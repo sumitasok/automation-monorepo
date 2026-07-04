@@ -28,7 +28,13 @@ dist/
 .DS_Store
 Thumbs.db
 
-# SQLite transaction journals
+# Machine-local state DBs — NOT versioned. Run history, caches, and per-machine
+# state are specific to the machine that produced them; committing them causes
+# merge conflicts and history bloat. Data meant to sync lives as diffable
+# exports (JSONL/CSV/YAML) — see docs/adr/0005. Force-add only if you have
+# deliberately chosen to share a specific DB.
+data/state/*.sqlite
+data/state/*.db
 *.sqlite-journal
 *.sqlite-wal
 *.sqlite-shm

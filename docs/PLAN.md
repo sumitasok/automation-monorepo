@@ -199,43 +199,42 @@ I have?" — together they're the memory you're currently missing.
 
 ---
 
-## 7. Global data store (git-synced YAML + SQLite)
+## 7. Data store — what's versioned vs. machine-local
 
-Per your choice, data lives as **files in the repo**, synced by git — no server
-required, works identically on every machine.
+The guiding split (see ADR 0005): **git versions the things that *define* your
+automations; it does not version the data those automations *produce*.**
 
-- **`data/config/*.yaml` — configuration & small structured data.** Human-
-  editable, diff-friendly, reviewable. Good for settings, lookup tables, lists,
-  anything you'd want to eyeball and hand-edit. Example: `global.yaml` holds
-  cross-job settings; a job can also ship its own `config/<job>.yaml`.
-- **`data/state/*.sqlite` — durable, growing, or queryable data.** When a job
-  accumulates rows (run history, scraped records, metrics), SQLite beats YAML:
-  it's a single file (so it still git-syncs), supports real queries, and handles
-  concurrent-ish access far better than rewriting a YAML file. One DB per
-  domain, e.g. `state/runs.sqlite` (run history) and `state/hello.sqlite`.
-- **`data/inbox/` — scratch, git-ignored.** Downloads, temp exports, anything
-  you don't want versioned.
+- **`data/config/*.yaml` — VERSIONED.** Configuration and small structured data:
+  settings, lookup tables, lists — anything you'd hand-edit and want reviewed in
+  a diff. This is input to jobs, belongs in git, and syncs to every machine on
+  `git pull`. `global.yaml` holds cross-job settings; a job can ship its own
+  `config/<job>.yaml`.
+- **`data/state/*.sqlite` — MACHINE-LOCAL, NOT versioned (git-ignored).** Run
+  history (`runs.sqlite`), caches, scraped rows, metrics — output that a job
+  accumulates. It's specific to the machine that produced it; committing it
+  causes constant binary-merge conflicts and history bloat, and it means little
+  on another machine. SQLite is still the right *store* (single file, real
+  queries) — it just lives locally, rebuilt from inputs, not carried in git.
+- **`data/inbox/` — scratch, git-ignored.** Downloads, temp exports.
 
-Rules that keep git-as-a-database sane:
+**If a specific dataset genuinely must sync across machines**, don't put the
+binary DB in git. Instead:
 
-- **SQLite files are binary → tracked via git-lfs** (`.gitattributes` handles
-  this) so diffs don't bloat the repo. For data you *want* human-diffable, keep
-  it YAML/CSV.
-- **One writer at a time per file.** Because git can't merge a binary SQLite,
-  design so a given DB is written by jobs on **one** machine (usually the
-  server), and other machines read. If two machines must write, split into
-  per-machine DBs (`runs.home-server.sqlite`) and let a job union them.
-- **Commit data changes on a schedule.** A tiny `data-sync` job (on the server)
-  does `git add data && git commit && git push` every N minutes, so the store
-  propagates automatically. Other machines pull on their own `data-sync`.
-- **Migrations live in `data/migrations/`** — plain `.sql` files, applied by
-  `auto data migrate`, so schema changes are versioned like everything else.
+1. **Export to a diffable format** — `JSONL`/`CSV`/`YAML` under
+   `data/shared/<name>.jsonl`, committed and synced. A job rebuilds the local
+   SQLite view from it. Git merges text cleanly; the DB stays derived and local.
+2. **Or graduate to a hosted DB** (Postgres on the always-on server) if multiple
+   machines must write concurrently in real time, or the data outgrows comfor-
+   table git sizes. The manifest's `data:` block means jobs don't need
+   rewriting — only the connection target changes.
 
-When to graduate to a real hosted DB (Postgres): if multiple machines need to
-write the same data concurrently and in real time, or the data outgrows what's
-comfortable to git-sync (roughly hundreds of MB, or high write frequency). The
-manifest's `data:` block means jobs won't need rewriting — only the connection
-target changes. Until then, git-synced files are the simplest thing that works.
+Rules of thumb: is it something you *wrote* to configure a job → versioned YAML.
+Is it something a job *generated* → local SQLite, git-ignored, and if it must
+travel, sync a diffable export, not the `.sqlite`.
+
+Migrations for any DB whose *schema* you want versioned live in
+`data/migrations/*.sql` (schema is definition, so it's tracked even though the DB
+contents aren't).
 
 ---
 
@@ -264,7 +263,9 @@ target changes. Until then, git-synced files are the simplest thing that works.
    the script in, fill the manifest, delete the old crontab entry, `auto
    schedule sync`.
 4. Turn on CI so the catalog and manifest validation run automatically.
-5. Add the `data-sync` job on the server so the data store self-propagates.
+5. Keep versioned config (`data/config/*.yaml`) in git as normal; it propagates
+   on `git pull`. Leave `data/state/*.sqlite` local (git-ignored). Only add a
+   diffable-export sync job if a specific dataset must travel between machines.
 6. From then on: every new script starts with `auto new`. It's in the catalog,
    scheduled, documented, and backed up the moment it's born.
 
