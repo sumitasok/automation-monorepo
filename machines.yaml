@@ -1,0 +1,26 @@
+# Registry of every computer that runs jobs from this repo.
+# `auto` matches the current machine by hostname (or AUTO_MACHINE_ID env override)
+# and uses `os` + `roles` to decide what to run and schedule here.
+#
+# roles:
+#   scheduler    - installs & runs scheduled jobs
+#   data-writer  - allowed to write to shared SQLite DBs (keep this to ONE machine)
+#   critical     - always-on; safe home for jobs that must not miss a run
+
+machines:
+  - id: home-server
+    hostname: home-server        # <-- set to real `hostname` output
+    os: linux
+    roles: [scheduler, data-writer, critical]
+
+  - id: laptop-mac
+    hostname: sumits-macbook      # <-- set to real hostname
+    os: macos
+    roles: [scheduler]
+
+  - id: desktop-win
+    hostname: SUMIT-PC            # <-- set to real hostname
+    os: windows
+    roles: [scheduler]
+
+# Add machines as you go. `any` in a manifest's runs_on.machines matches all.

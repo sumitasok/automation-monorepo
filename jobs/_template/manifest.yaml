@@ -1,0 +1,32 @@
+# Copy this whole folder to jobs/<category>/<your-job>/ (or use `auto new`).
+# This manifest is the SINGLE SOURCE OF TRUTH for the job. Fill every field.
+
+id: my-job                       # unique, kebab-case, NEVER change once set
+name: Human readable name
+description: >
+  One or two sentences: what it does and why it exists.
+category: uncategorized          # groups jobs in CATALOG.md and on disk
+owner: sumit
+language: python                 # python | bash | node | go
+entrypoint: main.py              # file to execute, relative to this folder
+tags: []                         # free-form, used by `auto search`
+
+runs_on:
+  os: [macos, linux, windows]    # platforms this job supports
+  machines: [any]                # `any` or explicit ids from machines.yaml
+
+schedule:
+  cron: ""                       # 5-field cron, e.g. "0 8 * * *"; empty = manual only
+  timezone: Asia/Kolkata
+  enabled: false                 # set true to have `auto schedule sync` install it
+
+runtime:
+  timeout_seconds: 600
+  env: []                        # names of required env vars (values live outside git)
+
+data:                            # documents what the job touches in data/
+  reads: []                      # e.g. [config/global.yaml]
+  writes: []                     # e.g. [state/my-job.sqlite]
+
+health:
+  expect_run_every: ""           # e.g. "1d"; blank = not health-checked

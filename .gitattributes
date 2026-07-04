@@ -1,0 +1,17 @@
+# Track binary / large data with git-lfs so the repo stays fast to clone.
+# Run once per machine: git lfs install
+data/state/*.sqlite   filter=lfs diff=lfs merge=lfs -text
+data/state/*.db       filter=lfs diff=lfs merge=lfs -text
+*.xlsx                filter=lfs diff=lfs merge=lfs -text
+*.pdf                 filter=lfs diff=lfs merge=lfs -text
+*.png                 filter=lfs diff=lfs merge=lfs -text
+*.jpg                 filter=lfs diff=lfs merge=lfs -text
+*.zip                 filter=lfs diff=lfs merge=lfs -text
+# Compiled Go binaries (if you commit them)
+lib/go/bin/*          filter=lfs diff=lfs merge=lfs -text
+
+# Normalize line endings for text so Windows/Unix don't fight
+*.sh   text eol=lf
+*.py   text eol=lf
+*.yaml text eol=lf
+*.md   text eol=lf

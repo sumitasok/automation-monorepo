@@ -1,0 +1,15 @@
+# Cross-job configuration. Human-editable, diff-friendly, version-controlled.
+# Jobs read this via AUTO_DATA_DIR/config/global.yaml.
+
+owner: sumit
+default_timezone: Asia/Kolkata
+
+# Example shared settings — replace with your own.
+notify:
+  email: sumitasok@gmail.com
+paths:
+  # Machine-specific paths keyed by machine id from machines.yaml
+  downloads:
+    home-server: /home/sumit/downloads
+    laptop-mac: /Users/sumit/Downloads
+    desktop-win: C:\Users\sumit\Downloads

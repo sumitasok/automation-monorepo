@@ -1,0 +1,30 @@
+id: tmp-cron-test
+name: Daily hello report
+description: >
+  Reference job. Appends a timestamped greeting to a SQLite table in the data
+  store, demonstrating the manifest, the run wrapper, and data conventions.
+category: example
+owner: sumit
+language: bash
+entrypoint: main.sh
+tags: [demo, reference]
+
+runs_on:
+  os: [macos, linux, windows]
+  machines: [any]
+
+schedule:
+  cron: "0 8 * * *"
+  timezone: Asia/Kolkata
+  enabled: true          # flip to true after you've read the plan
+
+runtime:
+  timeout_seconds: 120
+  env: []
+
+data:
+  reads:  [config/global.yaml]
+  writes: [state/hello.sqlite]
+
+health:
+  expect_run_every: 1d
