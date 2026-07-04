@@ -8,8 +8,17 @@ description: >
 category: uncategorized          # groups jobs in CATALOG.md and on disk
 owner: sumit
 language: python                 # python | bash | node | go
-entrypoint: main.py              # file to execute, relative to this folder
+entrypoint: main.py              # SCRIPT job: file to execute, relative to this folder
 tags: []                         # free-form, used by `auto search`
+
+# APP-BACKED job (a whole application, not a single script): instead of
+# `entrypoint`, give an explicit command and where to run it. `workdir` is
+# relative to the PACK root (the app repo). Example for a Go app subcommand:
+#   exec: "go run . discover"
+#   workdir: "."
+# Leave both unset for a normal script job.
+# exec: ""
+# workdir: ""
 
 # Who may see/receive this job. Omit to inherit the pack's default_visibility.
 #   private - never shared; only valid inside a private pack

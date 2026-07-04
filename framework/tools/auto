@@ -85,6 +85,7 @@ def load_jobs() -> list[dict]:
                 print(f"! bad manifest {mp}: {e}", file=sys.stderr); continue
             m["_dir"] = mp.parent
             m["_pack"] = pack["name"]
+            m["_packpath"] = pack["_path"]
             m["_visibility"] = m.get("visibility") or dvis
             jobs.append(m)
     return jobs
@@ -152,17 +153,28 @@ def cmd_search(args):
 
 def cmd_run(args):
     j = get_job(args.id)
-    entry = j["_dir"] / j.get("entrypoint", "")
-    if not entry.exists():
-        sys.exit(f"entrypoint not found: {entry}")
-    runner = {"python": [sys.executable], "node": ["node"], "bash": ["bash"], "go": ["go", "run"]}.get(j.get("language", "bash"), ["bash"])
-    cmd = runner + [str(entry)] + args.extra
     env = {**os.environ, "AUTO_DATA_DIR": str(DATA), "AUTO_WORKSPACE": str(WS), "AUTO_JOB_ID": j["id"], "AUTO_PACK": j["_pack"]}
     timeout = (j.get("runtime") or {}).get("timeout_seconds", 600)
+    # workdir defaults to the job folder; app-backed jobs set it relative to the pack root
+    workdir = j["_dir"]
+    if j.get("workdir"):
+        workdir = (j["_packpath"] / j["workdir"]).resolve()
+    if j.get("exec"):
+        # app-backed job: run an explicit shell command in workdir (e.g. "go run . discover")
+        cmd = j["exec"] + (" " + " ".join(args.extra) if args.extra else "")
+        shell = True; show = cmd
+    else:
+        # script job: run a single entrypoint file with the language runner
+        entry = j["_dir"] / j.get("entrypoint", "")
+        if not entry.exists():
+            sys.exit(f"entrypoint not found: {entry}")
+        runner = {"python": [sys.executable], "node": ["node"], "bash": ["bash"], "go": ["go", "run"]}.get(j.get("language", "bash"), ["bash"])
+        cmd = runner + [str(entry)] + args.extra
+        shell = False; show = " ".join(cmd)
     start = datetime.datetime.now()
-    print(f">> running {j['id']} [{j['_pack']}]: {' '.join(cmd)}")
+    print(f">> running {j['id']} [{j['_pack']}] in {workdir}: {show}")
     try:
-        rc = subprocess.run(cmd, env=env, timeout=timeout).returncode
+        rc = subprocess.run(cmd, env=env, timeout=timeout, cwd=str(workdir), shell=shell).returncode
     except subprocess.TimeoutExpired:
         rc = 124; print(f"!! timed out after {timeout}s")
     dur = (datetime.datetime.now() - start).total_seconds()
@@ -260,15 +272,22 @@ def cmd_doctor(args):
             print(f"FAIL pack '{pack['name']}' path missing: {pack['path']}"); ok = False
     for j in load_jobs():
         mp = j["_dir"] / "manifest.yaml"
-        for field in ("id", "name", "language", "entrypoint"):
+        for field in ("id", "name", "language"):
             if not j.get(field):
                 print(f"FAIL {mp}: missing '{field}'"); ok = False
+        # a job runs EITHER a single entrypoint file OR an explicit exec command
+        if not j.get("entrypoint") and not j.get("exec"):
+            print(f"FAIL {mp}: needs either 'entrypoint' or 'exec'"); ok = False
         jid = j.get("id")
         if jid in ids:
             print(f"FAIL duplicate id '{jid}' ({j['_pack']} and {ids[jid]})"); ok = False
         ids[jid] = j["_pack"]
-        if j.get("entrypoint") and not (j["_dir"] / j["entrypoint"]).exists():
+        if j.get("entrypoint") and not j.get("exec") and not (j["_dir"] / j["entrypoint"]).exists():
             print(f"FAIL {jid}: entrypoint missing"); ok = False
+        if j.get("workdir"):
+            wd = (j["_packpath"] / j["workdir"]).resolve()
+            if not wd.exists():
+                print(f"WARN {jid}: workdir not present ({j['workdir']}) — ok if pack is an unmounted submodule")
         vis = j["_visibility"]
         if vis not in VISIBILITIES:
             print(f"FAIL {jid}: invalid visibility '{vis}'"); ok = False; continue

@@ -1,0 +1,10 @@
+id: appdemo
+name: App-backed job demo
+description: Demonstrates exec + workdir (runs a command in the pack root, not the job folder).
+category: example
+language: bash
+exec: "pwd && echo 'ran from pack root; args:' \"$@\""
+workdir: "."
+visibility: public
+runs_on: {os: [macos,linux,windows], machines: [any]}
+schedule: {cron: "", timezone: UTC, enabled: false}
