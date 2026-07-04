@@ -27,5 +27,11 @@ packs:
     default_visibility: private
     writable: true
 
+  - name: gmail
+    path: packs/gmail
+    source: git@github.com:sumitasok/sa.automation.gmail.git
+    default_visibility: private
+    writable: true
+
 # To consume a community pack, add it as a submodule and register it here with
 # writable: false and default_visibility: public.
