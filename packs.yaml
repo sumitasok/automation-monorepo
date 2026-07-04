@@ -1,0 +1,31 @@
+# Registry of automation packs mounted into THIS workspace.
+# `auto` discovers jobs across every pack listed here.
+#
+# Each pack is an independent git repo (usually a submodule) so access is
+# controlled per-repo by your git host. See docs/SHARING.md and
+# docs/adr/0002-parent-pack-architecture.md.
+#
+# fields:
+#   name        - unique pack id
+#   path        - location relative to workspace root
+#   source      - git remote (informational; empty for a local-only pack)
+#   default_visibility - visibility applied to jobs that don't set their own
+#                        (private | shared | public)
+#   writable    - can you add/edit jobs here? (your private pack: true;
+#                 a read-only community pack you consume: false)
+
+packs:
+  - name: shared
+    path: packs/shared
+    source: ""                      # e.g. git@github.com:you/automation-pack-shared.git
+    default_visibility: shared
+    writable: true                  # contribute-back: you can add shared jobs
+
+  - name: private
+    path: packs/private
+    source: ""                      # your private repo / stays in this workspace
+    default_visibility: private
+    writable: true
+
+# To consume a community pack, add it as a submodule and register it here with
+# writable: false and default_visibility: public.

@@ -1,57 +1,53 @@
-# automation-monorepo
+# automation workspace
 
-One home for every script that makes your life easier — discoverable,
-version-controlled, self-scheduling, self-documenting, and backed by a shared
-git-synced data store, across macOS / Linux / Windows / server.
+Your private working copy of the automation system. It mounts a shareable
+**framework** (the parent) and one or more **packs** of jobs, and holds your
+machines, data, and private automations.
 
-**The one idea:** every script is a *job* — a folder under `jobs/` with a
-`manifest.yaml`. The manifest says what it is, how to run it, when, and where.
-Everything else (the catalog, the OS schedules, the docs) is generated from
-manifests, so nothing drifts out of date.
+**The model** (full rationale in `docs/adr/0002…` and `docs/SHARING.md`):
+
+```
+workspace (this repo, private)     machines.yaml + data/ + packs.yaml
+├── framework/   → public parent: the `auto` CLI + conventions   (submodule)
+└── packs/
+     ├── shared/  → team library, contribute-back                (submodule)
+     └── private/ → your jobs, never shared
+```
+
+A **job** is a folder with a `manifest.yaml`. Jobs live in packs. Each job has a
+`visibility` (`private`/`shared`/`public`) so you can share some automations and
+keep others private — enforced by `auto doctor`, guaranteed by per-repo access.
 
 ## Quickstart
 
 ```bash
-# See everything you have
-./tools/auto list
-./tools/auto search <term>
-
-# Start a new job (interactive scaffold from jobs/_template)
-./tools/auto new
-
-# Run one now (uniform logging, timeout, run-history)
-./tools/auto run hello-report
-
-# Install this machine's schedules from the manifests
-./tools/auto schedule sync --dry-run   # preview
-./tools/auto schedule sync             # apply
-
-# Regenerate the browsable index
-./tools/auto catalog
-
-# Journal what you did
-./tools/auto log "set up the monorepo"
-
-# Health-check: validate manifests, find drift
-./tools/auto doctor
+./auto packs                 # what's mounted
+./auto list                  # every job you can see (pack + visibility shown)
+./auto list --visibility shared
+./auto search backup
+./auto run hello-report      # run a job (logging, timeout, history)
+./auto new                   # scaffold a job into a pack (choose private/shared)
+./auto catalog               # regenerate CATALOG.md
+./auto share shared          # write a shareable catalog of the shared pack
+./auto schedule sync --dry-run
+./auto log "what I did"
+./auto doctor                # validate + check for visibility leaks
 ```
 
-## New machine, from zero
+## Sharing it with others
 
-```bash
-git clone <remote> automation-monorepo && cd automation-monorepo
-./tools/auto bootstrap        # git-lfs hook + runtime checks
-./tools/auto schedule sync    # install schedules meant for this machine
-```
+You share the **framework** (public) and the **shared pack** (team) — never your
+workspace or `packs/private/`. To split this folder into the three real repos and
+mount them as submodules: `tools/split-into-repos.sh` (dry-runs by default). Full
+walkthrough and collaborator onboarding: **[docs/SHARING.md](docs/SHARING.md)**.
 
 ## Where things are
 
-- `jobs/` — your scripts, one folder each (`manifest.yaml` + code + README)
-- `lib/` — shared code (python/node/bash/go)
-- `data/` — the global data store: `config/` (YAML), `state/` (SQLite), `inbox/` (scratch)
-- `docs/` — `PLAN.md` (the full design), `worklog/` (dated journal), `adr/`
-- `tools/` — the `auto` CLI and generators
-- `machines.yaml` — your registered computers
-- `CATALOG.md` — auto-generated index of all jobs
+- `framework/` — the parent: `auto` CLI, template, schema, LICENSE, VERSION
+- `packs/shared/`, `packs/private/` — jobs, each pack with a `pack.yaml`
+- `packs.yaml` — which packs are mounted
+- `machines.yaml` — your computers
+- `data/` — git-synced store: `config/` (YAML), `state/` (SQLite)
+- `docs/` — `PLAN.md`, `SHARING.md`, `adr/`, `worklog/`
 
-Full design and rationale: **[docs/PLAN.md](docs/PLAN.md)**.
+Design & decisions: `docs/PLAN.md` and `docs/adr/`.

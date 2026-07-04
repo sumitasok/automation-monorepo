@@ -11,6 +11,12 @@ language: python                 # python | bash | node | go
 entrypoint: main.py              # file to execute, relative to this folder
 tags: []                         # free-form, used by `auto search`
 
+# Who may see/receive this job. Omit to inherit the pack's default_visibility.
+#   private - never shared; only valid inside a private pack
+#   shared  - travels to everyone with access to the shared pack
+#   public  - fine to publish openly
+visibility: private
+
 runs_on:
   os: [macos, linux, windows]    # platforms this job supports
   machines: [any]                # `any` or explicit ids from machines.yaml

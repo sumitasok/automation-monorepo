@@ -1,0 +1,371 @@
+#!/usr/bin/env python3
+"""auto — the automation-framework CLI (pack-aware).
+
+Every script is a "job": a folder with a manifest.yaml. Jobs live in *packs*;
+a *workspace* mounts packs via packs.yaml. This tool discovers jobs across all
+mounted packs and does everything else: run, scaffold, schedule, document,
+health-check, and enforce the private/shared/public visibility rules.
+
+Usage:
+  auto list [--json] [--visibility private|shared|public]
+  auto packs
+  auto search <term>
+  auto run <id> [-- extra args]
+  auto new
+  auto catalog                 # workspace catalog (all packs)
+  auto share [<pack>]          # write a shareable catalog of a pack's non-private jobs
+  auto schedule sync [--dry-run]
+  auto log "<message>"
+  auto doctor                  # validate manifests + enforce visibility rules
+  auto bootstrap
+"""
+from __future__ import annotations
+import argparse, os, platform, re, socket, subprocess, sys, textwrap, datetime, shutil
+from pathlib import Path
+
+try:
+    import yaml
+except ImportError:
+    sys.exit("PyYAML is required.  pip install pyyaml  (or: pip install --break-system-packages pyyaml)")
+
+FRAMEWORK = Path(__file__).resolve().parent.parent          # .../framework
+VISIBILITIES = ("private", "shared", "public")
+
+
+# ---------- workspace & packs ------------------------------------------------
+def find_workspace() -> Path:
+    """Workspace root = nearest ancestor containing packs.yaml."""
+    env = os.environ.get("AUTO_WORKSPACE")
+    start = Path(env) if env else Path.cwd()
+    for d in [start, *start.parents]:
+        if (d / "packs.yaml").exists():
+            return d
+    return FRAMEWORK.parent   # fallback: framework usually sits inside the workspace
+
+WS = find_workspace()
+DATA = WS / "data"
+GEN = WS / "schedules" / "generated"
+WORKLOG = WS / "docs" / "worklog"
+
+def load_yaml(p: Path) -> dict:
+    with open(p) as f:
+        return yaml.safe_load(f) or {}
+
+def load_packs() -> list[dict]:
+    pf = WS / "packs.yaml"
+    if not pf.exists():
+        return []
+    packs = []
+    for p in load_yaml(pf).get("packs", []):
+        p["_path"] = WS / p["path"]
+        packs.append(p)
+    return packs
+
+def pack_default_vis(pack: dict) -> str:
+    pj = pack["_path"] / "pack.yaml"          # pack.yaml wins over the registry
+    if pj.exists():
+        v = load_yaml(pj).get("default_visibility")
+        if v:
+            return v
+    return pack.get("default_visibility", "private")
+
+
+# ---------- jobs -------------------------------------------------------------
+def load_jobs() -> list[dict]:
+    jobs = []
+    for pack in load_packs():
+        jroot = pack["_path"] / "jobs"
+        if not jroot.exists():
+            continue
+        dvis = pack_default_vis(pack)
+        for mp in sorted(jroot.rglob("manifest.yaml")):
+            try:
+                m = load_yaml(mp)
+            except Exception as e:
+                print(f"! bad manifest {mp}: {e}", file=sys.stderr); continue
+            m["_dir"] = mp.parent
+            m["_pack"] = pack["name"]
+            m["_visibility"] = m.get("visibility") or dvis
+            jobs.append(m)
+    return jobs
+
+def get_job(job_id: str) -> dict:
+    for j in load_jobs():
+        if j.get("id") == job_id:
+            return j
+    sys.exit(f"no job with id '{job_id}'  (try: auto list)")
+
+def this_os() -> str:
+    s = platform.system().lower()
+    return {"darwin": "macos", "windows": "windows"}.get(s, "linux")
+
+def machines() -> list[dict]:
+    mf = WS / "machines.yaml"
+    return load_yaml(mf).get("machines", []) if mf.exists() else []
+
+def current_machine() -> dict | None:
+    host = os.environ.get("AUTO_MACHINE_ID") or socket.gethostname()
+    for m in machines():
+        if host in (m.get("id"), m.get("hostname")):
+            return m
+    return None
+
+def job_runs_here(j: dict, mach: dict | None) -> bool:
+    ro = j.get("runs_on", {}) or {}
+    if this_os() not in ro.get("os", ["macos", "linux", "windows"]):
+        return False
+    want = ro.get("machines", ["any"])
+    return "any" in want or bool(mach and mach.get("id") in want)
+
+
+# ---------- commands ---------------------------------------------------------
+def cmd_packs(args):
+    ps = load_packs()
+    if not ps:
+        print("no packs registered — see packs.yaml"); return
+    for p in ps:
+        exists = "ok" if p["_path"].exists() else "MISSING"
+        print(f"{p['name']:<12} vis:{pack_default_vis(p):<7} writable:{str(p.get('writable', False)):<5} {exists}  {p['path']}")
+
+def cmd_list(args):
+    jobs = load_jobs()
+    if args.visibility:
+        jobs = [j for j in jobs if j["_visibility"] == args.visibility]
+    if getattr(args, "json", False):
+        import json
+        print(json.dumps([{k: v for k, v in j.items() if not k.startswith("_")} | {"pack": j["_pack"], "visibility": j["_visibility"]} for j in jobs], indent=2, default=str))
+        return
+    if not jobs:
+        print("no jobs yet — create one with:  auto new"); return
+    w = max((len(j.get("id", "")) for j in jobs), default=2)
+    for j in sorted(jobs, key=lambda x: (x["_pack"], x.get("id", ""))):
+        sch = j.get("schedule") or {}
+        when = sch.get("cron") if sch.get("enabled") else "(manual)"
+        print(f"{j.get('id',''):<{w}}  {j['_pack']:<8} {j['_visibility']:<7} {j.get('language',''):<6} {when or '(none)':<12} {j.get('name','')}")
+
+def cmd_search(args):
+    t = args.term.lower()
+    for j in load_jobs():
+        hay = " ".join(str(j.get(k, "")) for k in ("id", "name", "description", "category")) + " " + " ".join(j.get("tags", []))
+        if t in hay.lower():
+            print(f"{j.get('id')}  [{j['_pack']}/{j['_visibility']}]  —  {j.get('name')}")
+
+def cmd_run(args):
+    j = get_job(args.id)
+    entry = j["_dir"] / j.get("entrypoint", "")
+    if not entry.exists():
+        sys.exit(f"entrypoint not found: {entry}")
+    runner = {"python": [sys.executable], "node": ["node"], "bash": ["bash"], "go": ["go", "run"]}.get(j.get("language", "bash"), ["bash"])
+    cmd = runner + [str(entry)] + args.extra
+    env = {**os.environ, "AUTO_DATA_DIR": str(DATA), "AUTO_WORKSPACE": str(WS), "AUTO_JOB_ID": j["id"], "AUTO_PACK": j["_pack"]}
+    timeout = (j.get("runtime") or {}).get("timeout_seconds", 600)
+    start = datetime.datetime.now()
+    print(f">> running {j['id']} [{j['_pack']}]: {' '.join(cmd)}")
+    try:
+        rc = subprocess.run(cmd, env=env, timeout=timeout).returncode
+    except subprocess.TimeoutExpired:
+        rc = 124; print(f"!! timed out after {timeout}s")
+    dur = (datetime.datetime.now() - start).total_seconds()
+    _record_run(j["id"], rc, dur)
+    print(f"<< {j['id']} exited {rc} in {dur:.1f}s")
+    sys.exit(rc)
+
+def _record_run(job_id, rc, dur):
+    try:
+        import sqlite3
+        db = DATA / "state" / "runs.sqlite"; db.parent.mkdir(parents=True, exist_ok=True)
+        c = sqlite3.connect(db)
+        c.execute("CREATE TABLE IF NOT EXISTS runs(ts TEXT, job TEXT, host TEXT, rc INTEGER, dur REAL)")
+        c.execute("INSERT INTO runs VALUES (?,?,?,?,?)", (datetime.datetime.utcnow().isoformat(), job_id, socket.gethostname(), rc, dur))
+        c.commit(); c.close()
+    except Exception as e:
+        print(f"(run history not recorded: {e})", file=sys.stderr)
+
+def cmd_new(args):
+    packs = [p for p in load_packs() if p.get("writable")]
+    if not packs:
+        sys.exit("no writable packs in packs.yaml")
+    print("Which pack?  " + ", ".join(f"{i}:{p['name']}({pack_default_vis(p)})" for i, p in enumerate(packs)))
+    pack = packs[int((input("  pack [0]: ").strip() or "0"))]
+    jid = input("  id (kebab-case): ").strip()
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", jid or ""):
+        sys.exit("id must be kebab-case")
+    if any(j["id"] == jid for j in load_jobs()):
+        sys.exit(f"id '{jid}' already exists in another pack")
+    cat = input("  category [uncategorized]: ").strip() or "uncategorized"
+    name = input("  name: ").strip() or jid
+    lang = input("  language [python/bash/node/go]: ").strip() or "python"
+    dest = pack["_path"] / "jobs" / cat / jid
+    if dest.exists():
+        sys.exit(f"{dest} already exists")
+    dest.mkdir(parents=True)
+    ext = {"python": "py", "bash": "sh", "node": "js", "go": "go"}.get(lang, "sh")
+    entry = f"main.{ext}"
+    (dest / entry).write_text("#!/usr/bin/env bash\nset -euo pipefail\necho hi\n" if lang == "bash" else f"# {name}\n")
+    m = load_yaml(FRAMEWORK / "template" / "manifest.yaml")
+    m.update({"id": jid, "name": name, "category": cat, "language": lang,
+              "entrypoint": entry, "visibility": pack_default_vis(pack)})
+    with open(dest / "manifest.yaml", "w") as f:
+        yaml.safe_dump(m, f, sort_keys=False)
+    shutil.copy(FRAMEWORK / "template" / "README.md", dest / "README.md")
+    print(f"created {dest.relative_to(WS)}\n  edit manifest + {entry}, then:  ./auto run {jid}")
+
+def _catalog_rows(jobs):
+    rows = ["| id | name | pack | visibility | lang | schedule | machines |",
+            "|----|------|------|-----------|------|----------|----------|"]
+    for j in sorted(jobs, key=lambda x: (x["_pack"], x.get("category", ""), x.get("id", ""))):
+        sch = j.get("schedule") or {}
+        when = f"`{sch.get('cron')}`" if sch.get("enabled") and sch.get("cron") else "manual"
+        mc = ", ".join((j.get("runs_on") or {}).get("machines", ["any"]))
+        rows.append(f"| {j.get('id')} | {j.get('name','')} | {j['_pack']} | {j['_visibility']} | {j.get('language','')} | {when} | {mc} |")
+    return rows
+
+def cmd_catalog(args):
+    jobs = load_jobs()
+    out = ["# Catalog (workspace)", "", "_Auto-generated by `auto catalog`._", "",
+           f"{len(jobs)} job(s) across {len(load_packs())} pack(s).", ""] + _catalog_rows(jobs)
+    (WS / "CATALOG.md").write_text("\n".join(out) + "\n")
+    print(f"wrote CATALOG.md ({len(jobs)} jobs)")
+
+def cmd_share(args):
+    """Write a shareable catalog of a pack containing only non-private jobs."""
+    name = args.pack or "shared"
+    pack = next((p for p in load_packs() if p["name"] == name), None)
+    if not pack:
+        sys.exit(f"no pack '{name}'")
+    jobs = [j for j in load_jobs() if j["_pack"] == name and j["_visibility"] != "private"]
+    out = [f"# Shareable catalog — pack '{name}'", "",
+           "_Only non-private jobs. Generated by `auto share`._", "",
+           f"{len(jobs)} shareable job(s).", ""] + _catalog_rows(jobs)
+    dest = pack["_path"] / "CATALOG.md"
+    dest.write_text("\n".join(out) + "\n")
+    print(f"wrote {dest.relative_to(WS)} ({len(jobs)} shareable jobs)")
+
+def cmd_log(args):
+    WORKLOG.mkdir(parents=True, exist_ok=True)
+    today = datetime.date.today().isoformat()
+    f = WORKLOG / f"{today}.md"
+    if not f.exists():
+        f.write_text(f"# Worklog — {today}\n\n")
+    with open(f, "a") as fh:
+        fh.write(f"- {datetime.datetime.now():%H:%M} — {args.message}\n")
+    print(f"logged to {f.relative_to(WS)}")
+
+def cmd_doctor(args):
+    ok = True
+    ids = {}
+    packs = load_packs()
+    for pack in packs:
+        if not pack["_path"].exists():
+            print(f"FAIL pack '{pack['name']}' path missing: {pack['path']}"); ok = False
+    for j in load_jobs():
+        mp = j["_dir"] / "manifest.yaml"
+        for field in ("id", "name", "language", "entrypoint"):
+            if not j.get(field):
+                print(f"FAIL {mp}: missing '{field}'"); ok = False
+        jid = j.get("id")
+        if jid in ids:
+            print(f"FAIL duplicate id '{jid}' ({j['_pack']} and {ids[jid]})"); ok = False
+        ids[jid] = j["_pack"]
+        if j.get("entrypoint") and not (j["_dir"] / j["entrypoint"]).exists():
+            print(f"FAIL {jid}: entrypoint missing"); ok = False
+        vis = j["_visibility"]
+        if vis not in VISIBILITIES:
+            print(f"FAIL {jid}: invalid visibility '{vis}'"); ok = False; continue
+        pack = next(p for p in packs if p["name"] == j["_pack"])
+        if vis == "private" and pack_default_vis(pack) != "private":
+            print(f"FAIL {jid}: private job in non-private pack '{j['_pack']}' — would leak on share"); ok = False
+    print("OK — all manifests valid, no visibility leaks" if ok else "doctor found problems")
+    sys.exit(0 if ok else 1)
+
+def cmd_bootstrap(args):
+    print(f"workspace = {WS}")
+    print(f"os = {this_os()}, hostname = {socket.gethostname()}")
+    m = current_machine()
+    print(f"registered as: {m['id']}" if m else "NOT in machines.yaml — add this host.")
+    if shutil.which("git"):
+        subprocess.run(["git", "-C", str(WS), "submodule", "update", "--init", "--recursive"])
+        subprocess.run(["git", "lfs", "install"], cwd=WS)
+    for tool in ("python3", "node", "go", "sqlite3"):
+        print(f"  {tool}: {'yes' if shutil.which(tool) else 'MISSING'}")
+    print("next:  ./auto schedule sync --dry-run")
+
+
+# ---------- schedule sync ----------------------------------------------------
+def cmd_schedule(args):
+    if args.action != "sync":
+        sys.exit("usage: auto schedule sync [--dry-run]")
+    mach = current_machine(); osname = this_os()
+    due = [j for j in load_jobs()
+           if (j.get("schedule") or {}).get("enabled") and (j.get("schedule") or {}).get("cron")
+           and job_runs_here(j, mach)]
+    print(f"# {len(due)} scheduled job(s) for this machine ({osname})")
+    {"linux": _sync_cron, "macos": _sync_launchd, "windows": _sync_windows}[osname](due, args.dry_run)
+
+def _auto_cmd(job_id):
+    return f'"{sys.executable}" "{Path(__file__).resolve()}" run {job_id}'
+
+def _sync_cron(due, dry):
+    a, b = "# >>> automation >>>", "# <<< automation <<<"
+    block = "\n".join([a, *[f"{j['schedule']['cron']} {_auto_cmd(j['id'])}  # {j['id']}" for j in due], b])
+    if dry:
+        print("would install:\n" + block); return
+    try:
+        cur = subprocess.run(["crontab", "-l"], capture_output=True, text=True).stdout
+    except Exception:
+        cur = ""
+    cur = re.sub(re.escape(a) + r".*?" + re.escape(b), "", cur, flags=re.S).strip()
+    subprocess.run(["crontab", "-"], input=(cur + "\n\n" + block + "\n").lstrip(), text=True)
+    print("crontab updated.")
+
+def _sync_launchd(due, dry):
+    GEN.mkdir(parents=True, exist_ok=True)
+    for j in due:
+        label = f"com.automation.{j['id']}"
+        mins, hrs, *_ = (j["schedule"]["cron"].split() + ["*", "*"])[:2]
+        (GEN / f"{label}.plist").write_text(textwrap.dedent(f"""\
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0"><dict>
+          <key>Label</key><string>{label}</string>
+          <key>ProgramArguments</key><array>
+            <string>{sys.executable}</string><string>{Path(__file__).resolve()}</string>
+            <string>run</string><string>{j['id']}</string></array>
+          <key>StartCalendarInterval</key><dict>
+            <key>Hour</key><integer>{hrs if hrs.isdigit() else 0}</integer>
+            <key>Minute</key><integer>{mins if mins.isdigit() else 0}</integer></dict>
+        </dict></plist>"""))
+        print(f"wrote {(GEN / (label + '.plist')).relative_to(WS)}")
+    if not dry:
+        print("load:  cp schedules/generated/*.plist ~/Library/LaunchAgents/ && for p in ~/Library/LaunchAgents/com.automation.*; do launchctl load \"$p\"; done")
+
+def _sync_windows(due, dry):
+    GEN.mkdir(parents=True, exist_ok=True)
+    lines = ["@echo off", "REM Run as your user to (re)register scheduled tasks."]
+    for j in due:
+        mins, hrs, *_ = (j["schedule"]["cron"].split() + ["0", "0"])[:2]
+        hh = int(hrs) if hrs.isdigit() else 0; mm = int(mins) if mins.isdigit() else 0
+        lines.append(f'schtasks /Create /F /TN "automation\\{j["id"]}" /SC DAILY /ST {hh:02d}:{mm:02d} /TR {_auto_cmd(j["id"])}')
+    (GEN / "install-tasks.bat").write_text("\r\n".join(lines) + "\r\n")
+    print(f"wrote {(GEN / 'install-tasks.bat').relative_to(WS)}" + ("" if dry else " — run it to register tasks"))
+
+
+# ---------- arg parsing ------------------------------------------------------
+def main():
+    p = argparse.ArgumentParser(prog="auto", description="automation-framework CLI")
+    sub = p.add_subparsers(dest="cmd", required=True)
+    lp = sub.add_parser("list"); lp.add_argument("--json", action="store_true"); lp.add_argument("--visibility", choices=VISIBILITIES)
+    sub.add_parser("packs")
+    sp = sub.add_parser("search"); sp.add_argument("term")
+    rp = sub.add_parser("run"); rp.add_argument("id"); rp.add_argument("extra", nargs="*")
+    sub.add_parser("new"); sub.add_parser("catalog"); sub.add_parser("doctor"); sub.add_parser("bootstrap")
+    shp = sub.add_parser("share"); shp.add_argument("pack", nargs="?")
+    lgp = sub.add_parser("log"); lgp.add_argument("message")
+    scp = sub.add_parser("schedule"); scp.add_argument("action"); scp.add_argument("--dry-run", action="store_true")
+    a = p.parse_args()
+    {"list": cmd_list, "packs": cmd_packs, "search": cmd_search, "run": cmd_run, "new": cmd_new,
+     "catalog": cmd_catalog, "share": cmd_share, "log": cmd_log, "doctor": cmd_doctor,
+     "bootstrap": cmd_bootstrap, "schedule": cmd_schedule}[a.cmd](a)
+
+if __name__ == "__main__":
+    main()

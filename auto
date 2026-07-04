@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Workspace shim → runs the framework CLI against THIS workspace.
+# Lets you type `./auto ...` from the workspace root regardless of where the
+# framework submodule lives.
+here="$(cd "$(dirname "$0")" && pwd)"
+export AUTO_WORKSPACE="$here"
+exec python3 "$here/framework/tools/auto" "$@"

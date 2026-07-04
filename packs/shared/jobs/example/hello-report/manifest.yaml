@@ -8,6 +8,7 @@ owner: sumit
 language: bash
 entrypoint: main.sh
 tags: [demo, reference]
+visibility: public       # reference job — safe for anyone
 
 runs_on:
   os: [macos, linux, windows]

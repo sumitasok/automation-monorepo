@@ -1,0 +1,8 @@
+name: shared
+description: >
+  Team-shared automation library. Jobs here are visible to everyone with access
+  to this repo. Collaborators use them and contribute their own via pull request.
+default_visibility: shared          # jobs may override to `public`, never `private`
+maintainers: [sumit]
+# This directory is designed to become its own git repo
+# (automation-pack-shared) mounted as a submodule. See docs/SHARING.md.

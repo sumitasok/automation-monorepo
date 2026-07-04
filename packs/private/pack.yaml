@@ -1,0 +1,7 @@
+name: private
+description: >
+  Your private automations. Never leaves this workspace. Not a submodule — lives
+  only in your private workspace repo, so it is never exposed when others clone
+  the framework or the shared pack.
+default_visibility: private
+maintainers: [sumit]
