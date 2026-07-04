@@ -27,3 +27,8 @@ dist/
 # OS cruft
 .DS_Store
 Thumbs.db
+
+# SQLite transaction journals
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm

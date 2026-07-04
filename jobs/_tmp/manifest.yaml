@@ -1,6 +1,0 @@
-id: tmp-test
-name: Temp
-language: bash
-entrypoint: main.sh
-runs_on: {os: [macos,linux,windows], machines: [any]}
-schedule: {cron: "30 7 * * *", timezone: UTC, enabled: true}
