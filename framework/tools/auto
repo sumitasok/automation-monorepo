@@ -69,6 +69,30 @@ def pack_default_vis(pack: dict) -> str:
             return v
     return pack.get("default_visibility", "private")
 
+def pack_config_dir(pack_name: str) -> Path:
+    """Workspace-local, git-ignored dir holding a pack's real config + secrets."""
+    return WS / "config" / pack_name
+
+def load_pack_config(pack: dict):
+    """Return (env_dict, files_list, config_dir) for a pack.
+
+    Contract: the pack ships `config.sample.yaml` at its root declaring the env
+    keys it reads and the secret files it needs. The workspace overrides values
+    in `config/<pack>/config.yaml` (git-ignored). Env precedence, low→high:
+    sample defaults < workspace override < the ambient shell environment.
+    """
+    sample = pack["_path"] / "config.sample.yaml"
+    override = pack_config_dir(pack["name"]) / "config.yaml"
+    env, files = {}, []
+    if sample.exists():
+        s = load_yaml(sample)
+        env.update({str(k): "" if v is None else str(v) for k, v in (s.get("env") or {}).items()})
+        files = list(s.get("files") or [])
+    if override.exists():
+        o = load_yaml(override)
+        env.update({str(k): "" if v is None else str(v) for k, v in (o.get("env") or {}).items()})
+    return env, files, pack_config_dir(pack["name"])
+
 
 # ---------- jobs -------------------------------------------------------------
 def load_jobs() -> list[dict]:
@@ -151,14 +175,39 @@ def cmd_search(args):
         if t in hay.lower():
             print(f"{j.get('id')}  [{j['_pack']}/{j['_visibility']}]  —  {j.get('name')}")
 
+def _link_pack_files(files, cfg_dir: Path, workdir: Path):
+    """Make a pack's declared secret files available in the workdir via symlink,
+    so file-based apps (that read e.g. ./credentials.json) find them. The real
+    files live in the git-ignored workspace config dir; the symlink also lets the
+    app WRITE through (e.g. token.json) so state persists across re-clones."""
+    for name in files:
+        target = cfg_dir / name
+        link = workdir / name
+        try:
+            if link.is_symlink():
+                link.unlink()
+            elif link.exists():
+                print(f"   (config) {name} already a real file in workdir — leaving it"); continue
+            link.symlink_to(target)   # may be dangling (e.g. token.json created on first run)
+        except OSError as e:
+            print(f"   (config) could not link {name}: {e}")
+
 def cmd_run(args):
     j = get_job(args.id)
-    env = {**os.environ, "AUTO_DATA_DIR": str(DATA), "AUTO_WORKSPACE": str(WS), "AUTO_JOB_ID": j["id"], "AUTO_PACK": j["_pack"]}
+    pack = next(p for p in load_packs() if p["name"] == j["_pack"])
+    cfg_env, cfg_files, cfg_dir = load_pack_config(pack)
+    # env precedence: pack sample defaults < workspace override < ambient shell env
+    env = {**cfg_env, **os.environ,
+           "AUTO_DATA_DIR": str(DATA), "AUTO_WORKSPACE": str(WS),
+           "AUTO_JOB_ID": j["id"], "AUTO_PACK": j["_pack"],
+           "AUTO_PACK_CONFIG_DIR": str(cfg_dir)}
     timeout = (j.get("runtime") or {}).get("timeout_seconds", 600)
     # workdir defaults to the job folder; app-backed jobs set it relative to the pack root
     workdir = j["_dir"]
     if j.get("workdir"):
         workdir = (j["_packpath"] / j["workdir"]).resolve()
+    if cfg_files and cfg_dir.exists():
+        _link_pack_files(cfg_files, cfg_dir, workdir)
     if j.get("exec"):
         # app-backed job: run an explicit shell command in workdir (e.g. "go run . discover")
         cmd = j["exec"] + (" " + " ".join(args.extra) if args.extra else "")
@@ -297,6 +346,39 @@ def cmd_doctor(args):
     print("OK — all manifests valid, no visibility leaks" if ok else "doctor found problems")
     sys.exit(0 if ok else 1)
 
+def cmd_config(args):
+    packs = load_packs()
+    pack = next((p for p in packs if p["name"] == args.pack), None)
+    if not pack:
+        sys.exit(f"no pack '{args.pack}'  (see: auto packs)")
+    sample = pack["_path"] / "config.sample.yaml"
+    cfg_dir = pack_config_dir(pack["name"])
+    override = cfg_dir / "config.yaml"
+    env, files, _ = load_pack_config(pack)
+    if args.action == "init":
+        cfg_dir.mkdir(parents=True, exist_ok=True)
+        if not sample.exists():
+            print(f"pack '{args.pack}' ships no config.sample.yaml — nothing to init"); return
+        if override.exists():
+            print(f"{override.relative_to(WS)} already exists — leaving it")
+        else:
+            shutil.copy(sample, override)
+            print(f"created {override.relative_to(WS)}  (git-ignored) — fill in real values")
+        if files:
+            print("place these secret files in " + str(cfg_dir.relative_to(WS)) + ":  " + ", ".join(files))
+        return
+    # status (default)
+    print(f"pack '{args.pack}' config")
+    print(f"  sample:   {sample.relative_to(pack['_path'].parent) if sample.exists() else '(none shipped)'}")
+    print(f"  override: {override.relative_to(WS) if override.exists() else '(not created — run: auto config init ' + args.pack + ')'}")
+    print(f"  dir:      {cfg_dir.relative_to(WS)}")
+    for k, v in env.items():
+        set_by = "shell" if os.environ.get(k) else ("override/sample" if v else "MISSING")
+        print(f"  env {k}: {'set('+set_by+')' if (v or os.environ.get(k)) else 'MISSING'}")
+    for f in files:
+        present = (cfg_dir / f).exists()
+        print(f"  file {f}: {'present' if present else 'MISSING — add to ' + str(cfg_dir.relative_to(WS))}")
+
 def cmd_bootstrap(args):
     print(f"workspace = {WS}")
     print(f"os = {this_os()}, hostname = {socket.gethostname()}")
@@ -381,10 +463,11 @@ def main():
     shp = sub.add_parser("share"); shp.add_argument("pack", nargs="?")
     lgp = sub.add_parser("log"); lgp.add_argument("message")
     scp = sub.add_parser("schedule"); scp.add_argument("action"); scp.add_argument("--dry-run", action="store_true")
+    cfp = sub.add_parser("config"); cfp.add_argument("action", choices=["status", "init"], nargs="?", default="status"); cfp.add_argument("pack")
     a = p.parse_args()
     {"list": cmd_list, "packs": cmd_packs, "search": cmd_search, "run": cmd_run, "new": cmd_new,
      "catalog": cmd_catalog, "share": cmd_share, "log": cmd_log, "doctor": cmd_doctor,
-     "bootstrap": cmd_bootstrap, "schedule": cmd_schedule}[a.cmd](a)
+     "bootstrap": cmd_bootstrap, "schedule": cmd_schedule, "config": cmd_config}[a.cmd](a)
 
 if __name__ == "__main__":
     main()

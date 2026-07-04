@@ -6,6 +6,11 @@ data/secrets/
 *.key
 *.pem
 
+# Per-pack config overrides + secret files, injected by `auto run`.
+# Real values live here locally and are NEVER versioned in the workspace.
+config/*
+!config/README.md
+
 # Scratch / drop zone
 data/inbox/*
 !data/inbox/.gitkeep

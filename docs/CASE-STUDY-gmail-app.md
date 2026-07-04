@@ -101,6 +101,37 @@ Now it's a first-class part of the system:
 The run wrapper gives a compiled Go app the same logging, timeout, and
 run-history as a one-line bash script — for free.
 
+## Config & secrets (the credentials.json problem)
+
+The app reads `credentials.json`, `token.json`, and `ANTHROPIC_API_KEY`. None can
+live in the pack repo (it may be shared) or the workspace repo (it's versioned).
+The unified config contract (ADR 0007) solves this:
+
+The pack ships `config.sample.yaml` (committed — declarations only):
+
+```yaml
+env:
+  ANTHROPIC_API_KEY: ""
+files:
+  - credentials.json     # Google OAuth client. REQUIRED.
+  - token.json           # created on first auth; persists here
+```
+
+You supply the real values once, in the workspace (git-ignored):
+
+```bash
+./auto config init gmail                       # creates config/gmail/config.yaml
+cp ~/Downloads/credentials.json config/gmail/  # drop the real secret in
+# edit config/gmail/config.yaml to set ANTHROPIC_API_KEY
+./auto config gmail                            # shows set vs missing
+```
+
+Then `auto run gmail-discover` injects `ANTHROPIC_API_KEY` into the process and
+symlinks `credentials.json`/`token.json` into the app dir *before* calling it —
+so the app finds them, and the OAuth token it writes lands back in
+`config/gmail/` and survives a re-clone. That is exactly what fixes the original
+`credentials.json: no such file` error, and the same flow works for every pack.
+
 ## Two lessons this example teaches
 
 **1. Code is shareable; inputs and outputs are not.** An app cleanly separates

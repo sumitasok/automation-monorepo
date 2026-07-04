@@ -29,6 +29,22 @@ Every job has a `manifest.yaml` — the single source of truth. Fields:
 private` may only live in a pack whose `default_visibility` is `private`. This is
 what prevents private automations from leaking into a shared/public pack.
 
+## Pack config (config.sample.yaml)
+
+Config and secrets are declared per **pack**, not per job. A pack ships a
+`config.sample.yaml` at its root:
+
+```yaml
+env:                     # env vars the pack reads (placeholders only)
+  ANTHROPIC_API_KEY: ""
+files:                   # secret files the pack reads from its workdir
+  - credentials.json
+```
+
+Real values live in the workspace at `config/<pack>/` (git-ignored). `auto run`
+injects the env and symlinks the files before the pack runs. Manage with
+`auto config init <pack>` and `auto config <pack>`. See `docs/adr/0007`.
+
 ## Two job shapes
 
 A job must define **exactly one** way to run:

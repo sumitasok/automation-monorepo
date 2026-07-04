@@ -26,6 +26,8 @@ keep others private — enforced by `auto doctor`, guaranteed by per-repo access
 ./auto list --visibility shared
 ./auto search backup
 ./auto run hello-report      # run a job (logging, timeout, history)
+./auto config init gmail     # scaffold a pack's config (values live in config/, git-ignored)
+./auto config gmail          # show which env/secret values are set vs missing
 ./auto new                   # scaffold a job into a pack (choose private/shared)
 ./auto catalog               # regenerate CATALOG.md
 ./auto share shared          # write a shareable catalog of the shared pack
