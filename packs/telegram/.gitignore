@@ -1,0 +1,25 @@
+# MTProto user-account session — the long-lived credential. NEVER commit.
+session.json
+*.session
+
+# Runtime checkpoint state (per-chat last-seen message IDs) — local only (ADR 0005)
+state.json
+telegram.state
+
+# Fetched-message debug dumps (personal message content) — never committed
+messages_dump.json
+output/
+
+# Go
+*.exe
+*.test
+*.out
+vendor/
+
+# Universal
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp
+.vscode/
+.idea/

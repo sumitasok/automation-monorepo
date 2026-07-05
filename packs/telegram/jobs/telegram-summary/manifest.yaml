@@ -1,0 +1,40 @@
+id: telegram-summary
+name: Telegram daily digest
+description: >
+  Read all Telegram chats (read-only) via the user-account MTProto client,
+  summarize messages received since the last checkpoint with the Claude API,
+  and send one digest message to the configured chat. Incremental: only new
+  messages are summarized, so the digest never repeats.
+category: telegram
+owner: sumit
+language: go
+exec: "go run . summary"       # app-backed job: a command, not a file (ADR 0006)
+workdir: "."                   # run in the pack (app) root
+tags: [telegram, digest, summary]
+visibility: private
+
+runs_on:
+  os: [macos, linux]
+  machines: [home-server]      # always-on; must not miss a run (holds the session)
+
+schedule:
+  cron: "30 7 * * *"           # every morning 07:30
+  timezone: Asia/Kolkata
+  enabled: false               # flip on once mounted + session.json + config in place
+
+runtime:
+  timeout_seconds: 900
+  env:
+    - TELEGRAM_API_ID
+    - TELEGRAM_API_HASH
+    - ANTHROPIC_API_KEY
+    - TELEGRAM_DIGEST_CHAT_ID
+    - TELEGRAM_FIRST_RUN_LOOKBACK_HOURS
+    - TELEGRAM_EXCLUDE_CHAT_IDS
+
+data:
+  reads:  [session.json]
+  writes: [state.json]         # per-chat checkpoints — keep local, not in git (ADR 0005)
+
+health:
+  expect_run_every: 1d

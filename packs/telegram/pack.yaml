@@ -1,0 +1,12 @@
+name: telegram
+description: >
+  Telegram automation (Go app): reads all of your Telegram chats via a
+  user-account MTProto client (read-only), summarizes new messages since the
+  last run with the Claude API, and delivers a single digest message back to
+  you. One app-backed job (see jobs/telegram-summary/).
+default_visibility: private     # holds a live user-account session credential + personal message content
+maintainers: [sumit]
+# This repo is mounted into a workspace as a pack (submodule). The Go code keeps
+# its own structure; jobs/ only describes how to run the subcommand.
+# Access model + secret handling: see automation-monorepo docs/adr/0008-telegram-pack.md
+# Modeled on the gmail pack (docs/adr/0006 apps-as-packs, 0007 config-injection).

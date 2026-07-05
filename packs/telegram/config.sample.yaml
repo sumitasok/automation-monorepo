@@ -1,0 +1,36 @@
+# Config contract for the telegram pack.
+#
+# This file is COMMITTED here (it contains no secrets — only declarations and
+# placeholders). Real values live in the workspace at config/telegram/
+# (git-ignored) and are injected by `auto run` before this app is called.
+#
+#   auto config init telegram   # scaffold config/telegram/config.yaml
+#   auto config telegram        # show what's set / missing
+#
+# See docs/adr/0007-pack-config-injection.md.
+
+# env: keys exported into the process environment before the app runs.
+env:
+  # MTProto API credentials from https://my.telegram.org -> API development tools.
+  # These identify the CLIENT LIBRARY, not your account. REQUIRED.
+  TELEGRAM_API_ID: ""            # integer, e.g. 1234567
+  TELEGRAM_API_HASH: ""          # 32-char hex string
+
+  # Claude API key used to write the digest. REQUIRED.
+  ANTHROPIC_API_KEY: ""
+
+  # Destination for the digest message. A chat_id (dedicated chat/channel).
+  # For a channel/supergroup use the -100... form; for a user, their numeric id.
+  # Leave empty to fall back to "Saved Messages" (your own self-chat).
+  TELEGRAM_DIGEST_CHAT_ID: ""
+
+  # First-run lookback in hours when no checkpoint exists yet. Default 24.
+  TELEGRAM_FIRST_RUN_LOOKBACK_HOURS: "24"
+
+  # Optional comma-separated chat IDs to always exclude from the digest.
+  TELEGRAM_EXCLUDE_CHAT_IDS: ""
+
+# files: secret files the app reads from its working directory. Put the real
+# ones in config/telegram/; `auto run` symlinks them into the app dir at runtime.
+files:
+  - session.json               # MTProto session, created by `go run . login`. REQUIRED (persist across re-clones).
