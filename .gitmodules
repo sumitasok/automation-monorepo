@@ -1,3 +1,6 @@
 [submodule "packs/gmail"]
 	path = packs/gmail
 	url = git@github.com:sumitasok/sa.automation.gmail.git
+[submodule "data/gmail"]
+	path = data/gmail
+	url = git@github.com:sumitasok/sa.automation.gmail-data.git
