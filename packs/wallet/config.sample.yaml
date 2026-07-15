@@ -1,0 +1,41 @@
+# Config contract for the wallet pack.
+#
+# This file is COMMITTED here (no secrets — only declarations and placeholders).
+# Real values live in the workspace at config/wallet/ (git-ignored) and are
+# injected by `auto run` before this app is called.
+#
+#   auto config init wallet   # scaffold config/wallet/config.yaml
+#   auto config wallet        # show what's set / missing
+#
+# See docs/adr/0007-pack-config-injection.md and docs/adr/0009-wallet-pack.md.
+
+# env: keys exported into the process environment before the app runs.
+env:
+  # Wallet REST API bearer token. Create one in the Wallet web app:
+  # https://web.budgetbakers.com/settings/rest-api  (Premium plan required).
+  # REQUIRED for real runs (not needed for --dry-run).
+  WALLET_API_TOKEN: ""
+
+  # Label attached to every record this pack creates, so you can filter them in
+  # Wallet. Created automatically if it doesn't exist. Default shown.
+  WALLET_LABEL: "source:automation-monorepo"
+
+  # Payment type used when an account rule doesn't specify one. One of:
+  # cash, debit_card, credit_card, transfer, voucher, mobile_payment, web_payment.
+  WALLET_DEFAULT_PAYMENT_TYPE: "debit_card"
+
+  # Timezone used to interpret date-only TxnDate values from the CSV.
+  WALLET_TIMEZONE: "Asia/Kolkata"
+
+  # Override the API base URL (rarely needed).
+  WALLET_BASE_URL: "https://rest.budgetbakers.com/wallet"
+
+# files: config files the app reads from AUTO_PACK_CONFIG_DIR (auto injects the
+# dir path; the app also falls back to ./accounts.json for dev).
+files:
+  # Maps each CSV "Account" code (bank last-4 / identifier) to a Wallet account
+  # UUID, with an optional per-account paymentType. The "_default" entry catches
+  # empty/unmapped codes; leave its accountId empty to SKIP such rows instead.
+  # A starter is committed as accounts.sample.json — copy it to
+  # config/wallet/accounts.json and fill in real UUIDs from `GET /accounts`.
+  - accounts.json

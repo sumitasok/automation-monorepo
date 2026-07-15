@@ -1,0 +1,14 @@
+name: wallet
+description: >
+  Wallet automation (Go app): reads the transactions.csv produced by the gmail
+  pack and creates one record per transaction in the BudgetBakers Wallet app via
+  the Wallet REST API. Records are processed day by day, deduped by MessageID so
+  re-runs never duplicate, and every record carries a single label
+  (source:automation-monorepo) so this pack's writes can be filtered in Wallet.
+  One app-backed job (see jobs/wallet-sync/).
+default_visibility: private     # holds a Wallet API token + personal finance data
+maintainers: [sumit]
+# This repo is mounted into a workspace as a pack. The Go code (pure stdlib)
+# keeps its own structure; jobs/ only describes how to run the subcommand.
+# Access model + secret handling: see automation-monorepo docs/adr/0009-wallet-pack.md
+# Modeled on the gmail pack (docs/adr/0006 apps-as-packs, 0007 config-injection).

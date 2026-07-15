@@ -1,0 +1,39 @@
+id: wallet-sync
+name: Wallet transaction sync
+description: >
+  Read the gmail pack's transactions.csv and create one record per transaction
+  in the BudgetBakers Wallet app via the Wallet REST API. Processed day by day,
+  deduped by MessageID (state.json) so re-runs never duplicate, and every record
+  is tagged with the source:automation-monorepo label for later filtering.
+category: wallet
+owner: sumit
+language: go
+exec: "go run . sync"          # app-backed job: a command, not a file (ADR 0006)
+workdir: "."                   # run in the pack (app) root
+tags: [wallet, finance, sync]
+visibility: private
+
+runs_on:
+  os: [macos, linux]
+  machines: [home-server]      # always-on; must not miss a run
+
+schedule:
+  cron: "30 7 * * *"           # every morning 07:30, after gmail-extract (07:00)
+  timezone: Asia/Kolkata
+  enabled: false               # flip on once token + accounts.json are in place
+
+runtime:
+  timeout_seconds: 600
+  env:
+    - WALLET_API_TOKEN
+    - WALLET_LABEL
+    - WALLET_DEFAULT_PAYMENT_TYPE
+    - WALLET_TIMEZONE
+    - WALLET_BASE_URL
+
+data:
+  reads:  [../gmail/transactions.csv, accounts.json]
+  writes: [state.json]          # dedupe ledger — keep local, not in git (ADR 0005)
+
+health:
+  expect_run_every: 1d

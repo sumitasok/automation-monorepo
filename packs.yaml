@@ -42,5 +42,14 @@ packs:
     default_visibility: private     # holds a live user-account session credential
     writable: true
 
+  - name: wallet
+    path: packs/wallet
+    source: ""                      # local for now; split into its own repo (e.g.
+                                    # git@github.com:sumitasok/sa.automation.wallet.git)
+                                    # via tools/split-into-repos.sh, then set the remote
+                                    # and register as a submodule like gmail. See ADR 0009.
+    default_visibility: private     # holds a Wallet API token + personal finance data
+    writable: true
+
 # To consume a community pack, add it as a submodule and register it here with
 # writable: false and default_visibility: public.

@@ -1,0 +1,11 @@
+# Produced/local data — never commit (ADR 0005).
+/state.json
+/state.json.tmp
+
+# Real config lives in the workspace at config/wallet/ (injected at runtime).
+# Only the committed sample belongs in this repo.
+/accounts.json
+/config.yaml
+
+# Build artifacts.
+/bin/

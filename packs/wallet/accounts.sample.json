@@ -1,0 +1,9 @@
+{
+  "3690": { "accountId": "", "paymentType": "debit_card" },
+  "3176": { "accountId": "", "paymentType": "debit_card" },
+  "1008": { "accountId": "", "paymentType": "debit_card" },
+  "0878": { "accountId": "", "paymentType": "credit_card" },
+  "XXX383": { "accountId": "", "paymentType": "credit_card" },
+  "XX6102": { "accountId": "", "paymentType": "credit_card" },
+  "_default": { "accountId": "", "paymentType": "debit_card" }
+}
