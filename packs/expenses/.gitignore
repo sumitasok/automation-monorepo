@@ -1,0 +1,10 @@
+# Produced/local data — never commit (ADR 0005). The event registry
+# (config/events.json) IS committed — see docs/adr/0011-expenses-pack.md.
+/state.json
+/state.json.tmp
+
+# Real config lives in the workspace at config/expenses/ (injected at runtime).
+/config.yaml
+
+# Build artifacts.
+/bin/

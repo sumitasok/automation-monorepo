@@ -1,0 +1,30 @@
+# Config contract for the expenses pack.
+#
+# This file is COMMITTED here (no secrets — only declarations and placeholders).
+# Real values live in the workspace at config/expenses/ (git-ignored) and are
+# injected by `auto run` before this app is called.
+#
+#   auto config init expenses   # scaffold config/expenses/config.yaml
+#   auto config expenses        # show which are set / missing
+#
+# See docs/adr/0007-pack-config-injection.md and
+# docs/adr/0011-expenses-pack.md.
+
+# env: keys exported into the process environment before the app runs.
+env:
+  # Required for `update-event` (all runs, including --dry-run — matching
+  # still needs the model). Only DeepSeek is implemented today; the Matcher
+  # Strategy interface leaves room for others.
+  DEEPSEEK_API_KEY: ""
+
+  # Optional; overrides the built-in default model (deepseek-v4-flash).
+  DEEPSEEK_MODEL: ""
+
+  # Optional; "deepseek" (default, only one implemented).
+  AI_PROVIDER: ""
+
+# files: this pack declares none — the event registry (config/events.json)
+# ships committed inside the pack itself (it's a versioned definitions file,
+# not a secret), and the assignment ledger (state.json) is local produced
+# data written directly into the pack's own workdir.
+files: []

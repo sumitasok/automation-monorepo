@@ -126,7 +126,8 @@ Records are pushed in batches of ≤20 per day. Successes are written to
 `auto run` injects env + `accounts.json` and applies the manifest's timeout:
 
 ```bash
-../../auto run wallet-sync
+../../auto run wallet-sync          # real sync
+make auto-dry-run                    # dry-run via auto (accounts.json still required)
 ```
 
 Enable the daily schedule (07:30 IST, after gmail-extract) by setting

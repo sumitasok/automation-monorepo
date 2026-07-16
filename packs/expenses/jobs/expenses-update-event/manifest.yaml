@@ -1,0 +1,40 @@
+id: expenses-update-event
+name: Expenses AI event clustering
+description: >
+  Read the gmail pack's transactions.csv (read-only) and, via DeepSeek, match
+  each not-yet-assigned transaction against the known event registry
+  (config/events.json) or propose a new event when confidence falls below
+  threshold. New-event proposals are grouped within a batch so several rows
+  belonging to the same real-world event become one registry entry. Writes
+  the assignment to a local ledger (state.json), keyed by MessageID; never
+  writes to transactions.csv itself.
+category: expenses
+owner: sumit
+language: go
+exec: "go run . update-event"   # app-backed job: a command, not a file (ADR 0006)
+workdir: "."                    # run in the pack (app) root
+tags: [expenses, finance, ai, deepseek]
+visibility: private
+
+runs_on:
+  os: [macos, linux]
+  machines: [any]
+
+schedule:
+  cron: ""                      # manual only for now — run after gmail-extract as needed
+  timezone: Asia/Kolkata
+  enabled: false
+
+runtime:
+  timeout_seconds: 600
+  env:
+    - DEEPSEEK_API_KEY
+    - DEEPSEEK_MODEL
+    - AI_PROVIDER
+
+data:
+  reads:  [../gmail/transactions.csv, config/events.json]
+  writes: [config/events.json, state.json]
+
+health:
+  expect_run_every: ""

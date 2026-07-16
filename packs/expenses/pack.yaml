@@ -1,0 +1,17 @@
+name: expenses
+description: >
+  Expenses automation (Go app): clusters gmail-extracted transactions into
+  ad-hoc "events" (a trip, a festival, a house move — not a spending category)
+  using an AI provider (DeepSeek by default). Reads the gmail pack's
+  transactions.csv read-only and keeps a versioned registry of known events
+  (config/events.json) plus a local assignment ledger (state.json), so a
+  transaction seen next month is recognised as belonging to an event created
+  by an earlier run instead of spawning a duplicate. One app-backed job (see
+  jobs/expenses-update-event/).
+default_visibility: private     # reads personal transaction data
+maintainers: [sumit]
+# This repo is mounted into a workspace as a pack. The Go code (pure stdlib)
+# keeps its own structure; jobs/ only describes how to run the subcommand.
+# Design + rationale: docs/adr/0011-expenses-pack.md. Modeled on the wallet
+# pack (read-only CSV consumer + local ledger, ADR 0009) and the gmail pack's
+# categorize subcommand (DeepSeek provider convention, ADR 0010).

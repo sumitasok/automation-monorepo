@@ -36,6 +36,35 @@ keep others private — enforced by `auto doctor`, guaranteed by per-repo access
 ./auto doctor                # validate + check for visibility leaks
 ```
 
+### Wallet sync (gmail transactions → BudgetBakers Wallet)
+
+The `wallet` pack reads the gmail pack's `data/gmail/transactions.csv` and creates
+one Wallet record per transaction (day by day, deduped, tagged with the
+`source:automation-monorepo` label). Full setup in
+**[packs/wallet/RUNBOOK.md](packs/wallet/RUNBOOK.md)**; design in `docs/adr/0009`.
+
+```bash
+cd packs/wallet && make dry-run   # preview mappings — no token, no API calls
+./auto config init wallet         # scaffold config/wallet/ (set WALLET_API_TOKEN)
+#   ...then copy accounts.sample.json → config/wallet/accounts.json and fill UUIDs
+./auto run wallet-sync            # sync for real (env-injected, scheduler path)
+```
+
+### Expenses events (AI clustering of transactions into trips, festivals, …)
+
+The `expenses` pack reads the gmail pack's `transactions.csv` (read-only) and, via
+DeepSeek, matches each not-yet-assigned transaction against a versioned registry
+of known "events" (`config/events.json`) or proposes a new one — so a
+transaction seen next month is recognised as the same trip/festival instead of
+spawning a duplicate. Full setup in
+**[packs/expenses/RUNBOOK.md](packs/expenses/RUNBOOK.md)**; design in `docs/adr/0011`.
+
+```bash
+cd packs/expenses && go run . update-event --dry-run   # preview matches/new events
+./auto config init expenses                            # scaffold config/expenses/ (set DEEPSEEK_API_KEY)
+./auto run expenses-update-event                        # run for real (env-injected, scheduler path)
+```
+
 ## Sharing it with others
 
 You share the **framework** (public) and the **shared pack** (team) — never your
