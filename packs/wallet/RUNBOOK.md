@@ -15,7 +15,7 @@ See design & rationale in `docs/adr/0009-wallet-pack.md`.
 ```bash
 cd packs/wallet
 
-# 1. See exactly what WOULD be synced — no token, no API calls:
+# 1. See exactly what WOULD be synced — no token, no API calls (but accounts.json is still required):
 make dry-run                       # or: go run . sync --dry-run
 
 # 2. Once configured (token + accounts.json), push for real:
@@ -95,7 +95,8 @@ committed.
 ### Dry run (always start here)
 
 Parses the CSV, applies the account map, and prints what it would create — **no
-token required, no API calls**:
+token required, no API calls** (but `accounts.json` is still required so rows map
+onto the correct Wallet accounts):
 
 ```bash
 make dry-run

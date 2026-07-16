@@ -26,10 +26,18 @@ type Options struct {
 	Limit     int       // 0 = no cap on records pushed
 }
 
+// WalletClient is the small slice of the Wallet REST client that the sync
+// runner needs. Kept as an interface so the sync logic can be unit-tested
+// without calling the real API.
+type WalletClient interface {
+	EnsureLabel(name string) (string, error)
+	CreateRecords(records []wallet.NewRecord) ([]wallet.RecordResult, error)
+}
+
 // Runner holds resolved dependencies for a run.
 type Runner struct {
 	Cfg    *config.Config
-	Client *wallet.Client // nil in dry-run
+	Client WalletClient // nil in dry-run
 	Loc    *time.Location
 	Out    func(string, ...any) // logger, e.g. log.Printf
 }
@@ -70,6 +78,12 @@ func (r *Runner) Run(o Options) (Result, error) {
 	st, err := state.Load(o.StatePath)
 	if err != nil {
 		return res, fmt.Errorf("load state: %w", err)
+	}
+
+	// Without an account map, every row will be skipped as unmapped. Fail fast
+	// with an actionable message instead of streaming hundreds of skips.
+	if !hasAnyAccountMapping(r.Cfg) {
+		return res, fmt.Errorf("no Wallet account mappings found: create config/wallet/accounts.json (copy packs/wallet/accounts.sample.json) and fill in Wallet account UUIDs")
 	}
 
 	// Resolve the label once (real runs only).
@@ -199,6 +213,21 @@ func applyResults(chunk []item, results []wallet.RecordResult, st *state.State, 
 			out("fail %s %s: %s (%s)", day, short(it.txn.MessageID), rr.Error, rr.ErrorType)
 		}
 	}
+}
+
+func hasAnyAccountMapping(cfg *config.Config) bool {
+	if cfg == nil {
+		return false
+	}
+	if cfg.DefaultAccount.AccountID != "" {
+		return true
+	}
+	for _, r := range cfg.Accounts {
+		if r.AccountID != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func buildNote(t csvtxn.Txn) string {

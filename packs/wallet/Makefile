@@ -39,6 +39,10 @@ dry-run: ## parse + map + report only; no API calls, no token needed
 auto-sync: ## run wallet-sync through the workspace auto CLI
 	$(AUTO) run wallet-sync $(if $(ARGS),-- $(ARGS),)
 
+.PHONY: auto-dry-run
+auto-dry-run: ## dry-run wallet-sync through auto (no token needed; accounts.json still required)
+	$(AUTO) run wallet-sync -- --dry-run $(ARGS)
+
 ## ---- quality -----------------------------------------------------------
 
 .PHONY: test
