@@ -1,6 +1,6 @@
 # ADR 0010 — Gmail pack: AI categorisation of transactions (DeepSeek + committed taxonomy)
 
-**Status:** accepted — 2026-07-15
+**Status:** accepted — 2026-07-20
 
 ## Context
 

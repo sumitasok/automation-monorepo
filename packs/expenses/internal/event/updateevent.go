@@ -16,7 +16,7 @@ const defaultThreshold = 0.6
 
 // Config parameterises an update-event run.
 type Config struct {
-	CSVPath      string  // path to transactions.csv (read-only)
+	CSVPath      string  // path to transactions.csv (read-only for matching)
 	RegistryPath string  // path to the event registry (config/events.json)
 	StatePath    string  // path to the assignment ledger (state.json)
 	Provider     string  // "" or "deepseek"
@@ -25,6 +25,7 @@ type Config struct {
 	BatchSize    int     // transactions per API call (<=0 = one single call for all rows)
 	Limit        int     // stop after N unassigned rows (0 = all)
 	DryRun       bool    // print assignments/new events without writing registry or state
+	WriteCsv     bool    // after processing, enrich the CSV with EventID and EventDescription columns
 
 	// Matcher optionally injects the classifier (used in tests). When nil, Run
 	// builds one from Provider/Model via NewMatcher.
@@ -215,6 +216,27 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 	if err := st.Save(); err != nil {
 		return res, fmt.Errorf("saving state: %w", err)
 	}
+
+	// Optionally enrich the CSV with EventID and EventDescription columns
+	if cfg.WriteCsv {
+		eventMap := make(map[string]csvtxn.EventInfo)
+		for messageID, assignment := range st.Assigned {
+			event, found := reg.Find(assignment.EventID)
+			eventDesc := ""
+			if found {
+				eventDesc = event.Description
+			}
+			eventMap[messageID] = csvtxn.EventInfo{
+				EventID:          assignment.EventID,
+				EventDescription: eventDesc,
+			}
+		}
+		if err := csvtxn.WriteEnriched(cfg.CSVPath, eventMap); err != nil {
+			return res, fmt.Errorf("writing enriched csv: %w", err)
+		}
+		log.Printf("[INFO] update-event: enriched %s with EventID and EventDescription", cfg.CSVPath)
+	}
+
 	log.Printf("[INFO] update-event: %d assigned (%d new event(s) created), %d left without an event",
 		res.Assigned, res.NewEvents, res.NoEvent)
 	return res, nil

@@ -94,9 +94,9 @@ rather than spawning "Goa Trip 2".
 
 ## Consequences
 
-- `transactions.csv` is untouched by this pack; event membership lives in
-  `packs/expenses/state.json` joined by `MessageID`, and the catalog of known
-  events lives in `packs/expenses/config/events.json`.
+- `transactions.csv` is the primary read source for matching; event membership
+  lives in `packs/expenses/state.json` joined by `MessageID`, and the catalog
+  of known events lives in `packs/expenses/config/events.json`.
 - The registry can only grow (or have descriptions/keywords amended) — nothing
   in this pack deletes or merges events; a `merge-events` subcommand is left
   for a future ADR if duplicate events are observed in practice.
@@ -107,3 +107,23 @@ rather than spawning "Goa Trip 2".
   0007 (config injection: `DEEPSEEK_API_KEY` env), 0009 (wallet's
   read-only-consumer + local-ledger pattern), and 0010 (DeepSeek provider
   convention, full-reference-per-call, validate-before-write).
+
+## Amendment 1 (2026-07-16): Optional CSV enrichment
+
+The original decision (2) chose to keep `transactions.csv` read-only to respect
+the single-writer principle (ADR 0005). This is still the default. However, an
+opt-in `--write-csv` flag was later added to enrich the CSV with `EventID` and
+`EventDescription` columns when desired. Use cases include:
+
+- downstream analysis or export (spreadsheet tools, dashboards)
+- seeing event context inline with transaction data  
+- single-file workflows that don't need the separate state ledger
+
+The flag is off by default; the separate `state.json` ledger remains the
+canonical source for assignments, and `transactions.csv` is still the "primary"
+input file managed by gmail. The enrichment is additive (two new columns; no
+existing columns are modified) and is only written after successful matching
+(registry and state both saved). Combined with `--dry-run`, the enrichment can
+be previewed without touching the file.
+
+Invoke via `make expense-eventify` or `go run . update-event --write-csv`.

@@ -86,15 +86,34 @@ func (r *Runner) Run(o Options) (Result, error) {
 		return res, fmt.Errorf("no Wallet account mappings found: create config/wallet/accounts.json (copy packs/wallet/accounts.sample.json) and fill in Wallet account UUIDs")
 	}
 
-	// Resolve the label once (real runs only).
+	// Resolve the label once (real runs only). The Wallet REST API has no
+	// documented /labels endpoint (confirmed 2026-07-16: GET /labels 404s;
+	// the official quick-reference lists only records/accounts/budgets/
+	// categories as API-managed, and explicitly marks labels "Not supported
+	// via API" for writes) — contrary to ADR 0009 decision 4's assumption
+	// that a label could be resolved/created through this same API. Prefer a
+	// directly-configured WALLET_LABEL_ID (create the label once in the
+	// Wallet app, then look up its id — e.g. via the connected Wallet MCP's
+	// get_labels tool) over calling the client. If no id is configured, fall
+	// back to attempting the client's EnsureLabel for backward compatibility,
+	// but treat its failure as non-fatal: labeling is a nice-to-have, not
+	// worth aborting an otherwise-working sync over.
 	var labelIDs []string
 	if !o.DryRun {
-		id, err := r.Client.EnsureLabel(r.Cfg.LabelName)
-		if err != nil {
-			return res, fmt.Errorf("ensure label %q: %w", r.Cfg.LabelName, err)
+		switch {
+		case r.Cfg.LabelID != "":
+			labelIDs = []string{r.Cfg.LabelID}
+			r.Out("using label %q (%s, from WALLET_LABEL_ID)", r.Cfg.LabelName, r.Cfg.LabelID)
+		case r.Client != nil:
+			id, err := r.Client.EnsureLabel(r.Cfg.LabelName)
+			if err != nil {
+				r.Out("WARN: could not ensure label %q (%v) — continuing without a label. "+
+					"Set WALLET_LABEL_ID to the label's UUID to skip this lookup entirely.", r.Cfg.LabelName, err)
+			} else {
+				labelIDs = []string{id}
+				r.Out("using label %q (%s)", r.Cfg.LabelName, id)
+			}
 		}
-		labelIDs = []string{id}
-		r.Out("using label %q (%s)", r.Cfg.LabelName, id)
 	}
 
 	// Group eligible transactions by calendar day.

@@ -1,0 +1,33 @@
+id: expenses-bulk-assign
+name: Expenses bulk manual assignment
+description: >
+  Read a CSV with MessageID,EventID columns and import those manual event
+  assignments into the state ledger. Validates that every EventID exists in the
+  registry and every MessageID exists in transactions.csv. Manual assignments
+  override any existing auto-matched assignments.
+category: expenses
+owner: sumit
+language: go
+exec: "go run . bulk-assign"   # app-backed job (ADR 0006)
+workdir: "."                    # run in the pack root
+tags: [expenses, finance, manual]
+visibility: private
+
+runs_on:
+  os: [macos, linux]
+  machines: [any]
+
+schedule:
+  cron: ""
+  timezone: Asia/Kolkata
+  enabled: false
+
+runtime:
+  timeout_seconds: 600
+
+data:
+  reads:  [../gmail/transactions.csv, config/events.json]
+  writes: [config/events.json, state.json]
+
+health:
+  expect_run_every: ""

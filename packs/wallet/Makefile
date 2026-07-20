@@ -8,11 +8,13 @@
 #     ADR-0007. This is the path the scheduler uses.
 #
 # Pass extra flags with ARGS, e.g.:  make sync ARGS="--since 2026-07-01 --limit 20"
+# Point at a different source file with CSV, e.g.:  make sync CSV=../gmail/transactions.20260627.csv
 
 GO   ?= go
 BIN  ?= bin/wallet
 PKG  := .
 AUTO := ../../auto
+CSV  ?= ../gmail/transactions.csv
 ARGS ?=
 
 .DEFAULT_GOAL := help
@@ -26,22 +28,22 @@ build: ## compile the app to bin/wallet
 ## ---- run (direct: go run .) --------------------------------------------
 
 .PHONY: sync
-sync: ## sync transactions.csv -> Wallet (needs WALLET_API_TOKEN + accounts.json)
-	$(GO) run $(PKG) sync $(ARGS)
+sync: ## sync transactions.csv -> Wallet (needs WALLET_API_TOKEN + accounts.json); override source with CSV=path
+	$(GO) run $(PKG) sync --csv $(CSV) $(ARGS)
 
 .PHONY: dry-run
-dry-run: ## parse + map + report only; no API calls, no token needed
-	$(GO) run $(PKG) sync --dry-run $(ARGS)
+dry-run: ## parse + map + report only; no API calls, no token needed; override source with CSV=path
+	$(GO) run $(PKG) sync --dry-run --csv $(CSV) $(ARGS)
 
 ## ---- run (via auto: env-injected, scheduler path) ----------------------
 
 .PHONY: auto-sync
-auto-sync: ## run wallet-sync through the workspace auto CLI
-	$(AUTO) run wallet-sync $(if $(ARGS),-- $(ARGS),)
+auto-sync: ## run wallet-sync through the workspace auto CLI; override source with CSV=path
+	$(AUTO) run wallet-sync -- --csv $(CSV) $(ARGS)
 
 .PHONY: auto-dry-run
-auto-dry-run: ## dry-run wallet-sync through auto (no token needed; accounts.json still required)
-	$(AUTO) run wallet-sync -- --dry-run $(ARGS)
+auto-dry-run: ## dry-run wallet-sync through auto (no token needed; accounts.json still required); override source with CSV=path
+	$(AUTO) run wallet-sync -- --dry-run --csv $(CSV) $(ARGS)
 
 ## ---- quality -----------------------------------------------------------
 

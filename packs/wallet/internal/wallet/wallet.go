@@ -91,6 +91,15 @@ func (c *Client) do(method, path string, body any, out any) (int, error) {
 	if resp.StatusCode == http.StatusTooManyRequests {
 		return resp.StatusCode, fmt.Errorf("rate limited (429); slow down and retry")
 	}
+	// Any other non-success status (404, 400, 422, 5xx, ...): surface the raw
+	// response body. Previously callers only reported the status code
+	// ("POST /records: HTTP 404") with no indication of *why* — the body
+	// almost always carries the actual reason (bad accountId, validation
+	// error, wrong path, ...) and was being silently discarded. 207
+	// Multi-Status is a genuine partial-success response, not an error here.
+	if resp.StatusCode >= 300 {
+		return resp.StatusCode, fmt.Errorf("%s %s: HTTP %d: %s", method, path, resp.StatusCode, truncate(string(raw), 500))
+	}
 	if out != nil && len(raw) > 0 {
 		if err := json.Unmarshal(raw, out); err != nil {
 			return resp.StatusCode, fmt.Errorf("decode %s %s response: %w (body: %s)", method, path, err, truncate(string(raw), 300))

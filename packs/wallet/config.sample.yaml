@@ -17,8 +17,17 @@ env:
   WALLET_API_TOKEN: ""
 
   # Label attached to every record this pack creates, so you can filter them in
-  # Wallet. Created automatically if it doesn't exist. Default shown.
+  # Wallet. Display name only, used in logs — the Wallet REST API has no
+  # /labels endpoint (confirmed 2026-07-16: GET /labels 404s), so this is NOT
+  # looked up or created automatically. Default shown.
   WALLET_LABEL: "source:automation-monorepo"
+
+  # The label's Wallet UUID. REQUIRED to actually attach a label (see above) —
+  # create the label once, manually, in the Wallet app, then find its id (e.g.
+  # ask an assistant with the Wallet MCP connected to run get_labels, or check
+  # the web app's network requests). If left empty, records sync WITHOUT a
+  # label rather than failing the whole run.
+  WALLET_LABEL_ID: ""
 
   # Payment type used when an account rule doesn't specify one. One of:
   # cash, debit_card, credit_card, transfer, voucher, mobile_payment, web_payment.

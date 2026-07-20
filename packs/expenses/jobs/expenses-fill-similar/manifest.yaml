@@ -1,0 +1,38 @@
+id: expenses-fill-similar
+name: Expenses AI similarity filling
+description: >
+  For events with manual assignments (confidence = 1.0 from bulk-assign), use
+  DeepSeek to find other unassigned transactions similar to the manually-
+  assigned ones and assign them to the same events. The model sees examples
+  from each event and matches additional transactions that belong to it.
+  Requires DEEPSEEK_API_KEY.
+category: expenses
+owner: sumit
+language: go
+exec: "go run . fill-similar"   # app-backed job (ADR 0006)
+workdir: "."                     # run in the pack root
+tags: [expenses, finance, ai, deepseek]
+visibility: private
+
+runs_on:
+  os: [macos, linux]
+  machines: [any]
+
+schedule:
+  cron: ""
+  timezone: Asia/Kolkata
+  enabled: false
+
+runtime:
+  timeout_seconds: 600
+  env:
+    - DEEPSEEK_API_KEY
+    - DEEPSEEK_MODEL
+    - AI_PROVIDER
+
+data:
+  reads:  [../gmail/transactions.csv, config/events.json, state.json]
+  writes: [config/events.json, state.json]
+
+health:
+  expect_run_every: ""

@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,12 +13,18 @@ import (
 )
 
 type fakeClient struct {
-	labelName string
-	records   []wallet.NewRecord
+	labelName    string
+	labelErr     error
+	ensureCalled bool
+	records      []wallet.NewRecord
 }
 
 func (f *fakeClient) EnsureLabel(name string) (string, error) {
+	f.ensureCalled = true
 	f.labelName = name
+	if f.labelErr != nil {
+		return "", f.labelErr
+	}
 	return "lab_1", nil
 }
 
@@ -99,5 +106,85 @@ func TestRunner_RealRun_CreatesAndWritesState(t *testing.T) {
 	b, _ := os.ReadFile(statePath)
 	if !strings.Contains(string(b), "\"m1\"") {
 		t.Fatalf("expected state to contain m1, got: %s", string(b))
+	}
+}
+
+// The Wallet REST API has no documented /labels endpoint (GET /labels 404s in
+// practice) — a directly-configured LabelID must bypass EnsureLabel entirely.
+func TestRunner_RealRun_LabelIDConfigured_SkipsEnsureLabel(t *testing.T) {
+	dir := t.TempDir()
+	csvPath := filepath.Join(dir, "transactions.csv")
+	statePath := filepath.Join(dir, "state.json")
+
+	csv := strings.Join([]string{
+		"MessageID,EmailDate,TxnDate,Type,Amount,Account,Merchant,Info,Subject,BankFrom",
+		"m1,\"Mon, 01 Jul 2026 10:00:00 +0530\",2026-07-01,Debit,100.00,3690,Shop,hello,subj,bank",
+	}, "\n") + "\n"
+	if err := os.WriteFile(csvPath, []byte(csv), 0o644); err != nil {
+		t.Fatalf("write csv: %v", err)
+	}
+
+	cfg := &config.Config{
+		LabelName:          "source:automation-monorepo",
+		LabelID:            "11b72de6-e49c-402f-971c-f0403de471ce",
+		DefaultPaymentType: "debit_card",
+		Accounts: map[string]config.AccountRule{
+			"3690": {AccountID: "acc_1", PaymentType: "debit_card"},
+		},
+	}
+	loc, _ := time.LoadLocation("Asia/Kolkata")
+	fc := &fakeClient{}
+
+	r := &Runner{Cfg: cfg, Client: fc, Loc: loc, Out: func(string, ...any) {}}
+	res, err := r.Run(Options{CSVPath: csvPath, StatePath: statePath, DryRun: false})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Created != 1 {
+		t.Fatalf("expected 1 created, got %d", res.Created)
+	}
+	if fc.ensureCalled {
+		t.Fatalf("expected EnsureLabel NOT to be called when LabelID is configured")
+	}
+	if len(fc.records) != 1 || len(fc.records[0].LabelIDs) != 1 || fc.records[0].LabelIDs[0] != cfg.LabelID {
+		t.Fatalf("expected the record to carry LabelID %q, got %+v", cfg.LabelID, fc.records)
+	}
+}
+
+// A failure resolving the label (e.g. the 404 the API actually returns) must
+// not abort an otherwise-working sync — labeling is best-effort.
+func TestRunner_RealRun_EnsureLabelFails_ContinuesWithoutLabel(t *testing.T) {
+	dir := t.TempDir()
+	csvPath := filepath.Join(dir, "transactions.csv")
+	statePath := filepath.Join(dir, "state.json")
+
+	csv := strings.Join([]string{
+		"MessageID,EmailDate,TxnDate,Type,Amount,Account,Merchant,Info,Subject,BankFrom",
+		"m1,\"Mon, 01 Jul 2026 10:00:00 +0530\",2026-07-01,Debit,100.00,3690,Shop,hello,subj,bank",
+	}, "\n") + "\n"
+	if err := os.WriteFile(csvPath, []byte(csv), 0o644); err != nil {
+		t.Fatalf("write csv: %v", err)
+	}
+
+	cfg := &config.Config{
+		LabelName:          "source:automation-monorepo",
+		DefaultPaymentType: "debit_card",
+		Accounts: map[string]config.AccountRule{
+			"3690": {AccountID: "acc_1", PaymentType: "debit_card"},
+		},
+	}
+	loc, _ := time.LoadLocation("Asia/Kolkata")
+	fc := &fakeClient{labelErr: errors.New("GET /labels: HTTP 404")}
+
+	r := &Runner{Cfg: cfg, Client: fc, Loc: loc, Out: func(string, ...any) {}}
+	res, err := r.Run(Options{CSVPath: csvPath, StatePath: statePath, DryRun: false})
+	if err != nil {
+		t.Fatalf("expected Run to succeed despite the label failure, got: %v", err)
+	}
+	if res.Created != 1 {
+		t.Fatalf("expected 1 created, got %d", res.Created)
+	}
+	if len(fc.records) != 1 || len(fc.records[0].LabelIDs) != 0 {
+		t.Fatalf("expected the record to carry no label, got %+v", fc.records)
 	}
 }

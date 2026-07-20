@@ -19,13 +19,16 @@ See design & rationale in `docs/adr/0011-expenses-pack.md`.
 cd packs/expenses
 
 # 1. See exactly what WOULD be assigned/created — no writes:
-make dry-run                       # or: go run . update-event --dry-run
+make expenses-update-event-dry     # or: go run . update-event --dry-run
 
-# 2. Once configured (DEEPSEEK_API_KEY), run for real:
-make update-event                  # or: go run . update-event
+# 2. Once configured (DEEPSEEK_API_KEY), run for real and enrich CSV:
+make expense-eventify              # or: go run . update-event --write-csv
+
+# 3. Preview enrichment without writing:
+make expense-eventify-dry          # or: go run . update-event --write-csv --dry-run
 
 # Scheduler path (env-injected, per ADR 0007):
-../../auto run expenses-update-event   # or: make auto-update-event
+../../auto run expenses-update-event   # or add --write-csv to the command
 ```
 
 Run `make help` for every target (build, test, config, events, …).
@@ -85,7 +88,7 @@ on once you're happy with the assignments it produces.
 
 | Flag | Default | Meaning |
 |------|---------|---------|
-| `--csv PATH` | `../gmail/transactions.csv` | source CSV, read-only |
+| `--csv PATH` | `../gmail/transactions.csv` | source CSV (read for matching; enriched if `--write-csv`) |
 | `--events PATH` | `config/events.json` | event registry, versioned |
 | `--state PATH` | `state.json` | assignment ledger, local |
 | `--ai-provider NAME` | `deepseek` | AI provider |
@@ -94,6 +97,7 @@ on once you're happy with the assignments it produces.
 | `--batch-size N` | `0` (one call for all) | transactions per API call |
 | `--limit N` | `0` (no cap) | stop after N unassigned rows |
 | `--dry-run` | off | report only; nothing written |
+| `--write-csv` | off | enrich transactions.csv with `EventID` and `EventDescription` columns |
 
 ## Environment (from `config/expenses/config.yaml`)
 
@@ -122,6 +126,93 @@ on once you're happy with the assignments it produces.
 - Rows the model deliberately leaves without an event (an ordinary routine
   purchase, not part of any event) are still marked in the ledger so they
   aren't re-sent to the model on every future run.
+
+## CSV enrichment (--write-csv)
+
+By default, `state.json` keeps the assignment ledger separate from
+`transactions.csv`. Use `--write-csv` to enrich the CSV with two new columns:
+- `EventID` — the matched/created event's id
+- `EventDescription` — the event's description text (from `config/events.json`)
+
+This is useful for:
+- downstream analysis or export (spreadsheet tools, dashboards)
+- seeing event context inline with transaction data
+- single-file workflows that don't split CSV and state ledger
+
+Example:
+```bash
+make expense-eventify                 # match events AND write CSV columns
+make expense-eventify-dry             # preview what would be written
+go run . update-event --write-csv --limit 50   # enrich first 50 unassigned rows only
+```
+
+The CSV is only written after successful matching (registry and state both
+saved). Combined with `--dry-run`, `--write-csv` previews the enrichment without
+touching the file.
+
+## Manual event workflow (bulk-assign + fill-similar)
+
+Use this when you want to manually specify that certain transactions belong to
+an event, and let AI find other similar transactions automatically:
+
+### 1. Create assignment CSV
+
+Create a CSV file with two columns: `MessageID` and `EventID`. MessageID must
+exist in transactions.csv, and EventID must already exist in config/events.json.
+
+Example (`my-assignments.csv`):
+```
+MessageID,EventID
+msg-2024-05-15-001,goa-trip-2024
+msg-2024-05-16-002,goa-trip-2024
+msg-2024-06-02-001,diwali-shopping
+```
+
+### 2. Import the assignments
+
+```bash
+make expense-bulk-assign ASSIGNMENTS=my-assignments.csv    # real run
+make expense-bulk-assign-dry ASSIGNMENTS=my-assignments.csv # preview
+```
+
+Manual assignments override any existing auto-matches; confidence is set to 1.0
+(max). The command validates every MessageID and EventID before writing.
+
+### 3. Find similar transactions
+
+Once manual assignments are imported, ask AI to find unassigned transactions
+that belong to the same events:
+
+```bash
+make expense-fill-similar        # real run: find and assign similar txns
+make expense-fill-similar-dry    # preview matches without writing
+```
+
+The model sees 1–3 example transactions from each manually-assigned event and
+searches the unassigned batch for matches. Matches above `--threshold`
+(default 0.6) are assigned with their confidence score. Existing auto-matches
+are NOT overwritten (fill-similar only assigns unassigned rows).
+
+### Full workflow
+
+```bash
+# 1. Preview the auto-matching on fresh data
+make expenses-update-event-dry --limit 50
+
+# 2. Create manual_fixes.csv with known event assignments
+# (see example above)
+
+# 3. Import and fill manually
+make expense-bulk-assign-dry ASSIGNMENTS=manual_fixes.csv
+make expense-bulk-assign ASSIGNMENTS=manual_fixes.csv
+
+# 4. Have AI find similar ones automatically
+make expense-fill-similar-dry
+make expense-fill-similar
+
+# 5. Optionally enrich the CSV with event info
+make expense-eventify
+```
 
 ## Idempotency & re-runs
 

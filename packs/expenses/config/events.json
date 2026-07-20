@@ -1,3 +1,63 @@
 {
-  "events": []
+  "events": [
+    {
+      "id": "house-maintenance",
+      "name": "House Maintenance",
+      "description": "Various home maintenance and repair expenses including property tax, water purifier service, electrical work, and plumbing.",
+      "keywords": [
+        "home",
+        "maintenance",
+        "repairs",
+        "BBMP",
+        "Eureka Forbes"
+      ],
+      "createdAt": "2026-07-16T16:06:58Z",
+      "updatedAt": "2026-07-16T16:06:58Z",
+      "txnCount": 9
+    },
+    {
+      "id": "singapore-and-japan-trip",
+      "name": "Singapore and Japan Trip",
+      "description": "International trip to Singapore and Japan in late May to early June 2026 including flights, hotels, attractions, local transport, and shopping.",
+      "keywords": [
+        "Singapore",
+        "Japan",
+        "travel",
+        "trip",
+        "vacation"
+      ],
+      "createdAt": "2026-07-16T16:06:58Z",
+      "updatedAt": "2026-07-16T16:06:58Z",
+      "txnCount": 30
+    },
+    {
+      "id": "munnar-trip",
+      "name": "Munnar Trip",
+      "description": "Short trip to Munnar in July 2026 including hotel bookings, fuel, and local expenses.",
+      "keywords": [
+        "Munnar",
+        "hotel",
+        "trip",
+        "MERLIN",
+        "Agoda"
+      ],
+      "createdAt": "2026-07-16T16:06:58Z",
+      "updatedAt": "2026-07-16T16:06:58Z",
+      "txnCount": 8
+    },
+    {
+      "id": "kerala-trip",
+      "name": "Kerala Trip",
+      "description": "Family trip to Kerala in July 2026 with local food, shopping, fuel, and vehicle service.",
+      "keywords": [
+        "Kerala",
+        "Kodungallur",
+        "trip",
+        "local travel"
+      ],
+      "createdAt": "2026-07-16T16:06:58Z",
+      "updatedAt": "2026-07-16T16:06:58Z",
+      "txnCount": 23
+    }
+  ]
 }

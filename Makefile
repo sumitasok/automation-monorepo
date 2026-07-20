@@ -8,6 +8,11 @@
 # Pass extra job flags with ARGS, e.g.:
 #   make wallet-sync ARGS="--since 2026-07-01 --limit 20"
 #   make run JOB=gmail-extract ARGS="--backfill"
+# Jobs that read a source CSV (wallet-sync, expenses-update-event) accept
+# CSV=path to point at a different file. The path is resolved from the PACK's
+# own directory (auto run cd's there first), not the workspace root — e.g.
+# from packs/wallet/, reach a dated backup in data/gmail/ via ../../data/gmail/:
+#   make wallet-sync-dry CSV=../../data/gmail/transactions.20260627.csv
 #
 # The per-job targets below mirror CATALOG.md at the time of writing. `make
 # jobs` always shows the live, authoritative list (run it after `auto new` /
@@ -18,6 +23,9 @@ AUTO := ./auto
 ARGS ?=
 Q    ?=
 MSG  ?=
+# Default matches each job's own --csv default (resolved from the pack's
+# workdir, e.g. packs/wallet/ -> ../gmail/transactions.csv).
+CSV  ?= ../gmail/transactions.csv
 
 .DEFAULT_GOAL := help
 
@@ -92,12 +100,12 @@ config-gmail: ## show gmail pack config/secret status
 ## ---- wallet pack -----------------------------------------------------------
 
 .PHONY: wallet-sync
-wallet-sync: ## push transactions.csv rows into BudgetBakers Wallet (needs WALLET_API_TOKEN)
-	$(AUTO) run wallet-sync $(if $(ARGS),-- $(ARGS),)
+wallet-sync: ## REAL RUN: push every not-yet-synced transactions.csv row into Wallet, day-by-day, deduped by MessageID in state.json, tagged with WALLET_LABEL — needs WALLET_API_TOKEN + accounts.json set (config-wallet to check); override source with CSV=path; run wallet-sync-dry first
+	$(AUTO) run wallet-sync -- --csv $(CSV) $(ARGS)
 
 .PHONY: wallet-sync-dry
-wallet-sync-dry: ## preview what would sync; no token, no API calls
-	$(AUTO) run wallet-sync -- --dry-run $(ARGS)
+wallet-sync-dry: ## preview what would sync; no token, no API calls; override source with CSV=path
+	$(AUTO) run wallet-sync -- --dry-run --csv $(CSV) $(ARGS)
 
 .PHONY: config-wallet
 config-wallet: ## show wallet pack config/secret status
@@ -112,6 +120,30 @@ expenses-update-event: ## match/create AI events for transactions.csv rows (need
 .PHONY: expenses-update-event-dry
 expenses-update-event-dry: ## preview matches/new events; nothing written
 	$(AUTO) run expenses-update-event -- --dry-run $(ARGS)
+
+.PHONY: expense-eventify
+expense-eventify: ## send transactions to AI assistant and enrich CSV with event descriptions
+	$(AUTO) run expenses-update-event -- --write-csv $(ARGS)
+
+.PHONY: expense-eventify-dry
+expense-eventify-dry: ## preview AI event enrichment; nothing written
+	$(AUTO) run expenses-update-event -- --write-csv --dry-run $(ARGS)
+
+.PHONY: expense-bulk-assign
+expense-bulk-assign: ## import manual event assignments from CSV (MessageID,EventID); override source with ASSIGNMENTS=path
+	$(AUTO) run expenses-bulk-assign -- --assignments $(ASSIGNMENTS) $(ARGS)
+
+.PHONY: expense-bulk-assign-dry
+expense-bulk-assign-dry: ## preview manual assignments; nothing written; use ASSIGNMENTS=path
+	$(AUTO) run expenses-bulk-assign -- --assignments $(ASSIGNMENTS) --dry-run $(ARGS)
+
+.PHONY: expense-fill-similar
+expense-fill-similar: ## find unassigned transactions similar to manually-assigned ones via AI (needs DEEPSEEK_API_KEY)
+	$(AUTO) run expenses-fill-similar $(if $(ARGS),-- $(ARGS),)
+
+.PHONY: expense-fill-similar-dry
+expense-fill-similar-dry: ## preview AI similarity matching; nothing written
+	$(AUTO) run expenses-fill-similar -- --dry-run $(ARGS)
 
 .PHONY: config-expenses
 config-expenses: ## show expenses pack config/secret status

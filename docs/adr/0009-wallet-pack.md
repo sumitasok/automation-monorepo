@@ -101,3 +101,20 @@ choices its sync makes get an ADR before it is used.
 - The *code* is dependency-free and could later be shared/public (each user
   supplying their own token + `accounts.json`); this instance is `private` as it
   syncs personal finance data.
+
+## Correction — 2026-07-16: labels have no REST endpoint
+
+Decision 4 assumed the label could be resolved/created through the same
+Wallet REST API (`GET`/`POST /labels`) that handles accounts and records.
+First real run proved this wrong: `GET /labels` returns 404, and the official
+quick-reference (`https://rest.budgetbakers.com/wallet/reference`) confirms
+only records/accounts/budgets/categories are API-managed — its "Deleting
+Entities" table explicitly marks labels "Not supported via API."
+
+Fix: the label must be created once, manually, in the Wallet app; its UUID is
+then supplied directly via `WALLET_LABEL_ID` (`WALLET_LABEL` is now display-only,
+used in logs). If `WALLET_LABEL_ID` is unset, or the (retained, for backward
+compatibility) API-based `EnsureLabel` fallback fails, `sync` now logs a
+warning and continues **without** a label rather than aborting the run —
+labeling is a nice-to-have provenance/rollback handle, not worth failing an
+otherwise-working sync over. See `packs/wallet/RUNBOOK.md` § Labels.

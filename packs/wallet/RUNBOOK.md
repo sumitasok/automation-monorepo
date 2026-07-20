@@ -156,7 +156,8 @@ Enable the daily schedule (07:30 IST, after gmail-extract) by setting
 | Var | Default | Notes |
 |-----|---------|-------|
 | `WALLET_API_TOKEN` | — | **required** for real runs |
-| `WALLET_LABEL` | `source:automation-monorepo` | tag on every record; created if missing |
+| `WALLET_LABEL` | `source:automation-monorepo` | display name only, used in logs |
+| `WALLET_LABEL_ID` | — | the label's Wallet UUID; **required** to actually attach a label — see [Labels](#labels-no-rest-endpoint) below |
 | `WALLET_DEFAULT_PAYMENT_TYPE` | `debit_card` | used when an account rule has none |
 | `WALLET_TIMEZONE` | `Asia/Kolkata` | interprets date-only `TxnDate` values |
 | `WALLET_BASE_URL` | `https://rest.budgetbakers.com/wallet` | rarely changed |
@@ -172,9 +173,44 @@ Enable the daily schedule (07:30 IST, after gmail-extract) by setting
 - **counterParty** — the CSV `Merchant`.
 - **note** — the CSV `Info`/`Subject` plus `[gmail-csv <shortId>]` for tracing
   back to the source email.
-- **labels** — `[WALLET_LABEL]`.
+- **labels** — `[WALLET_LABEL_ID]` if set, otherwise no label at all (see below).
 - **category** — left unset (Wallet auto-assigns Unknown income/expense);
   recategorise in the app.
+
+## Account matching: exact, then last-4/last-3-digit fuzzy match
+
+Bank alert emails mask the same account inconsistently — real examples seen
+in `transactions.csv`: `0878`, `X0878`, and `XXXXX860878` all refer to the
+same card. `ResolveAccount` tries an exact key match in `accounts.json`
+first; if that misses, it compares trailing digits (last 4, then last 3)
+against every mapped code and uses the one it finds — **only when exactly
+one** mapped code shares that suffix. A suffix shared by two or more mapped
+codes, or matching none, falls through to `_default` (skip) unchanged — it
+never guesses when ambiguous. Nothing to configure; this applies automatically
+on top of your existing `accounts.json`.
+
+## Labels: no REST endpoint
+
+The Wallet REST API does **not** expose `/labels` (confirmed 2026-07-16: `GET
+/labels` returns 404; the official quick-reference at
+`https://rest.budgetbakers.com/wallet/reference` lists only
+records/accounts/budgets/categories as API-managed, and its "Deleting
+Entities" table explicitly marks labels "Not supported via API"). This
+pack originally assumed labels could be looked up/created through the same
+API (ADR 0009 decision 4) — that assumption was wrong.
+
+To attach a label to synced records:
+
+1. Create the label once, manually, in the Wallet app (any name, e.g.
+   `source:automation-monorepo`).
+2. Find its UUID. There's no public way to list labels via the REST API —
+   easiest is asking an assistant with the Wallet MCP connector enabled to
+   run `get_labels`, or inspecting the Wallet web app's network requests.
+3. Set `WALLET_LABEL_ID` in `config/wallet/config.yaml` to that UUID.
+
+If `WALLET_LABEL_ID` is left empty, `sync` still runs — records are just
+created without a label — rather than failing the whole run (the old
+behavior called the nonexistent endpoint and aborted on its 404).
 
 ## Idempotency & re-runs
 
@@ -200,9 +236,10 @@ records.
 | `unauthorized (401)` | bad/expired token, or missing `records.create` scope. |
 | `wallet sync in progress (409)` | initial data sync running; retry in a few minutes. |
 | `rate limited (429)` | 300 req/hour cap; wait and re-run (state means no duplicates). |
-| `skip (unmapped account "X")` | add `X` to `accounts.json`, or rely on `_default`. |
+| `skip (unmapped account "X")` | add `X` to `accounts.json` (exact or fuzzy last-4/last-3 digit match — see above), or rely on `_default`. |
+| `POST /records: HTTP 404: <body>` | as of this fix, errors now include the raw response body — read it, it names the actual reason (bad `accountId`, validation error, etc.). Common causes: a mapped `accountId` in `accounts.json` no longer exists or was mistyped; double-check it against `GET /accounts`. If the body itself says "not found" for the *route* rather than a field, the Wallet API's path structure may have changed since ADR 0009 was written — check `https://rest.budgetbakers.com/wallet/openapi/ui` for the current spec. |
 | Old rows show `failed` | Wallet rejects `recordDate` >10 years in the past; bound with `--since`. |
-| `POST /labels: HTTP 4xx` | create the label named `source:automation-monorepo` in the Wallet app, then re-run. |
+| `ensure label ...: GET /labels: HTTP 404` (old versions: fatal) | expected — the API has no `/labels` endpoint. Now non-fatal: sync continues without a label. Set `WALLET_LABEL_ID` (see [Labels](#labels-no-rest-endpoint) above) to attach one. |
 | Records rejected on an account | that account is bank-synced; map only manual accounts. |
 
 ## Files
