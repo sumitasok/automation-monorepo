@@ -4,6 +4,34 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-07-23 22:21 — Plan: Job Orchestrator (`/speckit-plan`)
+
+**Prompt summary**: `/speckit-plan` with no additional input — proceed with planning against the existing `specs/001-job-orchestrator/spec.md`.
+
+**Files affected**:
+- `specs/001-job-orchestrator/plan.md` — filled in (Summary, Technical Context, Constitution Check + post-design re-check, Project Structure, Structure Decision)
+- `specs/001-job-orchestrator/research.md` (new) — 6 design decisions with rationale + rejected alternatives
+- `specs/001-job-orchestrator/data-model.md` (new) — YAML schema for Orchestration/Step/loop, SQLite schema for orchestration run history
+- `specs/001-job-orchestrator/contracts/cli.md` (new) — `auto orchestrate` command contract (bare = list, `<name>` = run), exit codes
+- `specs/001-job-orchestrator/quickstart.md` (new) — 8 manual validation scenarios covering every user story + success criterion
+
+**Steps taken**:
+1. Confirmed no `.specify/extensions.yml` — before/after-plan hooks skipped silently.
+2. Ran `.specify/scripts/bash/setup-plan.sh --json`, which copied the plan template and confirmed branch `001-job-orchestrator`.
+3. Re-read `spec.md` in full and confirmed the (unfilled) constitution has no ratified principles to gate against.
+4. Inspected `framework/tools/auto`'s existing `cmd_run`/`_record_run` implementation, `.gitignore`'s `data/state/*.sqlite` rule, and `schedules/` as the precedent for a workspace-root, pack-spanning directory — used these to ground every plan decision in what already exists rather than inventing new patterns.
+5. Made and documented 6 key decisions in research.md: `orchestrator/` location, flat `auto orchestrate [name]` CLI shape (list vs. run), extracting a shared `execute_job()` core instead of shelling out, a new `orchestrations.sqlite` file instead of extending `runs.sqlite`, a minimal `max_iterations`+`until_exit_code` loop vocabulary, and sequential-only v1 execution.
+6. Wrote data-model.md (authoritative field names/types/defaults for the YAML schema and SQLite tables) and contracts/cli.md (command behavior, exit codes, compatibility notes tying back to FR-016).
+7. Wrote quickstart.md with one manual scenario per user story (plus discoverability and history-inspection scenarios), since this workspace has no automated test suite.
+
+**Outcome**: Phase 0 + Phase 1 planning complete. No code written yet — `framework/tools/auto` is unmodified; `orchestrator/` directory doesn't exist on disk yet. That's `/speckit-tasks` → `/speckit-implement`.
+
+**Caveats**:
+- The loop `until_exit_code` convention (e.g. "job exits 2 when nothing left to categorize") is a *contract this feature introduces*, not something `gmail-categorize` already does — implementing loop support (US4/P4) will need either a small change to that job to emit such a code, or the loop capability will only be exercised with `max_iterations` alone until that job-side change happens. Flagged here so `/speckit-tasks` doesn't assume it's free.
+- Same Obsidian-note caveat as the previous entry: no known vault path, so that global-memory instruction was not applied.
+
+---
+
 ## 2026-07-23 22:15 — Spec: Job Orchestrator (`/speckit-specify`)
 
 **Prompt summary**: User currently runs `./auto run gmail-extract -- --ai=deepseek` then `./auto run gmail-categorize -- --ai=deepseek --batch-size 0` by hand. Wants an `orchestrator/` directory holding pipeline YAML files (e.g. `gmail-wallet-sync.yaml`), run via `./auto orchestrate gmail-wallet-sync`, executing steps in order. This must become a spec-kit feature (not just an ad-hoc script) because future capabilities are planned: loop, wait, retry, timeout — and pipelines must span multiple packs and be fully user-controllable via YAML.
