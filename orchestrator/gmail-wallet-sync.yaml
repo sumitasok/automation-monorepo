@@ -1,0 +1,8 @@
+name: gmail-wallet-sync
+description: Extract Gmail transactions, then categorize them.
+steps:
+  - job: gmail-extract
+    ai: deepseek
+  - job: gmail-categorize
+    ai: deepseek
+    args: ["--batch-size", "0"]

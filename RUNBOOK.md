@@ -4,6 +4,34 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-07-23 22:44 — Implement: Job Orchestrator (`/speckit-implement`)
+
+**Prompt summary**: Chained from `/speckit-tasks and /speckit-implement` — generate tasks, then implement all 26 of them against the approved plan/spec.
+
+**Files affected**:
+- `framework/tools/auto` — extracted `execute_job()` from `cmd_run()`; added `ORCH_DIR`, `load_orchestrations()`/`load_orchestration()`, `validate_orchestration()`, the `orchestrations.sqlite` schema + `_record_orchestration_run()`/`_record_orchestration_step()`, `_run_step_once_with_retry()`, `_run_step_with_loop()`, `_print_orchestrations()`, `cmd_orchestrate()`; wired the `orchestrate` subcommand into argparse and the usage docstring.
+- `orchestrator/README.md` (new) — schema reference for anyone authoring a pipeline.
+- `orchestrator/gmail-wallet-sync.yaml` (new) — the real two-step pipeline (`gmail-extract` → `gmail-categorize`) replacing today's two manual commands.
+- `README.md` — added `auto orchestrate` to Quickstart and `orchestrator/` to "Where things are."
+- `Makefile` — added `make orchestrate NAME=...` (mirrors `make run JOB=...`).
+- `specs/001-job-orchestrator/tasks.md` — all 26 tasks marked `[X]`.
+
+**Steps taken**:
+1. Confirmed no `.specify/extensions.yml` (hooks skipped) and that the spec-quality checklist was 16/16 complete — proceeded without pausing for confirmation.
+2. Implemented Setup + Foundational (T001–T005) as pure additions/refactors to `framework/tools/auto`, keeping `cmd_run()`'s observable behavior byte-for-byte identical (verified via `python3 -m py_compile` and a real `auto run hello-report`).
+3. Implemented US1 (T006–T012): `orchestrate` subcommand, list mode, run mode with validation-before-execution, sequential step loop, history recording, and the real `gmail-wallet-sync.yaml` fixture.
+4. Implemented US2 (T013–T016, retry + per-step timeout), US3 (T017–T019, wait-before), US4 (T020–T022, bounded loop with `until_exit_code`) directly on top of the same step-execution loop, in that order.
+5. Implemented Polish (T023–T026): README/Makefile docs, `auto doctor` regression check, history inspection.
+6. **Manual validation** (in place of an automated suite, since none exists in this workspace): created four throwaway jobs under `packs/private/jobs/scratch/` (`orch-test-fail`, `orch-test-flaky`, `orch-test-slow`, `orch-test-loop`) plus scratch `orchestrator/_test-*.yaml` files, and exercised every quickstart.md scenario against them — sequential run + list + unknown-job validation, fail-then-skip-remaining, retry-recovers, retry-exhausted, timeout-kills-and-counts-as-failed-attempt, wait-before measured at ~3.1s for a 3s wait, loop stopping early on `until_exit_code` at iteration 2 of 5, and loop stopping at `max_iterations` (2) when the condition never matched. Inspected `data/state/orchestrations.sqlite` directly and confirmed run/step rows matched every scenario. Ran `./auto doctor` — still reports OK, confirming the `execute_job()` extraction didn't regress existing manifest/visibility checks.
+7. **Cleaned up all scratch test artifacts** (`packs/private/jobs/scratch/`, `orchestrator/_test-*.yaml`, `/tmp/orch-test-*.state`) before committing — none of it is part of the shipped feature.
+
+**Outcome**: All 26 tasks complete. `./auto orchestrate` (list) and `./auto orchestrate gmail-wallet-sync` (run) are live. Every user story (P1–P4) validated manually per quickstart.md. `auto doctor` and `auto run` behavior confirmed unregressed.
+
+**Caveats**:
+- `orchestrator/gmail-wallet-sync.yaml` was validated structurally and via equivalent scratch fixtures, but was **not executed for real** — doing so would trigger live Gmail API reads and billed DeepSeek API calls against real financial data, which this session didn't take without the user explicitly asking for that specific run. Run `./auto orchestrate gmail-wallet-sync` yourself when ready to replace the two manual commands for real.
+- The `until_exit_code` loop-stop mechanism works exactly as designed (proven with the scratch `orch-test-loop` fixture), but `gmail-categorize` itself doesn't yet emit a distinguishing "nothing left" exit code — so looping `gmail-categorize` today only makes sense bounded by `max_iterations` alone, as flagged in the plan. Documented in `orchestrator/README.md`'s "Known limitation."
+- No automated regression suite was added (matches this workspace's existing convention for `framework/tools/auto`) — re-run the scratch-fixture scenarios above if `cmd_orchestrate`'s step loop is touched again in the future.
+
 ## 2026-07-23 22:33 — Tasks: Job Orchestrator (`/speckit-tasks`)
 
 **Prompt summary**: `/speckit-tasks and /speckit-implement` — generate the task breakdown for the planned job orchestrator, then proceed straight into implementation.

@@ -23,6 +23,7 @@ AUTO := ./auto
 ARGS ?=
 Q    ?=
 MSG  ?=
+NAME ?=
 # Default matches each job's own --csv default (resolved from the pack's
 # workdir, e.g. packs/wallet/ -> ../gmail/transactions.csv).
 CSV  ?= ../gmail/transactions.csv
@@ -74,6 +75,10 @@ new: ## scaffold a new job into a pack (interactive)
 .PHONY: run
 run: ## run any job by id: make run JOB=gmail-extract ARGS="--backfill"
 	$(AUTO) run $(JOB) $(if $(ARGS),-- $(ARGS),)
+
+.PHONY: orchestrate
+orchestrate: ## run a pipeline from orchestrator/: make orchestrate NAME=gmail-wallet-sync (omit NAME to list)
+	$(AUTO) orchestrate $(NAME)
 
 ## ---- gmail pack ----------------------------------------------------------
 

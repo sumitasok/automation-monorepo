@@ -11,6 +11,7 @@ Usage:
   auto packs
   auto search <term>
   auto run <id> [--ai <name>] [-- extra args]
+  auto orchestrate [<name>]    # run (or list, if no name) a multi-step pipeline from orchestrator/
   auto new
   auto catalog                 # workspace catalog (all packs)
   auto share [<pack>]          # write a shareable catalog of a pack's non-private jobs
@@ -21,7 +22,7 @@ Usage:
   auto serve [--port N]        # local dashboard: packs, config status, jobs, command help
 """
 from __future__ import annotations
-import argparse, html, os, platform, re, socket, subprocess, sys, textwrap, datetime, shutil
+import argparse, html, os, platform, re, socket, subprocess, sys, textwrap, datetime, shutil, time
 from pathlib import Path
 
 try:
@@ -47,6 +48,7 @@ WS = find_workspace()
 DATA = WS / "data"
 GEN = WS / "schedules" / "generated"
 WORKLOG = WS / "docs" / "worklog"
+ORCH_DIR = WS / "orchestrator"
 
 def load_yaml(p: Path) -> dict:
     with open(p) as f:
@@ -246,11 +248,18 @@ def _link_pack_files(files, cfg_dir: Path, workdir: Path):
         except OSError as e:
             print(f"   (config) could not link {name}: {e}")
 
-def cmd_run(args):
-    j = get_job(args.id)
+def execute_job(job_id: str, extra_args: list[str] | None = None, ai: str = "",
+                 timeout_override: int | None = None) -> tuple[int, float]:
+    """Run one job to completion and return (returncode, duration_seconds).
+    This is the shared execution core: `cmd_run` calls it once for `auto run`,
+    and `cmd_orchestrate` calls it once per step attempt/iteration — the two
+    share this function so a step with no orchestration controls set behaves
+    byte-for-byte like `auto run` (spec FR-016), not just similarly."""
+    extra_args = extra_args or []
+    j = get_job(job_id)
     pack = next(p for p in load_packs() if p["name"] == j["_pack"])
     cfg_env, cfg_files, cfg_dir = load_pack_config(pack)
-    ai_env = ai_profile_env(args.ai) if getattr(args, "ai", "") else {}
+    ai_env = ai_profile_env(ai) if ai else {}
     # env precedence: pack sample defaults < workspace override < ambient shell env
     # < --ai <name> (ADR 0015 — the most specific, explicitly-named choice wins)
     env = {**cfg_env, **os.environ, **ai_env,
@@ -258,8 +267,8 @@ def cmd_run(args):
            "AUTO_JOB_ID": j["id"], "AUTO_PACK": j["_pack"],
            "AUTO_PACK_CONFIG_DIR": str(cfg_dir)}
     if ai_env:
-        print(f"   (ai) profile '{args.ai}' loaded — provider: {ai_env.get('AI_PROVIDER')}")
-    timeout = (j.get("runtime") or {}).get("timeout_seconds", 600)
+        print(f"   (ai) profile '{ai}' loaded — provider: {ai_env.get('AI_PROVIDER')}")
+    timeout = timeout_override or (j.get("runtime") or {}).get("timeout_seconds", 600)
     # workdir defaults to the job folder; app-backed jobs set it relative to the pack root
     workdir = j["_dir"]
     if j.get("workdir"):
@@ -268,7 +277,7 @@ def cmd_run(args):
         _link_pack_files(cfg_files, cfg_dir, workdir)
     if j.get("exec"):
         # app-backed job: run an explicit shell command in workdir (e.g. "go run . discover")
-        cmd = j["exec"] + (" " + " ".join(args.extra) if args.extra else "")
+        cmd = j["exec"] + (" " + " ".join(extra_args) if extra_args else "")
         shell = True; show = cmd
     else:
         # script job: run a single entrypoint file with the language runner
@@ -276,7 +285,7 @@ def cmd_run(args):
         if not entry.exists():
             sys.exit(f"entrypoint not found: {entry}")
         runner = {"python": [sys.executable], "node": ["node"], "bash": ["bash"], "go": ["go", "run"]}.get(j.get("language", "bash"), ["bash"])
-        cmd = runner + [str(entry)] + args.extra
+        cmd = runner + [str(entry)] + extra_args
         shell = False; show = " ".join(cmd)
     start = datetime.datetime.now()
     print(f">> running {j['id']} [{j['_pack']}] in {workdir}: {show}")
@@ -285,8 +294,13 @@ def cmd_run(args):
     except subprocess.TimeoutExpired:
         rc = 124; print(f"!! timed out after {timeout}s")
     dur = (datetime.datetime.now() - start).total_seconds()
-    _record_run(j["id"], rc, dur)
     print(f"<< {j['id']} exited {rc} in {dur:.1f}s")
+    return rc, dur
+
+def cmd_run(args):
+    j = get_job(args.id)
+    rc, dur = execute_job(args.id, args.extra, getattr(args, "ai", ""))
+    _record_run(j["id"], rc, dur)
     sys.exit(rc)
 
 def _record_run(job_id, rc, dur):
@@ -299,6 +313,221 @@ def _record_run(job_id, rc, dur):
         c.commit(); c.close()
     except Exception as e:
         print(f"(run history not recorded: {e})", file=sys.stderr)
+
+
+# ---------- orchestrator (multi-step pipelines spanning packs) --------------
+def load_orchestrations() -> list[dict]:
+    """Every orchestrator/*.yaml, parsed. Each gets '_id' (filename stem, the
+    name used on the CLI) and '_path'. Missing/empty orchestrator/ -> []."""
+    if not ORCH_DIR.exists():
+        return []
+    out = []
+    for p in sorted(ORCH_DIR.glob("*.yaml")):
+        try:
+            o = load_yaml(p)
+        except Exception as e:
+            print(f"! bad orchestration {p}: {e}", file=sys.stderr); continue
+        o = o or {}
+        o["_id"] = p.stem
+        o["_path"] = p
+        out.append(o)
+    return out
+
+def load_orchestration(name: str) -> dict | None:
+    """Parse orchestrator/<name>.yaml, or None if it doesn't exist."""
+    p = ORCH_DIR / f"{name}.yaml"
+    if not p.exists():
+        return None
+    o = load_yaml(p) or {}
+    o["_id"] = name
+    o["_path"] = p
+    return o
+
+def validate_orchestration(orch: dict) -> list[str]:
+    """Structural validation only — no step executes here. Returns a list of
+    human-readable problems; empty list means valid (FR-006)."""
+    problems = []
+    steps = orch.get("steps")
+    if not isinstance(steps, list) or not steps:
+        problems.append("orchestration must have a non-empty 'steps' list")
+        return problems
+    job_ids = {j["id"] for j in load_jobs()}
+    for i, step in enumerate(steps):
+        if not isinstance(step, dict) or not step.get("job"):
+            problems.append(f"step {i}: missing required 'job'")
+            continue
+        if step["job"] not in job_ids:
+            problems.append(f"step {i}: unknown job id '{step['job']}'  (see: auto list)")
+        for field in ("retry", "timeout_seconds", "wait_before_seconds"):
+            v = step.get(field)
+            if v is not None and (not isinstance(v, int) or isinstance(v, bool) or v <= 0):
+                problems.append(f"step {i}: '{field}' must be a positive integer, got {v!r}")
+        rds = step.get("retry_delay_seconds")
+        if rds is not None and (not isinstance(rds, int) or isinstance(rds, bool) or rds < 0):
+            problems.append(f"step {i}: 'retry_delay_seconds' must be a non-negative integer, got {rds!r}")
+        loop = step.get("loop")
+        if loop is not None:
+            if not isinstance(loop, dict) or "max_iterations" not in loop:
+                problems.append(f"step {i}: 'loop' requires 'max_iterations'")
+            else:
+                mi = loop.get("max_iterations")
+                if not isinstance(mi, int) or isinstance(mi, bool) or mi <= 0:
+                    problems.append(f"step {i}: 'loop.max_iterations' must be a positive integer, got {mi!r}")
+                uec = loop.get("until_exit_code")
+                if uec is not None and (not isinstance(uec, int) or isinstance(uec, bool)):
+                    problems.append(f"step {i}: 'loop.until_exit_code' must be an integer, got {uec!r}")
+    return problems
+
+def _orchestrations_db() -> Path:
+    db = DATA / "state" / "orchestrations.sqlite"
+    db.parent.mkdir(parents=True, exist_ok=True)
+    return db
+
+def _orchestrations_schema(c):
+    c.execute("""CREATE TABLE IF NOT EXISTS orchestration_runs(
+        id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, orchestration TEXT,
+        host TEXT, rc INTEGER, dur REAL)""")
+    c.execute("""CREATE TABLE IF NOT EXISTS orchestration_steps(
+        run_id INTEGER, step_index INTEGER, job TEXT, iteration INTEGER,
+        attempt INTEGER, rc INTEGER, dur REAL, outcome TEXT)""")
+
+def _record_orchestration_run(orch_id: str, rc: int, dur: float) -> int:
+    try:
+        import sqlite3
+        c = sqlite3.connect(_orchestrations_db())
+        _orchestrations_schema(c)
+        cur = c.execute("INSERT INTO orchestration_runs(ts, orchestration, host, rc, dur) VALUES (?,?,?,?,?)",
+                         (datetime.datetime.utcnow().isoformat(), orch_id, socket.gethostname(), rc, dur))
+        run_id = cur.lastrowid
+        c.commit(); c.close()
+        return run_id
+    except Exception as e:
+        print(f"(orchestration run history not recorded: {e})", file=sys.stderr)
+        return -1
+
+def _record_orchestration_step(run_id: int, step_index: int, job: str, iteration: int,
+                                attempt: int, rc: int, dur: float, outcome: str):
+    try:
+        import sqlite3
+        c = sqlite3.connect(_orchestrations_db())
+        _orchestrations_schema(c)
+        c.execute("INSERT INTO orchestration_steps VALUES (?,?,?,?,?,?,?,?)",
+                  (run_id, step_index, job, iteration, attempt, rc, dur, outcome))
+        c.commit(); c.close()
+    except Exception as e:
+        print(f"(orchestration step history not recorded: {e})", file=sys.stderr)
+
+def _run_step_once_with_retry(step: dict) -> tuple[int, list[tuple]]:
+    """Run one loop iteration of a step, retrying up to step['retry']
+    additional times on failure. Returns (final_rc, attempts) where each
+    attempt is (attempt_index, rc, dur, outcome)."""
+    retry = step.get("retry") or 0
+    retry_delay = step.get("retry_delay_seconds") or 0
+    timeout_override = step.get("timeout_seconds")
+    until_code = (step.get("loop") or {}).get("until_exit_code")
+    attempts = []
+    rc = None
+    for attempt in range(retry + 1):
+        rc, dur = execute_job(step["job"], step.get("args") or [], step.get("ai", ""), timeout_override)
+        if rc == 0:
+            outcome = "succeeded"
+        elif until_code is not None and rc == until_code:
+            outcome = "loop_stopped"
+        elif rc == 124:
+            outcome = "timed_out"
+        elif attempt < retry:
+            outcome = "retried"
+        else:
+            outcome = "failed"
+        attempts.append((attempt, rc, dur, outcome))
+        if outcome in ("succeeded", "loop_stopped"):
+            break
+        if attempt < retry:
+            if retry_delay:
+                time.sleep(retry_delay)
+            continue
+        break
+    return rc, attempts
+
+def _run_step_with_loop(step_index: int, step: dict) -> tuple[int, list[tuple]]:
+    """Run a step through its loop iterations (1 iteration if no 'loop' is
+    declared), each wrapped in the retry logic above. Returns (final_rc,
+    step_records), step_records being flat (step_index, job, iteration,
+    attempt, rc, dur, outcome) tuples ready for _record_orchestration_step."""
+    loop_cfg = step.get("loop")
+    max_iter = loop_cfg["max_iterations"] if loop_cfg else 1
+    job = step["job"]
+    step_records = []
+    final_rc = 0
+    step_succeeded = True
+    for iteration in range(max_iter):
+        rc, attempts = _run_step_once_with_retry(step)
+        for (attempt, a_rc, a_dur, outcome) in attempts:
+            step_records.append((step_index, job, iteration, attempt, a_rc, a_dur, outcome))
+        final_rc = rc
+        last_outcome = attempts[-1][3]
+        if last_outcome == "loop_stopped":
+            break
+        if last_outcome != "succeeded":
+            step_succeeded = False
+            break
+    return (0 if step_succeeded else (final_rc or 1)), step_records
+
+def _print_orchestrations():
+    orchs = load_orchestrations()
+    if not orchs:
+        print("no orchestrations yet — add a YAML file to orchestrator/"); return
+    w = max((len(o["_id"]) for o in orchs), default=2)
+    for o in sorted(orchs, key=lambda x: x["_id"]):
+        steps = o.get("steps") or []
+        desc = o.get("description") or o.get("name") or ""
+        print(f"{o['_id']:<{w}}  {len(steps)} step(s)   {desc}")
+
+def cmd_orchestrate(args):
+    if not args.name:
+        _print_orchestrations()
+        return
+
+    orch = load_orchestration(args.name)
+    if orch is None:
+        sys.exit(f"no orchestration '{args.name}'  (looked for {(ORCH_DIR / (args.name + '.yaml')).relative_to(WS)})")
+    problems = validate_orchestration(orch)
+    if problems:
+        print(f"orchestration '{args.name}' is invalid:")
+        for p in problems:
+            print(f"  - {p}")
+        sys.exit(2)
+
+    steps = orch["steps"]
+    all_records = []   # (step_index, job, iteration, attempt, rc, dur, outcome)
+    overall_rc = 0
+    failed_at = None
+    start = datetime.datetime.now()
+    for i, step in enumerate(steps):
+        if failed_at is not None:
+            all_records.append((i, step["job"], 0, 0, -1, 0.0, "skipped"))
+            continue
+        wait = step.get("wait_before_seconds") or 0
+        if wait:
+            print(f"   (wait) sleeping {wait}s before step {i} ({step['job']})")
+            time.sleep(wait)
+        rc, step_records = _run_step_with_loop(i, step)
+        all_records.extend(step_records)
+        if rc != 0:
+            failed_at = i
+            overall_rc = rc
+
+    dur_total = (datetime.datetime.now() - start).total_seconds()
+    run_id = _record_orchestration_run(orch["_id"], overall_rc, dur_total)
+    for step_index, job, iteration, attempt, rc, dur, outcome in all_records:
+        _record_orchestration_step(run_id, step_index, job, iteration, attempt, rc, dur, outcome)
+
+    status = "OK" if overall_rc == 0 else f"FAILED at step {failed_at}"
+    print(f"\norchestration '{orch['_id']}' — {status}  ({dur_total:.1f}s)")
+    for step_index, job, iteration, attempt, rc, dur, outcome in all_records:
+        print(f"  step {step_index} {job:<24} iter={iteration} attempt={attempt} rc={rc:<5} {outcome}")
+    sys.exit(overall_rc)
+
 
 def cmd_new(args):
     packs = [p for p in load_packs() if p.get("writable")]
@@ -668,6 +897,7 @@ def main():
     sub.add_parser("packs")
     sp = sub.add_parser("search"); sp.add_argument("term")
     rp = sub.add_parser("run"); rp.add_argument("id"); rp.add_argument("extra", nargs="*")
+    orp = sub.add_parser("orchestrate"); orp.add_argument("name", nargs="?")
     sub.add_parser("new"); sub.add_parser("catalog"); sub.add_parser("doctor"); sub.add_parser("bootstrap")
     shp = sub.add_parser("share"); shp.add_argument("pack", nargs="?")
     lgp = sub.add_parser("log"); lgp.add_argument("message")
@@ -676,8 +906,8 @@ def main():
     svp = sub.add_parser("serve"); svp.add_argument("--port", type=int, default=4321)
     a = p.parse_args(argv)
     a.ai = ai_name  # only meaningful for cmd == "run" (ADR 0015)
-    {"list": cmd_list, "packs": cmd_packs, "search": cmd_search, "run": cmd_run, "new": cmd_new,
-     "catalog": cmd_catalog, "share": cmd_share, "log": cmd_log, "doctor": cmd_doctor,
+    {"list": cmd_list, "packs": cmd_packs, "search": cmd_search, "run": cmd_run, "orchestrate": cmd_orchestrate,
+     "new": cmd_new, "catalog": cmd_catalog, "share": cmd_share, "log": cmd_log, "doctor": cmd_doctor,
      "bootstrap": cmd_bootstrap, "schedule": cmd_schedule, "config": cmd_config, "serve": cmd_serve}[a.cmd](a)
 
 if __name__ == "__main__":
