@@ -19,11 +19,12 @@ type Config struct {
 	CSVPath      string  // path to transactions.csv (read-only for matching)
 	RegistryPath string  // path to the event registry (config/events.json)
 	StatePath    string  // path to the assignment ledger (state.json)
+	RulesFile    string  // path to the shared expense-rules.yaml (spec 002); "" disables rule matching entirely
 	Provider     string  // "" or "deepseek"
 	Model        string  // override model (else env/default)
 	Threshold    float64 // confidence cutoff for accepting a match; <=0 uses defaultThreshold
 	BatchSize    int     // transactions per API call (<=0 = one single call for all rows)
-	Limit        int     // stop after N unassigned rows (0 = all)
+	Limit        int     // stop after N unassigned rows sent to the AI (0 = all; rule-decided rows don't count against this)
 	DryRun       bool    // print assignments/new events without writing registry or state
 	WriteCsv     bool    // after processing, enrich the CSV with EventID and EventDescription columns
 
@@ -34,11 +35,12 @@ type Config struct {
 
 // Result summarises a run.
 type Result struct {
-	Total     int // unassigned rows considered
-	Assigned  int // rows matched to an event (existing or newly created)
-	NewEvents int // brand-new registry entries created
-	NoEvent   int // rows the model deliberately left without an event
-	Malformed int // rows that failed CSV normalisation
+	Total       int // unassigned rows considered
+	Assigned    int // rows matched to an event (existing or newly created)
+	NewEvents   int // brand-new registry entries created
+	NoEvent     int // rows the model deliberately left without an event
+	RuleDecided int // rows a rule marked routine (not event-worthy) — no AI call made
+	Malformed   int // rows that failed CSV normalisation
 }
 
 // pending pairs a transaction with the raw match result awaiting grouping
@@ -47,6 +49,12 @@ type pending struct {
 	item Item
 	res  MatchResult
 }
+
+// aiSource formats the decision-source tag (ADR 0016) for an AI-decided row.
+func aiSource(matcherName string) string { return "ai:" + matcherName }
+
+// ruleSource formats the decision-source tag (ADR 0016) for a rule-decided row.
+func ruleSource(ruleName string) string { return "rule:" + ruleName }
 
 // Run enriches every not-yet-assigned transaction: it loads the registry and
 // ledger, finds rows missing an assignment, asks the AI provider to match them
@@ -69,6 +77,14 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 		return res, fmt.Errorf("load state: %w", err)
 	}
 
+	var rules ExpenseRules
+	if cfg.RulesFile != "" {
+		rules, err = LoadExpenseRules(cfg.RulesFile)
+		if err != nil {
+			return res, err
+		}
+	}
+
 	matcher := cfg.Matcher
 	if matcher == nil {
 		matcher, err = NewMatcher(cfg.Provider, cfg.Model)
@@ -86,11 +102,30 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 		log.Printf("[WARN] update-event: skip line %d: %s", s.Line, s.Reason)
 	}
 
+	// Before sending anything to the AI matcher, check the shared rules file:
+	// a rule scoped to "event" whose outcome is event_relevance: routine
+	// marks the transaction as intentionally not event-worthy directly (the
+	// registry's existing "no event" representation — empty EventID), with
+	// no AI call for that row (FR-005).
 	var items []Item
 	for _, t := range txns {
 		if st.Has(t.MessageID) {
 			continue
 		}
+
+		if rule, ok := rules.Match(ScopeEvent, MatchInput{
+			Merchant: t.Merchant, Info: t.Info, Subject: t.Subject, Amount: t.Amount, TxnDate: t.TxnDate,
+		}); ok && rule.Outcome.EventRelevance == EventRelevanceRoutine {
+			source := ruleSource(rule.Name)
+			if cfg.DryRun {
+				fmt.Printf("  %s -> no event (routine)  [%s]\n", t.MessageID, source)
+			} else {
+				st.Mark(t.MessageID, "", 1.0, source)
+			}
+			res.RuleDecided++
+			continue
+		}
+
 		items = append(items, Item{
 			ID:       t.MessageID,
 			Date:     t.TxnDate,
@@ -107,8 +142,22 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 	}
 	res.Total = len(items)
 
+	if res.RuleDecided > 0 {
+		log.Printf("[INFO] update-event: %d row(s) marked routine by rule (no AI call)", res.RuleDecided)
+	}
+
 	if len(items) == 0 {
-		log.Printf("[INFO] update-event: no unassigned rows in %s — nothing to do", cfg.CSVPath)
+		log.Printf("[INFO] update-event: no rows left for the AI matcher in %s", cfg.CSVPath)
+		if cfg.DryRun {
+			log.Printf("[INFO] update-event: dry-run — %d assigned (%d new event(s)), %d no-event, %d rule-decided — nothing written",
+				res.Assigned, res.NewEvents, res.NoEvent, res.RuleDecided)
+			return res, nil
+		}
+		if res.RuleDecided > 0 {
+			if err := st.Save(); err != nil {
+				return res, fmt.Errorf("saving state: %w", err)
+			}
+		}
 		return res, nil
 	}
 	log.Printf("[INFO] update-event: %d unassigned row(s) via %s (%d known event(s))",
@@ -146,9 +195,9 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 			if r.EventID != "" {
 				if _, known := reg.Find(r.EventID); known && r.Confidence >= threshold {
 					if cfg.DryRun {
-						fmt.Printf("  %s -> event %q (existing, confidence %.2f)\n", item.ID, r.EventID, r.Confidence)
+						fmt.Printf("  %s -> event %q (existing, confidence %.2f)  [%s]\n", item.ID, r.EventID, r.Confidence, aiSource(matcher.Name()))
 					} else {
-						st.Mark(item.ID, r.EventID, r.Confidence)
+						st.Mark(item.ID, r.EventID, r.Confidence, aiSource(matcher.Name()))
 						reg.Touch(r.EventID, 1)
 					}
 					res.Assigned++
@@ -165,9 +214,9 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 
 			// Model deliberately found no event for this transaction.
 			if cfg.DryRun {
-				fmt.Printf("  %s -> no event\n", item.ID)
+				fmt.Printf("  %s -> no event  [%s]\n", item.ID, aiSource(matcher.Name()))
 			} else {
-				st.Mark(item.ID, "", r.Confidence)
+				st.Mark(item.ID, "", r.Confidence, aiSource(matcher.Name()))
 			}
 			res.NoEvent++
 		}
@@ -188,14 +237,14 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 			group := groups[key]
 			first := group[0].res
 			if cfg.DryRun {
-				fmt.Printf("  NEW EVENT %q (%d txn): %v\n", first.NewEventName, len(group), idsOf(group))
+				fmt.Printf("  NEW EVENT %q (%d txn): %v  [%s]\n", first.NewEventName, len(group), idsOf(group), aiSource(matcher.Name()))
 				res.NewEvents++
 				res.Assigned += len(group)
 				continue
 			}
 			eventID := reg.CreateEvent(first.NewEventName, first.NewEventDescription, mergeKeywords(group), len(group))
 			for _, p := range group {
-				st.Mark(p.item.ID, eventID, 1.0)
+				st.Mark(p.item.ID, eventID, 1.0, aiSource(matcher.Name()))
 			}
 			res.NewEvents++
 			res.Assigned += len(group)
@@ -205,8 +254,8 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 	}
 
 	if cfg.DryRun {
-		log.Printf("[INFO] update-event: dry-run — %d assigned (%d new event(s)), %d no-event — nothing written",
-			res.Assigned, res.NewEvents, res.NoEvent)
+		log.Printf("[INFO] update-event: dry-run — %d assigned (%d new event(s)), %d no-event, %d rule-decided — nothing written",
+			res.Assigned, res.NewEvents, res.NoEvent, res.RuleDecided)
 		return res, nil
 	}
 

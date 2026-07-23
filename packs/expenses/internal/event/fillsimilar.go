@@ -209,7 +209,7 @@ func FillSimilar(ctx context.Context, cfg FillSimilarConfig) (FillSimilarResult,
 				if cfg.DryRun {
 					fmt.Printf("      %s -> %q (similar, confidence %.2f)\n", result.ID, eventCtx.Event.ID, result.Confidence)
 				} else {
-					st.Mark(result.ID, eventCtx.Event.ID, result.Confidence)
+					st.Mark(result.ID, eventCtx.Event.ID, result.Confidence, "ai:"+matcher.Name())
 					reg.Touch(eventCtx.Event.ID, 1)
 				}
 				res.Assigned++

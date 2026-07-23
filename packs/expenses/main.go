@@ -25,9 +25,24 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/sumitasok/sa.automation.expenses/internal/event"
 )
+
+// defaultRulesFile is where --rules-file looks for the shared expense
+// classification rules (spec 002-expense-rules-engine / ADR 0016). When
+// AUTO_DATA_DIR is set (i.e. this pack is running under `auto run`/`auto
+// orchestrate`), the shared, already-injected data directory is used;
+// otherwise it falls back to a workspace-root-relative path for local
+// `go run .` outside `auto`, mirroring every other flag's relative default
+// in this file (e.g. --csv ../gmail/transactions.csv).
+func defaultRulesFile() string {
+	if dataDir := os.Getenv("AUTO_DATA_DIR"); dataDir != "" {
+		return filepath.Join(dataDir, "config", "expense-rules.yaml")
+	}
+	return "../../data/config/expense-rules.yaml"
+}
 
 func main() {
 	log.SetFlags(0)
@@ -62,6 +77,7 @@ func runUpdateEvent(args []string) error {
 	csvPath := fs.String("csv", "../gmail/transactions.csv", "path to transactions.csv")
 	registryPath := fs.String("events", "config/events.json", "path to the event registry")
 	statePath := fs.String("state", "state.json", "path to the assignment ledger")
+	rulesFile := fs.String("rules-file", defaultRulesFile(), "path to the shared expense classification rules YAML, evaluated before the AI matcher (spec 002)")
 	provider := fs.String("ai-provider", envOr("AI_PROVIDER", ""), "AI provider (default: deepseek)")
 	model := fs.String("ai-model", "", "override model (else DEEPSEEK_MODEL or built-in default)")
 	threshold := fs.Float64("threshold", 0.6, "confidence cutoff (0-1) to accept a match to an existing event")
@@ -75,6 +91,7 @@ func runUpdateEvent(args []string) error {
 		CSVPath:      *csvPath,
 		RegistryPath: *registryPath,
 		StatePath:    *statePath,
+		RulesFile:    *rulesFile,
 		Provider:     *provider,
 		Model:        *model,
 		Threshold:    *threshold,
@@ -88,8 +105,8 @@ func runUpdateEvent(args []string) error {
 	if err != nil {
 		return err
 	}
-	log.Printf("done: %d unassigned | %d assigned | %d new event(s) | %d no-event | %d malformed",
-		res.Total, res.Assigned, res.NewEvents, res.NoEvent, res.Malformed)
+	log.Printf("done: %d unassigned | %d assigned | %d new event(s) | %d no-event | %d rule-decided | %d malformed",
+		res.Total, res.Assigned, res.NewEvents, res.NoEvent, res.RuleDecided, res.Malformed)
 	return nil
 }
 

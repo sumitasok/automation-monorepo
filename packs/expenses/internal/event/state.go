@@ -12,6 +12,11 @@ type AssignmentEntry struct {
 	EventID    string  `json:"eventId"`
 	Confidence float64 `json:"confidence"`
 	AssignedAt string  `json:"assignedAt"`
+	// Source records which mechanism produced this assignment: "rule:<name>"
+	// or "ai:<provider>" (ADR 0016). Empty on entries written before this
+	// feature shipped — encoding/json zero-values the missing field on load,
+	// so old state.json files remain readable with no migration step.
+	Source string `json:"source,omitempty"`
 }
 
 // State is the on-disk assignment ledger — local, produced data (ADR 0005),
@@ -52,11 +57,14 @@ func (s *State) Has(messageID string) bool {
 }
 
 // Mark records a MessageID as assigned to eventID with the given confidence.
-func (s *State) Mark(messageID, eventID string, confidence float64) {
+// source is "rule:<name>" or "ai:<provider>" (ADR 0016); "" is accepted for
+// callers that don't track it.
+func (s *State) Mark(messageID, eventID string, confidence float64, source string) {
 	s.Assigned[messageID] = AssignmentEntry{
 		EventID:    eventID,
 		Confidence: confidence,
 		AssignedAt: time.Now().UTC().Format(time.RFC3339),
+		Source:     source,
 	}
 }
 

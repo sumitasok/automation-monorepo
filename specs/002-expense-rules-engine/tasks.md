@@ -102,14 +102,14 @@ Two existing Go packs, extended in place, sharing one new data file — see `pla
 
 ### Tests for User Story 3
 
-- [ ] T014 [P] [US3] Table-driven tests in `packs/expenses/internal/event/rules_test.go` mirroring T005/T010's coverage (load/degrade/validate, all five condition types, `enabled`/`applies_to` scoping) for the expenses-side rule engine
+- [X] T014 [P] [US3] Table-driven tests in `packs/expenses/internal/event/rules_test.go` mirroring T005/T010's coverage (load/degrade/validate, all five condition types, `enabled`/`applies_to` scoping) for the expenses-side rule engine
 
 ### Implementation for User Story 3
 
-- [ ] T015 [P] [US3] Create `packs/expenses/internal/event/rules.go`: the same `ExpenseRule`/`ExpenseRules`/`MatchCondition`/`Outcome` shapes and `LoadExpenseRules` as gmail's `rules.go` (full condition set from the start, since the shared schema is already fully defined by Phase 4), evaluating only the `event_relevance` outcome field on this side (depends on Foundational T004)
-- [ ] T016 [US3] Add `RulesFile string` to `event.Config` (`packs/expenses/internal/event/updateevent.go`) and, in `Run()`, load the rules file once, then for each not-yet-assigned item evaluate `applies_to: event` rules in file order; on a match with `event_relevance: routine`, call `st.Mark(item.ID, "", 1.0)` directly and remove that item from the batch sent to the `Matcher` (depends on T015)
-- [ ] T017 [US3] Add `--rules-file` flag to the `update-event` subcommand in `packs/expenses/main.go`, same default-computation logic as T008, wired to `event.Config.RulesFile` (depends on T016)
-- [ ] T018 [US3] Manually run `quickstart.md` Scenario 3 against a scratch `transactions.csv`/`state.json`, confirming the HungerBox row is excluded from new-event proposals and never sent to the AI matcher
+- [X] T015 [P] [US3] Create `packs/expenses/internal/event/rules.go`: the same `ExpenseRule`/`ExpenseRules`/`MatchCondition`/`Outcome` shapes and `LoadExpenseRules` as gmail's `rules.go` (full condition set from the start, since the shared schema is already fully defined by Phase 4), evaluating only the `event_relevance` outcome field on this side (depends on Foundational T004)
+- [X] T016 [US3] Add `RulesFile string` to `event.Config` (`packs/expenses/internal/event/updateevent.go`) and, in `Run()`, load the rules file once, then for each not-yet-assigned item evaluate `applies_to: event` rules in file order; on a match with `event_relevance: routine`, call `st.Mark(item.ID, "", 1.0, source)` directly and remove that item from the batch sent to the `Matcher` (depends on T015) — *note: `Mark` gained a `source` parameter here rather than in Phase 6, since it's the same call site (T021/T022 folded in)*
+- [X] T017 [US3] Add `--rules-file` flag to the `update-event` subcommand in `packs/expenses/main.go`, same default-computation logic as T008, wired to `event.Config.RulesFile` (depends on T016)
+- [X] T018 [US3] Manually run `quickstart.md` Scenario 3 against a scratch `transactions.csv`/`state.json`, confirming the HungerBox row is excluded from new-event proposals and never sent to the AI matcher — validated: rule-decided rows (HungerBox, Uber commute) marked routine with zero AI calls; unrelated row correctly fell through to the AI matcher; `state.json`'s new `source` field confirmed on write
 
 **Checkpoint**: All three of US1/US2/US3 work independently — rules now drive both categorisation and event-relevance decisions.
 
@@ -123,12 +123,12 @@ Two existing Go packs, extended in place, sharing one new data file — see `pla
 
 ### Implementation for User Story 4
 
-- [ ] T019 [P] [US4] Add a `Source` column to `packs/gmail/store/csv.go`'s `csvHeader` (and a `colSource` constant), extending the write path so every enriched row records `rule:<rule-name>` or `ai:<provider-name>`; leave the column empty on legacy rows already enriched before this feature (additive schema change, mirrors ADR 0010's original column addition)
-- [ ] T020 [US4] Wire source-tagging into `categorize.Run()` (`packs/gmail/categorize/categorize.go`): pass `"rule:<name>"` for rule-decided rows and `"ai:<assigner.Name()>"` for AI-decided rows into the CSV write call (depends on T007/T011 and T019)
-- [ ] T021 [P] [US4] Add a `Source string` field to `AssignmentEntry` in `packs/expenses/internal/event/state.go`, and a way to set it alongside `EventID`/`Confidence` (extend `Mark` or add `MarkWithSource`); leave empty on legacy entries (no migration needed — `encoding/json` zero-values missing fields)
-- [ ] T022 [US4] Wire source-tagging into `update-event`'s `Run()` (`packs/expenses/internal/event/updateevent.go`): record `"rule:<name>"` for rule-decided rows and `"ai:<matcher.Name()>"` for AI-decided rows (depends on T016 and T021)
-- [ ] T023 [P] [US4] Add `[rule:<name>]` / `[ai:<provider>]` tags to both jobs' existing `--dry-run` print statements (`categorize.go`'s per-row `fmt.Printf`, `updateevent.go`'s per-row dry-run prints), per `contracts/cli.md`'s Output contract
-- [ ] T024 [US4] Manually run `quickstart.md` Scenario 4 (Source column/field present and correct in both files) and Scenario 5 (a rule with an invalid taxonomy outcome is rejected, logged, and falls through to AI rather than being silently written)
+- [X] T019 [P] [US4] Add a `Source` column to `packs/gmail/store/csv.go`'s `csvHeader` (and a `colSource` constant), extending the write path so every enriched row records `rule:<rule-name>` or `ai:<provider-name>`; leave the column empty on legacy rows already enriched before this feature (additive schema change, mirrors ADR 0010's original column addition) — *done in Phase 3 alongside T007, same edited function*
+- [X] T020 [US4] Wire source-tagging into `categorize.Run()` (`packs/gmail/categorize/categorize.go`): pass `"rule:<name>"` for rule-decided rows and `"ai:<assigner.Name()>"` for AI-decided rows into the CSV write call (depends on T007/T011 and T019) — *done in Phase 3*
+- [X] T021 [P] [US4] Add a `Source string` field to `AssignmentEntry` in `packs/expenses/internal/event/state.go`, and a way to set it alongside `EventID`/`Confidence` (extend `Mark` or add `MarkWithSource`); leave empty on legacy entries (no migration needed — `encoding/json` zero-values missing fields) — *done in Phase 5 alongside T016*
+- [X] T022 [US4] Wire source-tagging into `update-event`'s `Run()` (`packs/expenses/internal/event/updateevent.go`): record `"rule:<name>"` for rule-decided rows and `"ai:<matcher.Name()>"` for AI-decided rows (depends on T016 and T021) — *done in Phase 5, including the pre-existing bulk-assign ("manual") and fill-similar call sites*
+- [X] T023 [P] [US4] Add `[rule:<name>]` / `[ai:<provider>]` tags to both jobs' existing `--dry-run` print statements (`categorize.go`'s per-row `fmt.Printf`, `updateevent.go`'s per-row dry-run prints), per `contracts/cli.md`'s Output contract — *done in Phases 3 and 5*
+- [X] T024 [US4] Manually run `quickstart.md` Scenario 4 (Source column/field present and correct in both files) and Scenario 5 (a rule with an invalid taxonomy outcome is rejected, logged, and falls through to AI rather than being silently written) — validated: gmail's transactions.csv Source column and expenses' state.json source field both confirmed on real (non-dry-run) writes; Scenario 5 validated in Phase 3
 
 **Checkpoint**: All four user stories are independently functional; every classified transaction's decision source is auditable end-to-end.
 

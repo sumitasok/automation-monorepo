@@ -154,7 +154,7 @@ func BulkAssign(cfg BulkAssignConfig) (BulkAssignResult, error) {
 		}
 
 		if !cfg.DryRun {
-			st.Mark(msgID, eventID, 1.0) // manual = full confidence
+			st.Mark(msgID, eventID, 1.0, "manual") // manual = full confidence
 			reg.Touch(eventID, 1)        // increment transaction count for this event
 		}
 		res.Valid++
