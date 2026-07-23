@@ -98,6 +98,7 @@ on once you're happy with the assignments it produces.
 | `--limit N` | `0` (no cap) | stop after N unassigned rows |
 | `--dry-run` | off | report only; nothing written |
 | `--write-csv` | off | enrich transactions.csv with `EventID` and `EventDescription` columns |
+| `--rules-file PATH` | `$AUTO_DATA_DIR/config/expense-rules.yaml` (or `../../data/config/expense-rules.yaml` outside `auto`) | shared expense classification rules, evaluated before the AI matcher (spec 002, ADR 0016) |
 
 ## Environment (from `config/expenses/config.yaml`)
 
@@ -108,6 +109,35 @@ on once you're happy with the assignments it produces.
 | `AI_PROVIDER` | `deepseek` | only DeepSeek is implemented today |
 
 ---
+
+## Expense classification rules (spec 002, ADR 0016)
+
+Before any transaction reaches the AI matcher, `update-event` checks it
+against the shared, human-authored rules file at `--rules-file`
+(`data/config/expense-rules.yaml` at the workspace root — shared with the
+gmail pack's `categorize` command, see `docs/adr/0016-expense-rules-engine.md`).
+A rule scoped to `event` whose outcome is `event_relevance: routine` marks
+the transaction as intentionally not event-worthy (the same "no event"
+representation the AI path already uses — an empty `EventID` in
+`state.json`) **without calling the AI matcher for that row at all**. Rows
+with no matching rule go through AI matching exactly as before.
+
+This is how routine, recurring transactions (a daily workplace lunch, a
+regular commute) stop being repeatedly risked as spurious new-event
+proposals: once a rule says "this is routine," it's routine on every future
+run too, deterministically, with no AI cost. An empty or absent rules file
+is a no-op — every row goes to the AI exactly as it did before this feature.
+
+Every assignment (rule- or AI-decided) now also gets a `Source` field in
+`state.json` (`rule:<name>` or `ai:<provider>`, `"manual"` for bulk-assign),
+so any transaction's event assignment is auditable after the fact. The
+`done:` summary line reports a `rule-decided` count alongside the existing
+counters.
+
+See `internal/event/rules.go` for the rule schema
+(`ExpenseRule`/`MatchCondition`/`Outcome`) and
+`specs/002-expense-rules-engine/` in the parent workspace repo for the full
+spec/plan/contracts.
 
 ## How matching works
 

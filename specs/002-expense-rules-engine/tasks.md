@@ -138,10 +138,10 @@ Two existing Go packs, extended in place, sharing one new data file — see `pla
 
 **Purpose**: Documentation and final regression confirmation across both packs.
 
-- [ ] T025 [P] Write `docs/adr/0016-expense-rules-engine.md` documenting the decision (shared `data/config/expense-rules.yaml` via `AUTO_DATA_DIR`, duplicated per-pack Go loader/matcher rather than a cross-repo import, additive `Source` auditability), mirroring the style of ADR 0010/0011
-- [ ] T026 [P] Update `packs/gmail/RUNBOOK.md` with an entry for the `categorize` changes (new `rules.go`, `--rules-file` flag, `Source` column)
-- [ ] T027 [P] Update `packs/expenses/RUNBOOK.md` with an entry for the `update-event` changes (new `rules.go`, `--rules-file` flag, `Source` field)
-- [ ] T028 Re-run `quickstart.md` Scenario 0 end-to-end against both packs with an empty `data/config/expense-rules.yaml` to confirm zero regression (SC-005) after all phases are complete
+- [X] T025 [P] Write `docs/adr/0016-expense-rules-engine.md` documenting the decision (shared `data/config/expense-rules.yaml` via `AUTO_DATA_DIR`, duplicated per-pack Go loader/matcher rather than a cross-repo import, additive `Source` auditability), mirroring the style of ADR 0010/0011
+- [X] T026 [P] Update `packs/gmail/RUNBOOK.md` with an entry for the `categorize` changes (new `rules.go`, `--rules-file` flag, `Source` column)
+- [X] T027 [P] Update `packs/expenses/RUNBOOK.md` with an entry for the `update-event` changes (new `rules.go`, `--rules-file` flag, `Source` field)
+- [X] T028 Re-run `quickstart.md` Scenario 0 end-to-end against both packs with an empty `data/config/expense-rules.yaml` to confirm zero regression (SC-005) after all phases are complete — validated: both `gmail categorize` and `expenses update-event`, given an empty rules file, sent every row to the AI and failed at the identical pre-feature point (`DEEPSEEK_API_KEY not set`), confirming byte-identical behavior with zero rules defined
 
 ---
 
