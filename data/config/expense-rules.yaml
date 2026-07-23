@@ -1,0 +1,74 @@
+# Expense classification rules — the shared source of truth for both
+# gmail-categorize and expenses-update-event (specs/002-expense-rules-engine).
+#
+# Rules are evaluated in order; the FIRST enabled, in-scope rule whose match
+# conditions all hold wins (first-match-wins, mirroring the gmail pack's own
+# packs/gmail/config/categorizer_rules.yaml convention). A confirmed match
+# sets its outcome directly — no AI call for that transaction.
+#
+# Per rule:
+#   name          unique identifier; recorded as "rule:<name>" in the
+#                 Source column (gmail transactions.csv) / Source field
+#                 (expenses state.json) for auditability.
+#   description   free-text "why" — not evaluated, documentation only.
+#   enabled       defaults to true; set false to suspend a rule without
+#                 deleting it.
+#   applies_to    which decision(s) this rule may answer: "categorize"
+#                 (gmail-categorize's Category/SubCategory/Labels),
+#                 "event" (expenses-update-event's event-relevance), or both.
+#   match         all stated conditions AND together; at least one required:
+#     merchant_contains   case-insensitive substrings, any-of-list, matched
+#                         against the transaction's merchant/counterparty.
+#     keyword_contains    case-insensitive substrings, any-of-list, matched
+#                         against the transaction's description/subject/info.
+#     day_of_week         list of mon/tue/wed/thu/fri/sat/sun.
+#     time_between        [start, end] as "HH:MM" wall-clock, inclusive.
+#                         Requires the transaction's timestamp to include a
+#                         time component; if it doesn't, this condition
+#                         fails closed (does not match).
+#     amount_between      [min, max], inclusive.
+#   outcome       at least one field required:
+#     category / subcategory   must resolve against config/taxonomy.yaml
+#                              (packs/gmail); an unresolvable value is
+#                              rejected at evaluation time, not silently
+#                              applied.
+#     labels                   filtered/capped against the same taxonomy.
+#     event_relevance          only defined value today: "routine" — tells
+#                              expenses-update-event this transaction is not
+#                              event-worthy.
+#
+# See specs/002-expense-rules-engine/contracts/expense-rules.schema.md for
+# the full contract, and docs/adr/0016-expense-rules-engine.md for why this
+# file lives here.
+
+rules:
+  - name: hungerbox-workplace-food
+    description: >
+      HungerBox is the office cafeteria vendor — every charge from them is
+      workplace food, not a personal dining decision.
+    enabled: true
+    applies_to: [categorize, event]
+    match:
+      merchant_contains: ["hungerbox"]
+    outcome:
+      category: "Food & Drinks"
+      subcategory: "Groceries"
+      labels: ["Work"]
+      event_relevance: routine
+
+  - name: uber-weekday-afternoon-commute
+    description: >
+      Uber taken on a weekday afternoon/evening is the office-to-home
+      commute (no GPS data available — this is a time-of-day heuristic,
+      see specs/002-expense-rules-engine/spec.md Assumptions).
+    enabled: true
+    applies_to: [categorize, event]
+    match:
+      merchant_contains: ["uber"]
+      day_of_week: [mon, tue, wed, thu, fri]
+      time_between: ["13:00", "20:00"]
+    outcome:
+      category: "Transportation"
+      subcategory: "Business trips"
+      labels: ["Work"]
+      event_relevance: routine

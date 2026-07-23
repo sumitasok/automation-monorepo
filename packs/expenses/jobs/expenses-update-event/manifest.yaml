@@ -33,8 +33,8 @@ runtime:
     - AI_PROVIDER
 
 data:
-  reads:  [../gmail/transactions.csv, config/events.json]
-  writes: [config/events.json, state.json]
+  reads:  [../gmail/transactions.csv, config/events.json, ../../data/config/expense-rules.yaml]
+  writes: [config/events.json, state.json]     # state.json gains a Source field (ADR 0016)
 
 health:
   expect_run_every: ""

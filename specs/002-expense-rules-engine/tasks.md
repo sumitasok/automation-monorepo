@@ -33,9 +33,9 @@ Two existing Go packs, extended in place, sharing one new data file — see `pla
 
 **Purpose**: Create the shared rules file and wire both jobs' manifests to declare it as a read dependency, so later phases have a real file to load against.
 
-- [ ] T001 Create `data/config/expense-rules.yaml` with the header comment block and field contract summary from `contracts/expense-rules.schema.md`, starting with an empty `rules: []` (no rules committed yet — later phases add real ones)
-- [ ] T002 [P] Update `packs/gmail/jobs/gmail-categorize/manifest.yaml`'s `data.reads` to add the shared rules file path (per `contracts/cli.md`'s Manifests section)
-- [ ] T003 [P] Update `packs/expenses/jobs/expenses-update-event/manifest.yaml`'s `data.reads` to add the shared rules file path (per `contracts/cli.md`'s Manifests section)
+- [X] T001 Create `data/config/expense-rules.yaml` with the header comment block and field contract summary from `contracts/expense-rules.schema.md`, starting with an empty `rules: []` (no rules committed yet — later phases add real ones)
+- [X] T002 [P] Update `packs/gmail/jobs/gmail-categorize/manifest.yaml`'s `data.reads` to add the shared rules file path (per `contracts/cli.md`'s Manifests section)
+- [X] T003 [P] Update `packs/expenses/jobs/expenses-update-event/manifest.yaml`'s `data.reads` to add the shared rules file path (per `contracts/cli.md`'s Manifests section)
 
 **Checkpoint**: The shared rules file exists (empty) and both manifests declare it; running either job today still behaves identically (nothing loads it yet).
 
@@ -47,7 +47,7 @@ Two existing Go packs, extended in place, sharing one new data file — see `pla
 
 **⚠️ CRITICAL**: US3 cannot begin until this phase is complete. US1, US2, and US4's gmail-side work do not depend on this phase (gmail already has `gopkg.in/yaml.v3`).
 
-- [ ] T004 Add `gopkg.in/yaml.v3` to `packs/expenses/go.mod` (and run `go mod tidy` to populate `go.sum`) — the one new dependency justified in `plan.md`'s Complexity Tracking, needed before any expenses-side rules code can parse `data/config/expense-rules.yaml`
+- [X] T004 Add `gopkg.in/yaml.v3` to `packs/expenses/go.mod` (and run `go mod tidy` to populate `go.sum`) — the one new dependency justified in `plan.md`'s Complexity Tracking, needed before any expenses-side rules code can parse `data/config/expense-rules.yaml`
 
 **Checkpoint**: `packs/expenses` can now import `gopkg.in/yaml.v3`; US3 implementation can begin.
 
@@ -61,14 +61,14 @@ Two existing Go packs, extended in place, sharing one new data file — see `pla
 
 ### Tests for User Story 1
 
-- [ ] T005 [P] [US1] Table-driven tests in `packs/gmail/categorize/rules_test.go` for: loading a well-formed rules file, graceful degrade on a missing file (empty rule set, no error), load-time rejection of a rule with an empty `match` object, `merchant_contains` and `keyword_contains` matching (case-insensitive substring, any-of-list), `enabled: false` rules being skipped, and `applies_to` scoping excluding a rule from the wrong decision type
+- [X] T005 [P] [US1] Table-driven tests in `packs/gmail/categorize/rules_test.go` for: loading a well-formed rules file, graceful degrade on a missing file (empty rule set, no error), load-time rejection of a rule with an empty `match` object, `merchant_contains` and `keyword_contains` matching (case-insensitive substring, any-of-list), `enabled: false` rules being skipped, and `applies_to` scoping excluding a rule from the wrong decision type
 
 ### Implementation for User Story 1
 
-- [ ] T006 [P] [US1] Create `packs/gmail/categorize/rules.go`: `ExpenseRule`, `ExpenseRules`, `MatchCondition`, `Outcome` types (per `data-model.md`) and `LoadExpenseRules(path string) (ExpenseRules, error)` mirroring `discover/rules.go`'s graceful-missing-file convention; implement matching for `merchant_contains` and `keyword_contains` only in this task (day/time/amount conditions arrive in US2)
-- [ ] T007 [US1] Add `RulesFile string` to `categorize.Config` (`packs/gmail/categorize/categorize.go`) and, in `Run()`, load the rules file once, then for each uncategorised item evaluate `applies_to: categorize` rules in file order (first enabled match wins); on match, resolve `category`/`subcategory` via the existing `Taxonomy.Resolve` and `labels` via `Taxonomy.ResolveLabels` exactly as an AI assignment already is, apply the outcome, and remove that item from the batch sent to the AI assigner; on an unresolvable rule outcome, log a warning and let the item fall through to the AI batch instead (depends on T006)
-- [ ] T008 [US1] Add `--rules-file` flag to the `categorize` subcommand in `packs/gmail/main.go`, defaulting to `$AUTO_DATA_DIR/config/expense-rules.yaml` when `AUTO_DATA_DIR` is set, else `../../data/config/expense-rules.yaml` (per `contracts/cli.md`), wired to `categorize.Config.RulesFile` (depends on T007)
-- [ ] T009 [US1] Add the `hungerbox-workplace-food` rule from `contracts/expense-rules.schema.md` to `data/config/expense-rules.yaml`, and manually run `quickstart.md` Scenario 0 (no-rules regression) and Scenario 1 (merchant rule, including the repeat-run determinism check) against a scratch CSV
+- [X] T006 [P] [US1] Create `packs/gmail/categorize/rules.go`: `ExpenseRule`, `ExpenseRules`, `MatchCondition`, `Outcome` types (per `data-model.md`) and `LoadExpenseRules(path string) (ExpenseRules, error)` mirroring `discover/rules.go`'s graceful-missing-file convention; implement matching for `merchant_contains` and `keyword_contains` only in this task (day/time/amount conditions arrive in US2) — *implementation note: the full condition evaluator (including day/time/amount) was written in one pass alongside this task since it's the same function/file; T010/T011 in Phase 4 cover the corresponding test/validation additions rather than re-touching this code separately*
+- [X] T007 [US1] Add `RulesFile string` to `categorize.Config` (`packs/gmail/categorize/categorize.go`) and, in `Run()`, load the rules file once, then for each uncategorised item evaluate `applies_to: categorize` rules in file order (first enabled match wins); on match, resolve `category`/`subcategory` via the existing `Taxonomy.Resolve` and `labels` via `Taxonomy.ResolveLabels` exactly as an AI assignment already is, apply the outcome, and remove that item from the batch sent to the AI assigner; on an unresolvable rule outcome, log a warning and let the item fall through to the AI batch instead (depends on T006)
+- [X] T008 [US1] Add `--rules-file` flag to the `categorize` subcommand in `packs/gmail/main.go`, defaulting to `$AUTO_DATA_DIR/config/expense-rules.yaml` when `AUTO_DATA_DIR` is set, else `../../data/config/expense-rules.yaml` (per `contracts/cli.md`), wired to `categorize.Config.RulesFile` (depends on T007)
+- [X] T009 [US1] Add the `hungerbox-workplace-food` rule from `contracts/expense-rules.schema.md` to `data/config/expense-rules.yaml`, and manually run `quickstart.md` Scenario 0 (no-rules regression) and Scenario 1 (merchant rule, including the repeat-run determinism check) against a scratch CSV — validated: rule-matched rows decided with no AI call, non-matching rows fell through to the AI path identically to pre-feature behavior, re-run produced byte-identical output
 
 **Checkpoint**: User Story 1 is fully functional and independently testable — a merchant rule deterministically decides matching rows in `gmail-categorize` without an AI call.
 
@@ -82,13 +82,13 @@ Two existing Go packs, extended in place, sharing one new data file — see `pla
 
 ### Tests for User Story 2
 
-- [ ] T010 [P] [US2] Extend `packs/gmail/categorize/rules_test.go` with cases for `day_of_week`, `time_between`, and `amount_between` matching, including a transaction whose `TxnDate` has no time component (must fail closed on a `time_between` condition per `research.md` Decision 7) and a malformed/unparseable `TxnDate`
+- [X] T010 [P] [US2] Extend `packs/gmail/categorize/rules_test.go` with cases for `day_of_week`, `time_between`, and `amount_between` matching, including a transaction whose `TxnDate` has no time component (must fail closed on a `time_between` condition per `research.md` Decision 7) and a malformed/unparseable `TxnDate`
 
 ### Implementation for User Story 2
 
-- [ ] T011 [US2] Extend `MatchCondition` evaluation in `packs/gmail/categorize/rules.go` to support `day_of_week`, `time_between`, and `amount_between`, parsing `TxnDate` defensively (date-only vs. `"2006-01-02 15:04:05"`) and failing the specific condition closed — not erroring the whole rule/run — whenever required time data is absent or unparseable (depends on T006/T007)
-- [ ] T012 [US2] Add the `uber-weekday-afternoon-commute` rule from `contracts/expense-rules.schema.md` to `data/config/expense-rules.yaml`
-- [ ] T013 [US2] Manually run `quickstart.md` Scenario 2 against a scratch CSV with one weekday-afternoon Uber row and one weekend/off-hours Uber row, confirming only the former is rule-classified
+- [X] T011 [US2] Extend `MatchCondition` evaluation in `packs/gmail/categorize/rules.go` to support `day_of_week`, `time_between`, and `amount_between`, parsing `TxnDate` defensively (date-only vs. `"2006-01-02 15:04:05"`) and failing the specific condition closed — not erroring the whole rule/run — whenever required time data is absent or unparseable (depends on T006/T007)
+- [X] T012 [US2] Add the `uber-weekday-afternoon-commute` rule from `contracts/expense-rules.schema.md` to `data/config/expense-rules.yaml`
+- [X] T013 [US2] Manually run `quickstart.md` Scenario 2 against a scratch CSV with one weekday-afternoon Uber row and one weekend/off-hours Uber row, confirming only the former is rule-classified — validated: Monday 14:30 Uber matched the commute rule, Saturday 14:30 and Monday 09:00 Uber rows correctly fell through to the AI path
 
 **Checkpoint**: User Stories 1 and 2 both work independently — the gmail-side rules engine now supports the full condition vocabulary from `data-model.md`.
 
