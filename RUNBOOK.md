@@ -4,6 +4,31 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-07-23 23:10 — Specify: Expense Classification Rules Engine (`/speckit-specify`)
+
+**Prompt summary**: User wants a rules engine — human-authored rules like "afternoon Uber = office-to-home work travel" or "merchant HungerBox = workplace food" — to be the basis of how `gmail-categorize` and `expenses-update-event` classify transactions, instead of the AI re-guessing the same recurring patterns every run.
+
+**Files affected**:
+- `specs/002-expense-rules-engine/spec.md` (new) — feature spec: 4 prioritized user stories (merchant rule, time+pattern rule, rules informing event-matching, decision-source auditability), 13 functional requirements, 5 success criteria, and an Assumptions section.
+- `specs/002-expense-rules-engine/checklists/requirements.md` (new) — quality checklist, all items passing.
+- `.specify/feature.json` — repointed `feature_directory` to `specs/002-expense-rules-engine`.
+
+**Steps taken**:
+1. Confirmed no `.specify/extensions.yml` — pre/post-specify hooks skipped silently.
+2. Read both consumer jobs' manifests and Go source (`packs/gmail/categorize/categorize.go`, `packs/expenses/internal/event/matcher.go`) to ground the spec in what data is actually available (merchant, description/subject, amount, TxnDate — no location/GPS) and how each job currently prompts its AI provider.
+3. Confirmed `config/taxonomy.yaml` already has categories/labels (e.g. Transportation/Business trips, "Work" label) that a "work expense" outcome can map onto — no new taxonomy needed.
+4. Resolved what would otherwise be 2-3 [NEEDS CLARIFICATION] markers (rule-vs-AI precedence; conflict resolution between rules) as documented Assumptions instead, since reasonable defaults existed: the user's own global CLAUDE.md instruction to codify recurring decisions to avoid unnecessary AI calls (→ confirmed rule match deterministically skips the AI call), and the existing ordered per-bank filter-file pattern already in `packs/gmail/filters/` (→ first-match-wins precedence).
+5. Ran the spec-quality checklist — all items passed on the first pass, no iteration needed.
+6. Used the top-level `specs/` directory (sequential numbering, next after `001-job-orchestrator`) rather than `packs/gmail`'s own scoped spec-kit instance, since the feature is cross-cutting across both the gmail and expenses packs.
+
+**Outcome**: Spec ready for `/speckit-plan`. No open clarification questions.
+
+**Caveats**:
+- Spec deliberately leaves storage format/location, matching implementation, and how rule evaluation integrates into each job's existing batch-call flow to the planning phase — this is a WHAT/WHY spec only.
+- The "office to home" direction inference is documented as a time-of-day heuristic only (assumption), since no GPS/route data exists in the transaction extract today.
+
+---
+
 ## 2026-07-23 22:44 — Implement: Job Orchestrator (`/speckit-implement`)
 
 **Prompt summary**: Chained from `/speckit-tasks and /speckit-implement` — generate tasks, then implement all 26 of them against the approved plan/spec.
