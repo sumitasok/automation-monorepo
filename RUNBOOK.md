@@ -4,6 +4,36 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-07-23 23:45 — Implement: Expense Classification Rules Engine (`/speckit-plan and /speckit-tasks and /speckit-implement`)
+
+**Prompt summary**: Chained `/speckit-plan and /speckit-tasks and /speckit-implement` against the already-written `specs/002-expense-rules-engine/spec.md` — design, break into tasks, then build all four user stories for real.
+
+**Files affected**:
+- `specs/002-expense-rules-engine/{plan,research,data-model,quickstart}.md`, `contracts/{expense-rules.schema,cli}.md`, `tasks.md` (new) — design artifacts and a 28-task breakdown across 7 phases.
+- `data/config/expense-rules.yaml` (new) — the shared, versioned rules file both packs read; committed with two real, validated rules (`hungerbox-workplace-food`, `uber-weekday-afternoon-commute`).
+- `packs/gmail` (submodule, `sa.automation.gmail`) — `categorize/rules.go` + `rules_test.go` (new): `ExpenseRule`/`ExpenseRules`/`MatchCondition`/`Outcome` types, ordered first-match-wins evaluation, five condition types (merchant/keyword/day-of-week/time-of-day/amount), load-time validation. `categorize.go`: `Run()` evaluates rules before the AI assigner; a fully-resolved match skips the AI entirely. `store/csv.go`: new additive `Source` column. `main.go`: new `--rules-file` flag. `RUNBOOK.md`: new entry.
+- `packs/expenses/internal/event/rules.go` + `rules_test.go` (new) — an independent duplicate of the gmail-side engine (different repo/module boundary, same shared file). `updateevent.go`: `Run()` evaluates `event`-scoped rules before the AI matcher; a `routine` outcome marks the transaction as not event-worthy with zero AI calls. `state.go`: new additive `Source` field on `AssignmentEntry`; `Mark()` call sites across `updateevent.go`/`fillsimilar.go`/`bulkassign.go` all updated. `main.go`: new `--rules-file` flag. `go.mod`/`go.sum`: first external dependency, `gopkg.in/yaml.v3`. `RUNBOOK.md`: new section.
+- `docs/adr/0016-expense-rules-engine.md` (new).
+- Both jobs' `manifest.yaml` — `data.reads` gained the shared rules file.
+
+**Steps taken**:
+1. **Plan**: researched the actual current state of both consumer packs (categorize.go, updateevent.go, taxonomy validation, DeepSeek provider Strategy pattern) before designing, rather than guessing. Key finding during research: corrected a wrong assumption from the spec phase — `gmail-recategorize` operates on a completely different file/domain (`email_catalog.csv`'s sender-domain classification) than transaction category re-classification, so "reuse gmail-recategorize for retroactive re-application" was factually wrong; documented the correction in `research.md` rather than silently reusing the bad assumption.
+2. Chose `data/config/expense-rules.yaml` (read via the already-injected-but-previously-unused `AUTO_DATA_DIR` env var) over both root `config/<pack>/` (git-ignored secrets, wrong meaning) and a pack-local file (not actually shared) — this is the first real consumer of a convention the workspace had documented but nothing used yet.
+3. Chose to duplicate the rule-loading/matching Go code between `packs/gmail` (independently-versioned git submodule) and `packs/expenses` (separate in-repo Go module) rather than share a Go import — following the exact precedent ADR 0011 already set for the DeepSeek-provider Strategy interface.
+4. **Tasks**: broke the plan into Setup → Foundational (only gates US3's new `yaml.v3` dependency) → US1 (P1, merchant rule, MVP) → US2 (P2, time/day conditions) → US3 (P2, event-relevance) → US4 (P3, decision-source auditability) → Polish.
+5. **Implement**: built the full condition evaluator (merchant/keyword/day-of-week/time-of-day/amount, first-match-wins, taxonomy validation, fail-closed time matching) and the `Source`-tagging integration into `Run()` in one coherent pass per pack, rather than artificially splitting a single function's edit across phases — noted this explicitly in `tasks.md` rather than leaving the phase-to-code mapping misleading.
+6. Manually validated every quickstart.md scenario against scratch CSVs/state files at each phase boundary: zero-rules regression (byte-identical failure point to pre-feature behavior), merchant rule, weekday-afternoon-Uber time/day matching (including fail-closed on date-only timestamps), rule outcome vs. taxonomy rejection, event-relevance routine-marking, and `Source` column/field on real (non-dry-run) writes.
+7. Committed incrementally: gmail submodule (US1+US2 code, then the RUNBOOK entry) pushed to its own remote (`sa.automation.gmail`) before bumping the submodule pointer in this repo; expenses (not a submodule) committed directly; parent-repo commits for the shared rules file, manifests, ADR, and tasks.md tracking throughout.
+
+**Outcome**: All 28 tasks across 7 phases complete. `go test ./...` passes in both packs (53 gmail tests, 14 expenses tests, including 32 new rules-engine tests). Both `gmail categorize` and `expenses update-event` gained a `--rules-file` flag; a confirmed rule match now decides Category/SubCategory/Labels (gmail) or event-relevance (expenses) deterministically with zero AI calls, and every decision (rule- or AI-made) is now auditable via a new `Source` column/field.
+
+**Caveats**:
+- Rule-decided rows are held in memory and only persisted at the same single `Save()` call the AI-decided rows already used — consistent with pre-existing behavior, but it means if the AI batch portion of a run errors out, rule-decided rows from that same run are *not* persisted either (matches today's existing all-or-nothing-on-batch-error semantics; not a regression, but worth knowing if a run fails partway).
+- Only two rules are committed so far (`hungerbox-workplace-food`, `uber-weekday-afternoon-commute`) — both validated against real scratch data, but neither has been run against real financial data yet; do that deliberately when ready, same caveat as the orchestrator feature's `gmail-wallet-sync.yaml`.
+- No repo-wide test runner exists in this workspace (same finding as the job-orchestrator feature) — verification was per-pack `go test ./...` plus manual quickstart scenarios.
+
+---
+
 ## 2026-07-23 23:10 — Specify: Expense Classification Rules Engine (`/speckit-specify`)
 
 **Prompt summary**: User wants a rules engine — human-authored rules like "afternoon Uber = office-to-home work travel" or "merchant HungerBox = workplace food" — to be the basis of how `gmail-categorize` and `expenses-update-event` classify transactions, instead of the AI re-guessing the same recurring patterns every run.
