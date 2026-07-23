@@ -1,0 +1,17 @@
+# AI provider profile (ADR 0015) — copy this file to "claude.yaml" in the
+# same directory and fill in your real key. The .yaml (non-.example) copy is
+# gitignored; this template is the only version committed.
+#
+# Use it with any pack that supports the Claude provider, via `auto run`:
+#   ./auto run gmail-extract --ai claude -- --ai-assist
+
+provider: claude           # required — "claude" (aka "anthropic") or "deepseek"
+
+api_key: ""                 # required — your Anthropic API key
+                             # (https://console.anthropic.com/settings/keys)
+
+model: ""                   # optional — overrides the provider's built-in default
+
+api_base: ""                 # optional, advanced — overrides the Anthropic
+                              # Messages API endpoint. Leave empty unless
+                              # you're using a proxy or gateway.

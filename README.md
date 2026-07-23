@@ -26,6 +26,7 @@ keep others private — enforced by `auto doctor`, guaranteed by per-repo access
 ./auto list --visibility shared
 ./auto search backup
 ./auto run hello-report      # run a job (logging, timeout, history)
+./auto run gmail-extract --ai deepseek -- --ai-assist   # inject a named AI credential profile (config/ai/deepseek.yaml)
 ./auto config init gmail     # scaffold a pack's config (values live in config/, git-ignored)
 ./auto config gmail          # show which env/secret values are set vs missing
 ./auto new                   # scaffold a job into a pack (choose private/shared)
@@ -34,6 +35,8 @@ keep others private — enforced by `auto doctor`, guaranteed by per-repo access
 ./auto schedule sync --dry-run
 ./auto log "what I did"
 ./auto doctor                # validate + check for visibility leaks
+./auto serve                 # local dashboard: packs, config status, jobs, command help
+#   or: make serve  (PORT=... to override the default 4321)
 ```
 
 ### Wallet sync (gmail transactions → BudgetBakers Wallet)
@@ -79,6 +82,7 @@ walkthrough and collaborator onboarding: **[docs/SHARING.md](docs/SHARING.md)**.
 - `packs.yaml` — which packs are mounted
 - `machines.yaml` — your computers
 - `data/` — git-synced store: `config/` (YAML), `state/` (SQLite)
+- `config/ai/` — named AI provider profiles (`<name>.yaml`: provider/api_key/model/api_base), used via `auto run <job> --ai <name>` (any pack); see `config/ai/README.md` and `docs/adr/0015`
 - `docs/` — `PLAN.md`, `SHARING.md`, `adr/`, `worklog/`
 
 Design & decisions: `docs/PLAN.md` and `docs/adr/`.

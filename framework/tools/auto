@@ -10,7 +10,7 @@ Usage:
   auto list [--json] [--visibility private|shared|public]
   auto packs
   auto search <term>
-  auto run <id> [-- extra args]
+  auto run <id> [--ai <name>] [-- extra args]
   auto new
   auto catalog                 # workspace catalog (all packs)
   auto share [<pack>]          # write a shareable catalog of a pack's non-private jobs
@@ -18,9 +18,10 @@ Usage:
   auto log "<message>"
   auto doctor                  # validate manifests + enforce visibility rules
   auto bootstrap
+  auto serve [--port N]        # local dashboard: packs, config status, jobs, command help
 """
 from __future__ import annotations
-import argparse, os, platform, re, socket, subprocess, sys, textwrap, datetime, shutil
+import argparse, html, os, platform, re, socket, subprocess, sys, textwrap, datetime, shutil
 from pathlib import Path
 
 try:
@@ -92,6 +93,59 @@ def load_pack_config(pack: dict):
         o = load_yaml(override)
         env.update({str(k): "" if v is None else str(v) for k, v in (o.get("env") or {}).items()})
     return env, files, pack_config_dir(pack["name"])
+
+
+# ---------- AI provider profiles (ADR 0015) ----------------------------------
+def ai_profile_dir() -> Path:
+    """Workspace-local, git-ignored dir holding named AI provider profiles,
+    shared by every pack — see config/ai/README.md."""
+    return WS / "config" / "ai"
+
+def load_ai_profile(name: str) -> dict:
+    """Load and validate config/ai/<name>.yaml: provider, api_key (required),
+    optional model / api_base. Exits with a clear message on any problem —
+    an explicit `--ai <name>` should never fail silently or fall through to
+    some other credential source."""
+    path = ai_profile_dir() / f"{name}.yaml"
+    if not path.exists():
+        sys.exit(f"AI profile '{name}' not found at {path.relative_to(WS)}\n"
+                  f"  copy an example: cp config/ai/deepseek.example.yaml config/ai/{name}.yaml")
+    p = load_yaml(path)
+    provider = str(p.get("provider") or "").strip().lower()
+    api_key = str(p.get("api_key") or "")
+    if not provider:
+        sys.exit(f"AI profile '{name}' ({path.relative_to(WS)}): missing required field 'provider'")
+    if provider not in ("deepseek", "claude", "anthropic"):
+        sys.exit(f"AI profile '{name}' ({path.relative_to(WS)}): unsupported provider '{provider}' "
+                  f"(want \"deepseek\" or \"claude\")")
+    if not api_key:
+        sys.exit(f"AI profile '{name}' ({path.relative_to(WS)}): missing required field 'api_key'")
+    return {"provider": provider, "api_key": api_key,
+            "model": str(p.get("model") or ""), "api_base": str(p.get("api_base") or "")}
+
+def ai_profile_env(name: str) -> dict:
+    """Map a named AI profile to the env vars provider clients already read
+    (DEEPSEEK_API_KEY/DEEPSEEK_MODEL/DEEPSEEK_API_BASE, or the ANTHROPIC_*
+    equivalents), plus AI_PROVIDER. Any pack whose code already reads those
+    (as packs/gmail did before ADR 0015 existed) picks this up with zero
+    per-pack code — that's the point: the profile lives once, `auto run`
+    injects it into whichever job asked for it via --ai <name>."""
+    prof = load_ai_profile(name)
+    provider = prof["provider"]
+    env = {"AI_PROVIDER": "claude" if provider in ("claude", "anthropic") else "deepseek"}
+    if provider == "deepseek":
+        env["DEEPSEEK_API_KEY"] = prof["api_key"]
+        if prof["model"]:
+            env["DEEPSEEK_MODEL"] = prof["model"]
+        if prof["api_base"]:
+            env["DEEPSEEK_API_BASE"] = prof["api_base"]
+    else:  # claude / anthropic
+        env["ANTHROPIC_API_KEY"] = prof["api_key"]
+        if prof["model"]:
+            env["ANTHROPIC_MODEL"] = prof["model"]
+        if prof["api_base"]:
+            env["ANTHROPIC_API_BASE"] = prof["api_base"]
+    return env
 
 
 # ---------- jobs -------------------------------------------------------------
@@ -196,11 +250,15 @@ def cmd_run(args):
     j = get_job(args.id)
     pack = next(p for p in load_packs() if p["name"] == j["_pack"])
     cfg_env, cfg_files, cfg_dir = load_pack_config(pack)
+    ai_env = ai_profile_env(args.ai) if getattr(args, "ai", "") else {}
     # env precedence: pack sample defaults < workspace override < ambient shell env
-    env = {**cfg_env, **os.environ,
+    # < --ai <name> (ADR 0015 — the most specific, explicitly-named choice wins)
+    env = {**cfg_env, **os.environ, **ai_env,
            "AUTO_DATA_DIR": str(DATA), "AUTO_WORKSPACE": str(WS),
            "AUTO_JOB_ID": j["id"], "AUTO_PACK": j["_pack"],
            "AUTO_PACK_CONFIG_DIR": str(cfg_dir)}
+    if ai_env:
+        print(f"   (ai) profile '{args.ai}' loaded — provider: {ai_env.get('AI_PROVIDER')}")
     timeout = (j.get("runtime") or {}).get("timeout_seconds", 600)
     # workdir defaults to the job folder; app-backed jobs set it relative to the pack root
     workdir = j["_dir"]
@@ -379,6 +437,134 @@ def cmd_config(args):
         present = (cfg_dir / f).exists()
         print(f"  file {f}: {'present' if present else 'MISSING — add to ' + str(cfg_dir.relative_to(WS))}")
 
+# ---------- serve (local dashboard) ------------------------------------------
+def _make_targets():
+    """(file, target, help) for every `target: ... ## help` line in every Makefile in the workspace."""
+    rows = []
+    for mf in sorted(WS.rglob("Makefile")):
+        if any(part in (".git", "node_modules") for part in mf.parts):
+            continue
+        try:
+            text = mf.read_text()
+        except Exception:
+            continue
+        for line in text.splitlines():
+            m = re.match(r'^([a-zA-Z0-9_-]+):.*?##\s?(.*)$', line)
+            if m:
+                rows.append((str(mf.relative_to(WS)), m.group(1), m.group(2)))
+    return rows
+
+def _config_status(pack):
+    env, files, cfg_dir = load_pack_config(pack)
+    env_rows = [(k, "shell" if os.environ.get(k) else ("override/sample" if v else "MISSING")) for k, v in env.items()]
+    file_rows = [(f, (cfg_dir / f).exists()) for f in files]
+    return env_rows, file_rows
+
+def _dashboard_html():
+    packs = load_packs()
+    jobs = load_jobs()
+    mach = current_machine()
+
+    pack_blocks = []
+    for p in packs:
+        exists = "ok" if p["_path"].exists() else "MISSING"
+        env_rows, file_rows = _config_status(p)
+        env_html = "".join(
+            f"<tr><td>{html.escape(k)}</td><td class=\"{'ok' if v != 'MISSING' else 'bad'}\">{v}</td></tr>"
+            for k, v in env_rows
+        ) or "<tr><td colspan=2><em>none declared</em></td></tr>"
+        file_html = "".join(
+            f"<tr><td>{html.escape(f)}</td><td class=\"{'ok' if present else 'bad'}\">{'present' if present else 'MISSING'}</td></tr>"
+            for f, present in file_rows
+        ) or "<tr><td colspan=2><em>none declared</em></td></tr>"
+        pack_blocks.append(f"""
+        <div class="card">
+          <h3>{html.escape(p['name'])} <span class="tag">{pack_default_vis(p)}</span>
+              <span class="tag">{'writable' if p.get('writable') else 'read-only'}</span>
+              <span class="{'ok' if exists == 'ok' else 'bad'}">{exists}</span></h3>
+          <p class="path">{html.escape(p['path'])}</p>
+          <table><tr><th colspan=2>env</th></tr>{env_html}</table>
+          <table><tr><th colspan=2>files</th></tr>{file_html}</table>
+        </div>""")
+
+    def sched_of(j):
+        sch = j.get("schedule") or {}
+        return sch.get("cron") if sch.get("enabled") and sch.get("cron") else "(manual)"
+
+    job_rows = "".join(
+        f"<tr><td>{html.escape(j.get('id',''))}</td><td>{html.escape(j['_pack'])}</td>"
+        f"<td>{html.escape(j['_visibility'])}</td><td>{html.escape(j.get('language',''))}</td>"
+        f"<td>{html.escape(sched_of(j))}</td><td>{html.escape(j.get('name',''))}</td></tr>"
+        for j in sorted(jobs, key=lambda x: (x["_pack"], x.get("id", "")))
+    ) or "<tr><td colspan=6><em>no jobs yet — auto new</em></td></tr>"
+
+    cmd_rows = "".join(
+        f"<tr><td>{html.escape(f)}</td><td><code>make {html.escape(t)}</code></td><td>{html.escape(h)}</td></tr>"
+        for f, t, h in _make_targets()
+    ) or "<tr><td colspan=3><em>no Makefile targets found</em></td></tr>"
+
+    auto_usage = ""
+    if __doc__ and "Usage:" in __doc__:
+        auto_usage = html.escape(textwrap.dedent(__doc__.split("Usage:", 1)[1]).strip())
+
+    return f"""<!doctype html>
+<html><head><meta charset="utf-8"><title>auto — workspace dashboard</title>
+<style>
+ body{{font-family:-apple-system,Helvetica,Arial,sans-serif;max-width:1000px;margin:2rem auto;padding:0 1rem;color:#1a1a1a;background:#fafafa}}
+ h1{{font-size:1.4rem}} h2{{margin-top:2.5rem;border-bottom:1px solid #ddd;padding-bottom:.3rem}}
+ .card{{background:#fff;border:1px solid #ddd;border-radius:8px;padding:1rem;margin:1rem 0}}
+ .tag{{display:inline-block;font-size:.7rem;background:#eee;border-radius:4px;padding:.1rem .4rem;margin-left:.4rem;vertical-align:middle}}
+ .ok{{color:#0a7a2f}} .bad{{color:#b3261e;font-weight:600}}
+ table{{border-collapse:collapse;width:100%;margin:.5rem 0;font-size:.85rem}}
+ th,td{{text-align:left;padding:.25rem .5rem;border-bottom:1px solid #eee}}
+ th{{color:#666;font-weight:600}}
+ code{{background:#eee;padding:.1rem .3rem;border-radius:3px}}
+ .path{{color:#666;font-size:.8rem;margin:.2rem 0 .6rem}}
+ pre{{background:#fff;border:1px solid #ddd;border-radius:8px;padding:1rem;overflow-x:auto;font-size:.8rem}}
+ .meta{{color:#666;font-size:.85rem}}
+</style></head>
+<body>
+<h1>automation workspace — {html.escape(WS.name)}</h1>
+<p class="meta">os: {this_os()} &middot; host: {html.escape(socket.gethostname())} &middot;
+   machine: {html.escape(mach['id']) if mach else 'unregistered'} &middot; regenerated fresh on every reload</p>
+
+<h2>Packs &amp; config</h2>
+{''.join(pack_blocks)}
+
+<h2>Jobs ({len(jobs)})</h2>
+<table><tr><th>id</th><th>pack</th><th>visibility</th><th>lang</th><th>schedule</th><th>name</th></tr>{job_rows}</table>
+
+<h2>Commands</h2>
+<table><tr><th>Makefile</th><th>target</th><th>help</th></tr>{cmd_rows}</table>
+
+<h3>auto CLI usage</h3>
+<pre>{auto_usage}</pre>
+</body></html>"""
+
+def cmd_serve(args):
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = _dashboard_html().encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, fmt, *a):
+            pass  # quiet — read-only, localhost-only dashboard; see ADR 0012
+
+    httpd = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    print(f"serving workspace dashboard on http://127.0.0.1:{args.port}  (Ctrl+C to stop)")
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        print("\nstopped")
+    finally:
+        httpd.server_close()
+
 def cmd_bootstrap(args):
     print(f"workspace = {WS}")
     print(f"os = {this_os()}, hostname = {socket.gethostname()}")
@@ -451,8 +637,31 @@ def _sync_windows(due, dry):
     print(f"wrote {(GEN / 'install-tasks.bat').relative_to(WS)}" + ("" if dry else " — run it to register tasks"))
 
 
+def _extract_ai_flag(argv: list[str]) -> tuple[list[str], str]:
+    """Pull `--ai NAME` / `--ai=NAME` out of argv before argparse sees it
+    (ADR 0015), so it never has to coexist with `run`'s own bare `--`
+    separator inside argparse itself: a `nargs='*'` positional plus another
+    named option on the same subparser has unreliable `--` handling across
+    Python versions (verified broken on 3.10; fixed upstream in 3.13, but
+    this script's shebang can't assume that). Returns (remaining argv, name),
+    name == "" if --ai wasn't given."""
+    out, ai, i = [], "", 0
+    while i < len(argv):
+        tok = argv[i]
+        if tok == "--ai" and i + 1 < len(argv):
+            ai = argv[i + 1]; i += 2; continue
+        if tok.startswith("--ai="):
+            ai = tok[len("--ai="):]; i += 1; continue
+        out.append(tok); i += 1
+    return out, ai
+
 # ---------- arg parsing ------------------------------------------------------
 def main():
+    argv = sys.argv[1:]
+    ai_name = ""
+    if argv and argv[0] == "run":
+        argv, ai_name = _extract_ai_flag(argv)
+
     p = argparse.ArgumentParser(prog="auto", description="automation-framework CLI")
     sub = p.add_subparsers(dest="cmd", required=True)
     lp = sub.add_parser("list"); lp.add_argument("--json", action="store_true"); lp.add_argument("--visibility", choices=VISIBILITIES)
@@ -464,10 +673,12 @@ def main():
     lgp = sub.add_parser("log"); lgp.add_argument("message")
     scp = sub.add_parser("schedule"); scp.add_argument("action"); scp.add_argument("--dry-run", action="store_true")
     cfp = sub.add_parser("config"); cfp.add_argument("action", choices=["status", "init"], nargs="?", default="status"); cfp.add_argument("pack")
-    a = p.parse_args()
+    svp = sub.add_parser("serve"); svp.add_argument("--port", type=int, default=4321)
+    a = p.parse_args(argv)
+    a.ai = ai_name  # only meaningful for cmd == "run" (ADR 0015)
     {"list": cmd_list, "packs": cmd_packs, "search": cmd_search, "run": cmd_run, "new": cmd_new,
      "catalog": cmd_catalog, "share": cmd_share, "log": cmd_log, "doctor": cmd_doctor,
-     "bootstrap": cmd_bootstrap, "schedule": cmd_schedule, "config": cmd_config}[a.cmd](a)
+     "bootstrap": cmd_bootstrap, "schedule": cmd_schedule, "config": cmd_config, "serve": cmd_serve}[a.cmd](a)
 
 if __name__ == "__main__":
     main()

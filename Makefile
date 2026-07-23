@@ -51,6 +51,10 @@ catalog: ## regenerate CATALOG.md
 doctor: ## validate manifests + check for visibility leaks
 	$(AUTO) doctor
 
+.PHONY: serve
+serve: ## start local dashboard: packs, config status, jobs, command help — http://127.0.0.1:$(or $(PORT),4321) (Ctrl+C to stop)
+	$(AUTO) serve $(if $(PORT),--port $(PORT),)
+
 .PHONY: schedule-sync
 schedule-sync: ## install/refresh OS schedules for enabled jobs
 	$(AUTO) schedule sync
