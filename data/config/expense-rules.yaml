@@ -82,3 +82,11 @@ rules:
       category: "Transportation"
       subcategory: "Taxi"
       labels: []
+  - name: uber-india-syste-pvt-l-routine
+    description: >
+      Captured from a comment-driven correction on 2026-07-25.
+    applies_to: [event]
+    match:
+      merchant_contains: ["UBER INDIA SYSTE PVT L"]
+    outcome:
+      event_relevance: routine
