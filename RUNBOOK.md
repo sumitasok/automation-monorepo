@@ -4,6 +4,28 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-07-25 — Implement: Gmail Transactions Editor UI (`/speckit-implement #004`)
+
+**Prompt summary**: Completed the `/speckit-implement` chain started earlier this session (plan → tasks → implement) for feature 004: a local web UI to view `data/gmail/transactions.csv` newest-first and edit its annotation fields.
+
+**Files affected**:
+- `packs/gmail` (submodule, own branch `feature/transaction-editor-ui`, commit `062ed7a`) — see that repo's own `RUNBOOK.md` entry for the full breakdown: `store/csv.go`'s new `SetAnnotation`, the new `webui/` package (server, templates, static JS/CSS), `main.go`'s `serve` subcommand, `Makefile`'s `serve` target.
+- `specs/004-transaction-editor-ui/tasks.md` — all 27 tasks marked `[X]`.
+- `specs/004-transaction-editor-ui/research.md` — added a "Correction found during implementation" note under decision §6: the original assumption that `TxnDate` is always normalised turned out to be false for a couple of legacy rows in the real data.
+
+**Steps taken**:
+1. Implemented all 27 tasks directly (Setup → Foundational → US1 → US2 → US3 → Polish), reusing `store.CSVStore` throughout rather than a new data layer.
+2. Ran `go build ./... && go vet ./... && go test ./...` after implementation — all packages pass (webui: 9 top-level tests including subtests).
+3. Ran the quickstart validation against a **scratch copy** of the real `data/gmail/transactions.csv` (never the submodule's actual file) via `go run . serve` + `curl`: confirmed newest-first ordering, edit-and-persist (with `Source` correctly flipping to `"user"`), whitespace-only-category rejected with `422`, a touched-mtime save correctly rejected with `409`, an unknown `MessageID` correctly rejected with `404`, and merchant filtering (including a no-match empty-array case).
+4. Ordering validation against the real data surfaced a genuine bug: two legacy rows have a `TxnDate` `parser.NormaliseDate` couldn't parse and returned unchanged (`"Jul 22, 2024 05:46 PM"`, `"17/07/XXXX"`) — a plain string sort put a 2024 transaction ahead of every 2026 one. Fixed with an `isNormalisedDate` guard in `webui/server.go` (also applied to the `from`/`to` date filter for the same reason) and added a regression test before moving on.
+5. Confirmed via `git -C data/gmail status`/`diff` that the real submodule data was untouched throughout.
+
+**Outcome**: Feature complete. All tests green, quickstart scenarios verified against realistic data, one real bug found and fixed by actually running the feature rather than only unit-testing synthetic inputs.
+
+**Caveats**:
+- `packs/gmail`'s `feature/transaction-editor-ui` branch and this monorepo's are both still local — no push/MR yet, per the phase-separation decision made during `/speckit-specify`. Both are now ready for that step whenever the user wants to raise it for review.
+- No `.specify/extensions.yml` at the monorepo root, so no before/after-implement hooks ran.
+
 ## 2026-07-25 — Tasks: Gmail Transactions Editor UI (`/speckit-tasks #004`)
 
 **Prompt summary**: Continuation of the same `/speckit-implement` request — plan was done, now generating the task breakdown before implementing.
