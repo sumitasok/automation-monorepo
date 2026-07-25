@@ -4,6 +4,21 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-07-25 — Fix: serve's empty transaction list (feature 004 follow-up)
+
+**Prompt summary**: User ran `make serve` from inside the worktree as instructed, but the UI showed "No transactions to show." Traced to `serve`'s `--csv` default being the bare `transactions.csv`, which only resolves to real data when `auto run` injects it — running directly (`go run .`/`make`), no such file exists in `packs/gmail/`. The user asked for a `--data-dir` flag, matching the `AUTO_DATA_DIR` pattern this pack already uses for `--rules-file`.
+
+**Files affected**:
+- `packs/gmail` (submodule, `feature/transaction-editor-ui`, commit `09f2aca`) — `main.go`: `runServe` gains `--data-dir`; new `defaultServeCSVPath` resolves the CSV path the same way `defaultRulesFile` resolves `expense-rules.yaml` (explicit `--data-dir` → `AUTO_DATA_DIR` env → `../../data/gmail/transactions.csv` fallback). `RUNBOOK.md`: documented.
+
+**Steps taken**:
+1. Diagnosed two separate issues across this conversation: (a) the workspace root already has its own unrelated `make serve` → `./auto serve` (a pre-existing "workspace dashboard" on port 4321) — a naming collision, not a bug; (b) once running the right command from the right place, `serve`'s CSV default didn't match this pack's own established `AUTO_DATA_DIR`-aware convention used by every other data-path flag.
+2. Fixed (b) by mirroring `defaultRulesFile`'s exact resolution order, then verified live: plain `go run . serve` (zero flags) and `go run . serve --data-dir ../../data` both now load all 475 real transactions, newest (`2026-07-24 19:29:32`, Blinkit) first.
+
+**Outcome**: `make serve` / `go run . serve` now work with no flags from inside the feature worktree, opening the real `data/gmail/transactions.csv`.
+
+**Caveats**: unchanged from the prior entry — still local-only branches on both repos, no push/MR yet.
+
 ## 2026-07-25 — Implement: Gmail Transactions Editor UI (`/speckit-implement #004`)
 
 **Prompt summary**: Completed the `/speckit-implement` chain started earlier this session (plan → tasks → implement) for feature 004: a local web UI to view `data/gmail/transactions.csv` newest-first and edit its annotation fields.
