@@ -4,6 +4,25 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-07-25 — Tasks: Gmail Transactions Editor UI (`/speckit-tasks #004`)
+
+**Prompt summary**: Continuation of the same `/speckit-implement` request — plan was done, now generating the task breakdown before implementing.
+
+**Files affected**:
+- `specs/004-transaction-editor-ui/tasks.md` (new) — 27 tasks across Setup → Foundational → US1 (P1, MVP) → US2 (P1) → US3 (P2) → Polish.
+
+**Steps taken**:
+1. Mapped `research.md`'s 7 decisions and `data-model.md`'s field table/`SetAnnotation` signature/API shape into concrete, file-scoped tasks.
+2. Ordered Foundational work so the store-layer change (`SetAnnotation`) and the server/mapping/sort scaffolding both land before any user story, since every story's handler depends on them.
+3. Kept User Story 2 (edit) implementable and independently testable via raw `PATCH` requests even before User Story 1's rendering exists, and User Story 3 (filter) as a pure extension of User Story 1's list handler rather than a new endpoint.
+4. Followed this repo's established practice of tests-alongside-each-change (not a strict TDD-first gate, since the spec didn't request one) — every task touching behavior has a paired test task.
+
+**Outcome**: 27 tasks generated, all in strict checklist format (`- [ ] T0NN [P?] [USn?] description + file path`). MVP scope = Setup + Foundational + US1 (T001–T015). Proceeding to `/speckit-implement`.
+
+**Caveats**:
+- No `.specify/extensions.yml` in this repo, so no before/after-tasks hooks ran.
+- Still no push/MR for `feature/transaction-editor-ui` — deferred until implementation is complete and ready for review.
+
 ## 2026-07-25 — Plan: Gmail Transactions Editor UI (`/speckit-plan #004`)
 
 **Prompt summary**: User ran `/speckit-implement` for feature 004, which had only a spec (no plan/tasks yet). Asked and confirmed: run `/speckit-plan` then `/speckit-tasks` first, then proceed to implement.
