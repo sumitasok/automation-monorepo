@@ -53,3 +53,7 @@ data/state/*.db
 *.sqlite-journal
 *.sqlite-wal
 *.sqlite-shm
+
+# Speckit worktree/feature tracking — local-only, machine-specific
+.claude/spec-map.json
+.worktrees/
