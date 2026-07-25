@@ -4,6 +4,24 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-07-25 — Fix: serve's default CSV path made consistent with siblings (feature 004 follow-up 2)
+
+**Prompt summary**: User rejected the previous fix's `../../data/gmail/transactions.csv` fallback as "not correct at all." Clarified via a follow-up question: the objection was inconsistency with `categorize`/`discover`, which default `--csv` to a plain `transactions.csv` in the current directory — `serve` should match that, not special-case a workspace-relative guess. Separately, the user's own attempt to pass `--data-dir` directly to `make serve` failed because this Makefile only forwards extra flags via `ARGS=`.
+
+**Files affected**:
+- `packs/gmail` (submodule, `feature/transaction-editor-ui`, commit `5cabbbb`) — `main.go`: `defaultServeCSVPath`'s no-flag/no-env fallback changed from a hardcoded `../../data/gmail/transactions.csv` back to the shared `csvFile` constant (plain `"transactions.csv"`), matching every sibling subcommand. `--data-dir`/`AUTO_DATA_DIR` resolution unchanged. `RUNBOOK.md`: corrected.
+
+**Steps taken**:
+1. Asked a clarifying question rather than guessing which of three plausible objections (portability of a hardcoded relative path, wrong data location, inconsistency with siblings) the user meant — answer was inconsistency with siblings.
+2. Reverted the fallback to `csvFile`, keeping `--data-dir`/`AUTO_DATA_DIR` as the only two ways to point `serve` at a shared data directory (same as `--rules-file`).
+3. Verified live: `--data-dir=$HOME/.../data` (passed correctly via `make serve ARGS="--data-dir=..."`) resolves real data; plain `go run . serve` with no flags now correctly shows an empty list from `packs/gmail/`'s own directory, matching `categorize`/`discover`.
+
+**Outcome**: `serve`'s CSV resolution is now consistent with its sibling subcommands. Getting real data requires `--data-dir`, `AUTO_DATA_DIR`, or `--csv` explicitly — by design, matching the rest of this pack.
+
+**Caveats**: unchanged from prior entries — still local-only branches on both repos, no push/MR yet. `make serve --flag=value` (flag passed directly, not via `ARGS=`) will always fail with a `make` "unrecognized option" error — this is `make`'s own argument parsing, not something fixable in this pack's Makefile without changing its whole flag-passing convention.
+
+---
+
 ## 2026-07-25 — Fix: serve's empty transaction list (feature 004 follow-up)
 
 **Prompt summary**: User ran `make serve` from inside the worktree as instructed, but the UI showed "No transactions to show." Traced to `serve`'s `--csv` default being the bare `transactions.csv`, which only resolves to real data when `auto run` injects it — running directly (`go run .`/`make`), no such file exists in `packs/gmail/`. The user asked for a `--data-dir` flag, matching the `AUTO_DATA_DIR` pattern this pack already uses for `--rules-file`.
