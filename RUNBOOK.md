@@ -4,6 +4,30 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-07-25 — Plan: Gmail Transactions Editor UI (`/speckit-plan #004`)
+
+**Prompt summary**: User ran `/speckit-implement` for feature 004, which had only a spec (no plan/tasks yet). Asked and confirmed: run `/speckit-plan` then `/speckit-tasks` first, then proceed to implement.
+
+**Files affected**:
+- `specs/004-transaction-editor-ui/plan.md` — Technical Context, Constitution Check (constitution.md is unfilled template — fell back to this repo's observable conventions: reuse-existing-code, stdlib-first, additive-schema-only), single-project structure decision (extend `packs/gmail`, no separate frontend toolchain).
+- `specs/004-transaction-editor-ui/research.md` — 7 decisions: reuse `CSVStore` over a new data layer; new `SetAnnotation` method and its precise effect on `Source`/`CommentConsidered` (only touches `Source` when Category/SubCategory/Labels actually change, never touches `CommentConsidered` — preserves spec 003's `NeedsReclassification()` dirty-check untouched); stdlib `net/http`+`html/template`, no router library; server-rendered HTML + vanilla JS, no npm/React; row identity via `MessageID` not in-memory `Index`; sort by `TxnDate` string-lexicographic descending (already normalised by `parser.NormaliseDate`); staleness via file-mtime token rather than OS-level locking.
+- `specs/004-transaction-editor-ui/data-model.md` — read-only vs. editable field table, validation rules, the `SetAnnotation` signature, API resource shape.
+- `specs/004-transaction-editor-ui/contracts/transactions-api.md` — `GET /`, `GET /api/transactions` (list/filter), `PATCH /api/transactions/{messageId}` (edit), staleness-token (`loadedAt`) mechanics.
+- `specs/004-transaction-editor-ui/quickstart.md` — six runnable validation scenarios mapped to the spec's user stories/success criteria.
+
+**Steps taken**:
+1. Ran `check-prerequisites.sh` (from a prior `/speckit-implement` attempt) — confirmed no `plan.md` existed yet.
+2. Initialized the `packs/gmail` and `data/gmail` submodules inside the worktree (weren't checked out by `git worktree add`) to read the actual `store.CSVStore`/`Record` API (`packs/gmail/store/csv.go`) rather than guessing its shape.
+3. Confirmed `TxnDate` is already normalised to `YYYY-MM-DD[ HH:MM:SS]` by `parser.NormaliseDate`, so a lexicographic sort is a correct chronological sort — no new date-parsing needed.
+4. Designed the `Source`-vocabulary extension (`"user"`) and the split between "editing Category/SubCategory/Labels changes who decided the classification" vs. "editing Note/UserComment must not disturb spec 003's existing dirty-check" — the one genuinely non-obvious design decision in this plan.
+5. Chose a stdlib-only, single-binary approach (Go `net/http` + `html/template` + vanilla JS) over adding a frontend toolchain, since none exists anywhere in this repo today.
+
+**Outcome**: Design complete — research, data model, API contract, and quickstart all written. Constitution check passes (no ratified gates; repo conventions honored). Proceeding to `/speckit-tasks`.
+
+**Caveats**:
+- No `.specify/extensions.yml` in this repo, so no before/after-plan hooks ran.
+- This commit stays local to `feature/transaction-editor-ui`; still no push/MR (per the phase-separation decision recorded in the `/speckit-specify` entry below) until there's real implementation to review.
+
 ## 2026-07-25 — Specify: Gmail Transactions Editor UI (`/speckit-specify`)
 
 **Prompt summary**: "lets add a UI capability where a tab is dedicated to data in data/gmail/transactions. i should be able to edit the values of the transactions in the ui. shwo the latest event first" — request for a new web UI feature, not yet implemented.
