@@ -67,6 +67,43 @@ full feature spec.
    read to confirm this), so this is the correct, dependency-free way to
    draw that line.
 
+## Amendment — 2026-07-25: header/data mislabeling incident and fix
+
+Widening `csvHeader` to 20 columns (decision 3 above) exposed a latent bug
+in `store.NewCSVStore`'s header-merge logic, predating this feature: it
+decided whether to trust the file's on-disk header or gmail's built-in one
+by comparing raw **length**, not column **names**. `data/gmail/transactions.csv`
+had accumulated a stale on-disk header ending `...,EventID,EventDescription`
+(the expenses pack's `--write-csv` enrichment, ADR 0011) from before `Note`/
+`Source` existed. Once the built-in header's width reached, and then this
+feature pushed it past, the file's on-disk width, the length comparison
+picked the built-in header unconditionally — silently relabelling every
+row's `EventID` value as `Note` and `EventDescription` as `Source`. For one
+row, this went further: its real forwarded-note text
+(ADR 0013) was overwritten with empty values on a subsequent write.
+
+This was caught by the user inspecting the live data file, not by any test —
+the existing test suite only ever built headers matching the current
+built-in schema, so a stale-but-equal/lesser-width file header was never
+exercised. **Fix**: `NewCSVStore` now merges the on-disk header with the
+built-in one **by name** (`mergeHeader`/`remapRow`/`indexOfString`, in
+`packs/gmail/store/csv.go`) — gmail's own columns keep their fixed
+positions regardless of the file's on-disk width; genuinely foreign trailing
+columns (anything not in gmail's own schema) are preserved under their own
+name instead of being repositioned. A regression test
+(`TestNewCSVStorePreservesForeignColumnsByName`) reproduces the exact
+same-width collision. The live data file was repaired (one row's note text
+restored from git history; 70 rows' mislabelled cells cleared back to empty
+— their real event assignments were confirmed intact in
+`packs/expenses/state.json`, the canonical source, throughout) using the
+fixed `CSVStore` code itself (`SetNote`/`SetEnrichment`/`Save`), not a
+hand-edited CSV, so output formatting stayed consistent with normal writes.
+
+**Lesson for future schema growth**: any future column addition to
+`csvHeader` should get a test that opens a *shorter- or equal-width* legacy
+file header (not just the current schema) to catch this class of bug before
+it reaches real data again.
+
 ## Consequences
 
 - Zero comments ever written reproduces today's (post-ADR-0016) behavior
