@@ -4,6 +4,35 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-07-25 — Plan, Tasks, Implement: User Comments Inform Transaction Classification (`/speckit-plan #003`, `/speckit-tasks #003`, `/speckit-implement #003`)
+
+**Prompt summary**: Chained `/speckit-plan #003`, `/speckit-tasks #003`, `/speckit-implement #003` against the already-written `specs/003-transaction-user-comments/spec.md` — design, break into tasks, then build all six user stories for real, across both `packs/gmail` and `packs/expenses`.
+
+**Files affected**:
+- `specs/003-transaction-user-comments/{plan,research,data-model,quickstart}.md`, `contracts/{cli,rule-capture}.md`, `tasks.md` (new) — design artifacts and a 57-task breakdown across 9 phases, all marked complete.
+- `packs/gmail` (submodule, `sa.automation.gmail`, own commit `5b2a832`) — `store/csv.go`: additive `UserComment`/`CommentConsidered` columns, `Record.NeedsReclassification()`, `SetEnrichment` gains a comment-snapshot param, fetch re-runs now also preserve `Source`/comment columns in place. `categorize/deepseek.go`+`categorize.go`: `Item.Comment` (omitempty), descriptive-context-only system-prompt sentence, a present comment always bypasses `expense-rules.yaml` matching for that row, `Source` gains a `+comment` suffix. `categorize/suggest.go` (new): `--suggest-similar` interactive-only retroactive-suggestion walk. `categorize/rulecapture.go` (new): interactive prompt to capture an approved correction as a new, git-committed `expense-rules.yaml` rule (git-clean precondition, hand-appended YAML preserving existing bytes). `categorize/interactive.go` (new): stdlib-only TTY check. `main.go`: `--suggest-similar` flag. New/extended tests: `store/csv_test.go`, `categorize/{categorize,suggest,rulecapture}_test.go`. `RUNBOOK.md`: new entry.
+- `packs/expenses/internal/event/{state,matcher,updateevent}.go` — mirror shape: `Comment` field on `AssignmentEntry`, comment-aware `Item`, comment-bypasses-`routine`-rule precedence, `Source` `+comment` suffix, `needsReprocessing()` selection predicate. `internal/event/{suggest,rulecapture,interactive}.go` (new) — independent copies of the gmail-side Story 5/6 flows (spec 002 precedent: duplicated code, shared data, across the two independently-versioned repos); event-side rule capture only ever writes `event_relevance: routine` (no per-event outcome field exists in the rules engine). `internal/csvtxn/csvtxn.go`: read-only `UserComment` mirror. `internal/event/{bulkassign,fillsimilar}.go`: updated call sites for `State.Mark`'s new `comment` parameter (no behavior change on those paths). `main.go`: `--suggest-similar` flag. New tests: `internal/event/{state,updateevent,suggest,rulecapture}_test.go`. `RUNBOOK.md`: new section.
+- `docs/adr/0017-user-comment-driven-classification.md` (new).
+- `notes/2026-07-25_transaction-user-comments-validation.md` (new) — implementation & validation summary.
+- Both packs' `jobs/*/manifest.yaml`: `data.reads`/`data.writes` and descriptions updated for the new columns/fields and the conditional `expense-rules.yaml` write path.
+
+**Steps taken**:
+1. Read `specs/002-expense-rules-engine`'s plan/research/data-model/contracts and the actual current code in both packs (already carrying spec 002's rules engine and `Source` tracking) as the precedent to extend, per this repo's established "reuse existing code, extend rather than replace" convention.
+2. Wrote Phase 0/1 design artifacts: 12 numbered research decisions (comment-column placement, dirty-tracking via a value-snapshot column/field rather than a hash or timestamp, comment-always-bypasses-rule precedence, defensive AI-input framing, `Source` suffix vocabulary, stdlib-only TTY detection, candidate-selection rules for Story 5, git-commit mechanics for Story 6), data model, two CLI/rule-capture contracts, and a 10-scenario quickstart.
+3. Generated `tasks.md`: 57 tasks across Setup → Foundational → US1 → US2 → US4 → US3 → US5 → US6 → Polish, matching the spec's own priority ordering (P1 stories first as the MVP, P2/P3 layered on top).
+4. Implemented all 57 tasks directly (no sub-agent delegation — small enough to do inline with full context already loaded): additive schema changes in both packs first, then each user story's `Run()` changes, then the two new interactive-only flows (`suggest.go`, `rulecapture.go`) and their CLI flags, then documentation/ADR/manifest polish.
+5. Added table-driven unit tests alongside every change — comment dirty-tracking, rule-bypass precedence, candidate-selection logic, and git-backed rule capture exercised against real temporary git repositories (`git init`/`commit`/`status --porcelain` in `t.TempDir()`).
+6. Ran `go build ./... && go vet ./... && go test ./...` in both packs after every phase; final state: `packs/gmail` 67 tests passing across 8 packages, `packs/expenses` 26 tests passing across 3 packages, both `go vet`-clean.
+7. Committed and pushed `packs/gmail` (its own git repo) first, then staged and committed the root repo — deliberately leaving the pre-existing, unrelated `data/gmail` submodule-pointer change (present before this session started) unstaged rather than folding it into this feature's commit.
+
+**Outcome**: All six user stories implemented and unit-tested. Zero comments ever written reproduces pre-feature behavior exactly (every new code path gates on a non-empty, trimmed comment, or on `isInteractive()` for Stories 5/6) — the same zero-regression bar spec 002 set for itself.
+
+**Caveats**:
+- No `DEEPSEEK_API_KEY` and no real terminal (TTY) were available in this environment, so the AI-calling paths (Stories 1/2/4) were verified via stub `Assigner`/`Matcher` implementations that record the `Item` they were sent, and the interactive approve/skip and rule-capture prompts (Stories 5/6) were verified by unit-testing the pure logic they call into (`suggestCandidates`, `captureRule` against real temp git repos) rather than the prompts themselves end-to-end. Running `quickstart.md` Scenarios 1, 2, 8, and 9 for real — with a live API key, from an actual terminal, against a scratch copy of `transactions.csv` — is a reasonable next step before relying on this against real financial data.
+- Event-side rule capture (Story 6, `packs/expenses`) can only ever produce an `event_relevance: routine` rule — the rules engine has no per-event outcome field, so a correction that lands on a *specific* event (not "no event") is never offered a rule-capture prompt, only Story 5 suggestions.
+
+---
+
 ## 2026-07-25 — Specify: User Comments Inform Transaction Classification (`/speckit-specify`)
 
 **Prompt summary**: User wants a `user_comment` field addable directly to `transactions.csv` after gmail extraction, which `gmail-categorize` and `expenses-update-event` should read as AI input when deciding category/event — with the user's own explicit caveat that they were "assuming" a comment on one transaction would also somehow influence classification of other, similar transactions.
