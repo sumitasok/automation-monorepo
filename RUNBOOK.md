@@ -4,6 +4,129 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-07-25 — Fix: serve's default CSV path made consistent with siblings (feature 004 follow-up 2)
+
+**Prompt summary**: User rejected the previous fix's `../../data/gmail/transactions.csv` fallback as "not correct at all." Clarified via a follow-up question: the objection was inconsistency with `categorize`/`discover`, which default `--csv` to a plain `transactions.csv` in the current directory — `serve` should match that, not special-case a workspace-relative guess. Separately, the user's own attempt to pass `--data-dir` directly to `make serve` failed because this Makefile only forwards extra flags via `ARGS=`.
+
+**Files affected**:
+- `packs/gmail` (submodule, `feature/transaction-editor-ui`, commit `5cabbbb`) — `main.go`: `defaultServeCSVPath`'s no-flag/no-env fallback changed from a hardcoded `../../data/gmail/transactions.csv` back to the shared `csvFile` constant (plain `"transactions.csv"`), matching every sibling subcommand. `--data-dir`/`AUTO_DATA_DIR` resolution unchanged. `RUNBOOK.md`: corrected.
+
+**Steps taken**:
+1. Asked a clarifying question rather than guessing which of three plausible objections (portability of a hardcoded relative path, wrong data location, inconsistency with siblings) the user meant — answer was inconsistency with siblings.
+2. Reverted the fallback to `csvFile`, keeping `--data-dir`/`AUTO_DATA_DIR` as the only two ways to point `serve` at a shared data directory (same as `--rules-file`).
+3. Verified live: `--data-dir=$HOME/.../data` (passed correctly via `make serve ARGS="--data-dir=..."`) resolves real data; plain `go run . serve` with no flags now correctly shows an empty list from `packs/gmail/`'s own directory, matching `categorize`/`discover`.
+
+**Outcome**: `serve`'s CSV resolution is now consistent with its sibling subcommands. Getting real data requires `--data-dir`, `AUTO_DATA_DIR`, or `--csv` explicitly — by design, matching the rest of this pack.
+
+**Caveats**: unchanged from prior entries — still local-only branches on both repos, no push/MR yet. `make serve --flag=value` (flag passed directly, not via `ARGS=`) will always fail with a `make` "unrecognized option" error — this is `make`'s own argument parsing, not something fixable in this pack's Makefile without changing its whole flag-passing convention.
+
+---
+
+## 2026-07-25 — Fix: serve's empty transaction list (feature 004 follow-up)
+
+**Prompt summary**: User ran `make serve` from inside the worktree as instructed, but the UI showed "No transactions to show." Traced to `serve`'s `--csv` default being the bare `transactions.csv`, which only resolves to real data when `auto run` injects it — running directly (`go run .`/`make`), no such file exists in `packs/gmail/`. The user asked for a `--data-dir` flag, matching the `AUTO_DATA_DIR` pattern this pack already uses for `--rules-file`.
+
+**Files affected**:
+- `packs/gmail` (submodule, `feature/transaction-editor-ui`, commit `09f2aca`) — `main.go`: `runServe` gains `--data-dir`; new `defaultServeCSVPath` resolves the CSV path the same way `defaultRulesFile` resolves `expense-rules.yaml` (explicit `--data-dir` → `AUTO_DATA_DIR` env → `../../data/gmail/transactions.csv` fallback). `RUNBOOK.md`: documented.
+
+**Steps taken**:
+1. Diagnosed two separate issues across this conversation: (a) the workspace root already has its own unrelated `make serve` → `./auto serve` (a pre-existing "workspace dashboard" on port 4321) — a naming collision, not a bug; (b) once running the right command from the right place, `serve`'s CSV default didn't match this pack's own established `AUTO_DATA_DIR`-aware convention used by every other data-path flag.
+2. Fixed (b) by mirroring `defaultRulesFile`'s exact resolution order, then verified live: plain `go run . serve` (zero flags) and `go run . serve --data-dir ../../data` both now load all 475 real transactions, newest (`2026-07-24 19:29:32`, Blinkit) first.
+
+**Outcome**: `make serve` / `go run . serve` now work with no flags from inside the feature worktree, opening the real `data/gmail/transactions.csv`.
+
+**Caveats**: unchanged from the prior entry — still local-only branches on both repos, no push/MR yet.
+
+## 2026-07-25 — Implement: Gmail Transactions Editor UI (`/speckit-implement #004`)
+
+**Prompt summary**: Completed the `/speckit-implement` chain started earlier this session (plan → tasks → implement) for feature 004: a local web UI to view `data/gmail/transactions.csv` newest-first and edit its annotation fields.
+
+**Files affected**:
+- `packs/gmail` (submodule, own branch `feature/transaction-editor-ui`, commit `062ed7a`) — see that repo's own `RUNBOOK.md` entry for the full breakdown: `store/csv.go`'s new `SetAnnotation`, the new `webui/` package (server, templates, static JS/CSS), `main.go`'s `serve` subcommand, `Makefile`'s `serve` target.
+- `specs/004-transaction-editor-ui/tasks.md` — all 27 tasks marked `[X]`.
+- `specs/004-transaction-editor-ui/research.md` — added a "Correction found during implementation" note under decision §6: the original assumption that `TxnDate` is always normalised turned out to be false for a couple of legacy rows in the real data.
+
+**Steps taken**:
+1. Implemented all 27 tasks directly (Setup → Foundational → US1 → US2 → US3 → Polish), reusing `store.CSVStore` throughout rather than a new data layer.
+2. Ran `go build ./... && go vet ./... && go test ./...` after implementation — all packages pass (webui: 9 top-level tests including subtests).
+3. Ran the quickstart validation against a **scratch copy** of the real `data/gmail/transactions.csv` (never the submodule's actual file) via `go run . serve` + `curl`: confirmed newest-first ordering, edit-and-persist (with `Source` correctly flipping to `"user"`), whitespace-only-category rejected with `422`, a touched-mtime save correctly rejected with `409`, an unknown `MessageID` correctly rejected with `404`, and merchant filtering (including a no-match empty-array case).
+4. Ordering validation against the real data surfaced a genuine bug: two legacy rows have a `TxnDate` `parser.NormaliseDate` couldn't parse and returned unchanged (`"Jul 22, 2024 05:46 PM"`, `"17/07/XXXX"`) — a plain string sort put a 2024 transaction ahead of every 2026 one. Fixed with an `isNormalisedDate` guard in `webui/server.go` (also applied to the `from`/`to` date filter for the same reason) and added a regression test before moving on.
+5. Confirmed via `git -C data/gmail status`/`diff` that the real submodule data was untouched throughout.
+
+**Outcome**: Feature complete. All tests green, quickstart scenarios verified against realistic data, one real bug found and fixed by actually running the feature rather than only unit-testing synthetic inputs.
+
+**Caveats**:
+- `packs/gmail`'s `feature/transaction-editor-ui` branch and this monorepo's are both still local — no push/MR yet, per the phase-separation decision made during `/speckit-specify`. Both are now ready for that step whenever the user wants to raise it for review.
+- No `.specify/extensions.yml` at the monorepo root, so no before/after-implement hooks ran.
+
+## 2026-07-25 — Tasks: Gmail Transactions Editor UI (`/speckit-tasks #004`)
+
+**Prompt summary**: Continuation of the same `/speckit-implement` request — plan was done, now generating the task breakdown before implementing.
+
+**Files affected**:
+- `specs/004-transaction-editor-ui/tasks.md` (new) — 27 tasks across Setup → Foundational → US1 (P1, MVP) → US2 (P1) → US3 (P2) → Polish.
+
+**Steps taken**:
+1. Mapped `research.md`'s 7 decisions and `data-model.md`'s field table/`SetAnnotation` signature/API shape into concrete, file-scoped tasks.
+2. Ordered Foundational work so the store-layer change (`SetAnnotation`) and the server/mapping/sort scaffolding both land before any user story, since every story's handler depends on them.
+3. Kept User Story 2 (edit) implementable and independently testable via raw `PATCH` requests even before User Story 1's rendering exists, and User Story 3 (filter) as a pure extension of User Story 1's list handler rather than a new endpoint.
+4. Followed this repo's established practice of tests-alongside-each-change (not a strict TDD-first gate, since the spec didn't request one) — every task touching behavior has a paired test task.
+
+**Outcome**: 27 tasks generated, all in strict checklist format (`- [ ] T0NN [P?] [USn?] description + file path`). MVP scope = Setup + Foundational + US1 (T001–T015). Proceeding to `/speckit-implement`.
+
+**Caveats**:
+- No `.specify/extensions.yml` in this repo, so no before/after-tasks hooks ran.
+- Still no push/MR for `feature/transaction-editor-ui` — deferred until implementation is complete and ready for review.
+
+## 2026-07-25 — Plan: Gmail Transactions Editor UI (`/speckit-plan #004`)
+
+**Prompt summary**: User ran `/speckit-implement` for feature 004, which had only a spec (no plan/tasks yet). Asked and confirmed: run `/speckit-plan` then `/speckit-tasks` first, then proceed to implement.
+
+**Files affected**:
+- `specs/004-transaction-editor-ui/plan.md` — Technical Context, Constitution Check (constitution.md is unfilled template — fell back to this repo's observable conventions: reuse-existing-code, stdlib-first, additive-schema-only), single-project structure decision (extend `packs/gmail`, no separate frontend toolchain).
+- `specs/004-transaction-editor-ui/research.md` — 7 decisions: reuse `CSVStore` over a new data layer; new `SetAnnotation` method and its precise effect on `Source`/`CommentConsidered` (only touches `Source` when Category/SubCategory/Labels actually change, never touches `CommentConsidered` — preserves spec 003's `NeedsReclassification()` dirty-check untouched); stdlib `net/http`+`html/template`, no router library; server-rendered HTML + vanilla JS, no npm/React; row identity via `MessageID` not in-memory `Index`; sort by `TxnDate` string-lexicographic descending (already normalised by `parser.NormaliseDate`); staleness via file-mtime token rather than OS-level locking.
+- `specs/004-transaction-editor-ui/data-model.md` — read-only vs. editable field table, validation rules, the `SetAnnotation` signature, API resource shape.
+- `specs/004-transaction-editor-ui/contracts/transactions-api.md` — `GET /`, `GET /api/transactions` (list/filter), `PATCH /api/transactions/{messageId}` (edit), staleness-token (`loadedAt`) mechanics.
+- `specs/004-transaction-editor-ui/quickstart.md` — six runnable validation scenarios mapped to the spec's user stories/success criteria.
+
+**Steps taken**:
+1. Ran `check-prerequisites.sh` (from a prior `/speckit-implement` attempt) — confirmed no `plan.md` existed yet.
+2. Initialized the `packs/gmail` and `data/gmail` submodules inside the worktree (weren't checked out by `git worktree add`) to read the actual `store.CSVStore`/`Record` API (`packs/gmail/store/csv.go`) rather than guessing its shape.
+3. Confirmed `TxnDate` is already normalised to `YYYY-MM-DD[ HH:MM:SS]` by `parser.NormaliseDate`, so a lexicographic sort is a correct chronological sort — no new date-parsing needed.
+4. Designed the `Source`-vocabulary extension (`"user"`) and the split between "editing Category/SubCategory/Labels changes who decided the classification" vs. "editing Note/UserComment must not disturb spec 003's existing dirty-check" — the one genuinely non-obvious design decision in this plan.
+5. Chose a stdlib-only, single-binary approach (Go `net/http` + `html/template` + vanilla JS) over adding a frontend toolchain, since none exists anywhere in this repo today.
+
+**Outcome**: Design complete — research, data model, API contract, and quickstart all written. Constitution check passes (no ratified gates; repo conventions honored). Proceeding to `/speckit-tasks`.
+
+**Caveats**:
+- No `.specify/extensions.yml` in this repo, so no before/after-plan hooks ran.
+- This commit stays local to `feature/transaction-editor-ui`; still no push/MR (per the phase-separation decision recorded in the `/speckit-specify` entry below) until there's real implementation to review.
+
+## 2026-07-25 — Specify: Gmail Transactions Editor UI (`/speckit-specify`)
+
+**Prompt summary**: "lets add a UI capability where a tab is dedicated to data in data/gmail/transactions. i should be able to edit the values of the transactions in the ui. shwo the latest event first" — request for a new web UI feature, not yet implemented.
+
+**Files affected**:
+- `.gitignore` (root repo) — added `.claude/spec-map.json` and `.worktrees/` as local-only, ungitignored-tracking entries per the spec-based-workflow lifecycle.
+- `.claude/spec-map.json` (root repo, gitignored) — new entry tracking `transaction-editor-ui` → branch `feature/transaction-editor-ui`, worktree `.worktrees/transaction-editor-ui`, status `in_progress`.
+- `specs/004-transaction-editor-ui/spec.md` (new) — full feature spec: 3 prioritized user stories (view newest-first, edit a transaction, search/filter), 10 functional requirements, 4 success criteria, assumptions.
+- `specs/004-transaction-editor-ui/checklists/requirements.md` (new) — spec quality checklist, all items passing.
+- `.specify/feature.json` — updated `feature_directory` to `specs/004-transaction-editor-ui` for this worktree.
+
+**Steps taken**:
+1. Per the repo-wide spec-based-workflow rule (feedback memory: apply the worktree/branch lifecycle for every `speckit-*` prompt regardless of repo precedent), created `feature/transaction-editor-ui` branch and `.worktrees/transaction-editor-ui` worktree from `main` before doing any spec work, and recorded it in `.claude/spec-map.json`.
+2. Surveyed the codebase for prior art: no existing UI/web app anywhere in the repo (`packs/gmail`'s `main.go` is a manual-switch CLI with `discover`/`recategorize`/`categorize` only) — confirmed this is a genuinely new capability, not a duplicate of something reusable.
+3. Confirmed `data/gmail/transactions.csv` (not the dated snapshots or `.bak` file also present in `data/gmail/`) is the actively-synced, pipeline-canonical file via its own git log and `packs/gmail`'s `store/csv.go` usage.
+4. Drafted the spec against `spec-template.md`, flagging one `[NEEDS CLARIFICATION]` in FR-003: whether editing should cover the full record or only the annotation fields (Category/SubCategory/Labels/Note/UserComment) that spec 003 already treats as user-owned.
+5. Asked the user via a single clarification question; they chose "annotation fields only" — extracted fields (Amount, Account, TxnDate, Merchant, etc.) stay read-only so a record can never silently diverge from the source email. Updated FR-003/FR-004/FR-005 and the Key Entities section accordingly, and marked the checklist's `[NEEDS CLARIFICATION]` item resolved.
+
+**Outcome**: Spec complete and quality-checked, all checklist items pass, zero open clarifications. Ready for `/speckit-plan`.
+
+**Caveats**:
+- No `.specify/extensions.yml` exists in this repo, so no before/after-specify hooks ran.
+- Per the spec-based-workflow's phase separation, this commit stays local to the `feature/transaction-editor-ui` branch — no push or MR yet; that happens once there's implementation to review (after `/speckit-plan` → `/speckit-tasks` → `/speckit-implement`).
+- This is the first feature in this repo to actually use the worktree/branch lifecycle (specs 001–003 were all committed straight to `main`); `.claude/spec-map.json` and `.worktrees/` are now gitignored so this tracking stays machine-local going forward.
+
 ## 2026-07-25 — Plan, Tasks, Implement: User Comments Inform Transaction Classification (`/speckit-plan #003`, `/speckit-tasks #003`, `/speckit-implement #003`)
 
 **Prompt summary**: Chained `/speckit-plan #003`, `/speckit-tasks #003`, `/speckit-implement #003` against the already-written `specs/003-transaction-user-comments/spec.md` — design, break into tasks, then build all six user stories for real, across both `packs/gmail` and `packs/expenses`.
