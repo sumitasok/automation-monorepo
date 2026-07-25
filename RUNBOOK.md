@@ -4,6 +4,32 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-07-25 — Specify: User Comments Inform Transaction Classification (`/speckit-specify`)
+
+**Prompt summary**: User wants a `user_comment` field addable directly to `transactions.csv` after gmail extraction, which `gmail-categorize` and `expenses-update-event` should read as AI input when deciding category/event — with the user's own explicit caveat that they were "assuming" a comment on one transaction would also somehow influence classification of other, similar transactions.
+
+**Files affected**:
+- `specs/003-transaction-user-comments/spec.md` (new) — 6 prioritized user stories, 22 functional requirements, 8 success criteria, assumptions.
+- `specs/003-transaction-user-comments/checklists/requirements.md` (new) — quality checklist, all items passing.
+- `.specify/feature.json` — repointed to `specs/003-transaction-user-comments`.
+
+**Steps taken**:
+1. Confirmed no `.specify/extensions.yml` — hooks skipped silently.
+2. Read the current `transactions.csv` schema (`store/csv.go`) and confirmed a `Note` column already exists (ADR 0013, populated only via a manually-forwarded-email mechanism, never read by either AI job today) — established early that the new comment field must be explicitly distinguished from `Note`, not conflated with it.
+3. Confirmed neither `categorize.go` nor `updateevent.go` reads `Note` today, so "AI looks at user input" is a genuinely new capability, not an extension of something already wired up.
+4. Identified 3 scope-defining ambiguities worth blocking on rather than guessing (via `AskUserQuestion`, presented as multiple-choice with a recommended option each): (a) whether a comment on an already-classified row should trigger re-classification — this determines whether the feature's core value ever actually triggers in practice, since most rows get auto-classified within moments of extraction; (b) precedence between a comment and an applicable expense-rules.yaml rule (spec 002) — direct interaction with that just-shipped feature's determinism guarantee; (c) the user's own flagged uncertainty about cross-transaction "similar transaction" propagation.
+5. User's answers substantially expanded scope beyond the original ask: (a) yes, re-classify on comment change; (b) comment overrides the rule, **and** capture the correction as a rule-file update once approved, git-clean-before/commit-after; (c) yes to cross-row influence, but strictly interactive-run-only and per-row-approval-gated — never in scheduled/cron runs, and never silently mass-applied.
+6. Restructured the spec around 6 stories instead of the original 3: added User Story 4 (re-opening already-decided rows, P1 — without it the feature rarely matters), User Story 5 (approval-gated retroactive suggestion to older similar rows, interactive-only, P2), and User Story 6 (capturing an approved correction as a durable rule with a git-hygiene requirement, P3) — folding the user's own follow-on request (rule capture) into the spec as its own story rather than letting it hide inside the precedence answer.
+7. Ran the spec-quality checklist — all items passed after the clarifications were folded in.
+
+**Outcome**: Spec ready for `/speckit-plan`. No open clarification questions. Explicitly builds on and extends `specs/002-expense-rules-engine` (comment overrides a rule match; rule capture writes to the same `data/config/expense-rules.yaml`).
+
+**Caveats**:
+- This is now a substantially bigger feature than the original one-paragraph ask — an interactive approval-gated suggestion UI and a git-aware rule-capture workflow are real scope, not small additions. Flagged clearly in the spec's Story priorities (P1 for the base capability + re-open trigger, P2/P3 for the two enhancements) so `/speckit-plan` and `/speckit-tasks` can treat the MVP (Stories 1/2/4) as separable from the richer Stories 5/6.
+- "Similar" (for Story 5's retroactive suggestions) is deliberately left as an Assumption rather than a clarification — the spec commits only to reusing the same merchant/rule-matching signals the expense-rules engine already has, leaving the precise algorithm to the planning phase.
+
+---
+
 ## 2026-07-23 23:45 — Implement: Expense Classification Rules Engine (`/speckit-plan and /speckit-tasks and /speckit-implement`)
 
 **Prompt summary**: Chained `/speckit-plan and /speckit-tasks and /speckit-implement` against the already-written `specs/002-expense-rules-engine/spec.md` — design, break into tasks, then build all four user stories for real.
