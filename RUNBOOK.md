@@ -4,6 +4,31 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-07-25 — Specify: Gmail Transactions Editor UI (`/speckit-specify`)
+
+**Prompt summary**: "lets add a UI capability where a tab is dedicated to data in data/gmail/transactions. i should be able to edit the values of the transactions in the ui. shwo the latest event first" — request for a new web UI feature, not yet implemented.
+
+**Files affected**:
+- `.gitignore` (root repo) — added `.claude/spec-map.json` and `.worktrees/` as local-only, ungitignored-tracking entries per the spec-based-workflow lifecycle.
+- `.claude/spec-map.json` (root repo, gitignored) — new entry tracking `transaction-editor-ui` → branch `feature/transaction-editor-ui`, worktree `.worktrees/transaction-editor-ui`, status `in_progress`.
+- `specs/004-transaction-editor-ui/spec.md` (new) — full feature spec: 3 prioritized user stories (view newest-first, edit a transaction, search/filter), 10 functional requirements, 4 success criteria, assumptions.
+- `specs/004-transaction-editor-ui/checklists/requirements.md` (new) — spec quality checklist, all items passing.
+- `.specify/feature.json` — updated `feature_directory` to `specs/004-transaction-editor-ui` for this worktree.
+
+**Steps taken**:
+1. Per the repo-wide spec-based-workflow rule (feedback memory: apply the worktree/branch lifecycle for every `speckit-*` prompt regardless of repo precedent), created `feature/transaction-editor-ui` branch and `.worktrees/transaction-editor-ui` worktree from `main` before doing any spec work, and recorded it in `.claude/spec-map.json`.
+2. Surveyed the codebase for prior art: no existing UI/web app anywhere in the repo (`packs/gmail`'s `main.go` is a manual-switch CLI with `discover`/`recategorize`/`categorize` only) — confirmed this is a genuinely new capability, not a duplicate of something reusable.
+3. Confirmed `data/gmail/transactions.csv` (not the dated snapshots or `.bak` file also present in `data/gmail/`) is the actively-synced, pipeline-canonical file via its own git log and `packs/gmail`'s `store/csv.go` usage.
+4. Drafted the spec against `spec-template.md`, flagging one `[NEEDS CLARIFICATION]` in FR-003: whether editing should cover the full record or only the annotation fields (Category/SubCategory/Labels/Note/UserComment) that spec 003 already treats as user-owned.
+5. Asked the user via a single clarification question; they chose "annotation fields only" — extracted fields (Amount, Account, TxnDate, Merchant, etc.) stay read-only so a record can never silently diverge from the source email. Updated FR-003/FR-004/FR-005 and the Key Entities section accordingly, and marked the checklist's `[NEEDS CLARIFICATION]` item resolved.
+
+**Outcome**: Spec complete and quality-checked, all checklist items pass, zero open clarifications. Ready for `/speckit-plan`.
+
+**Caveats**:
+- No `.specify/extensions.yml` exists in this repo, so no before/after-specify hooks ran.
+- Per the spec-based-workflow's phase separation, this commit stays local to the `feature/transaction-editor-ui` branch — no push or MR yet; that happens once there's implementation to review (after `/speckit-plan` → `/speckit-tasks` → `/speckit-implement`).
+- This is the first feature in this repo to actually use the worktree/branch lifecycle (specs 001–003 were all committed straight to `main`); `.claude/spec-map.json` and `.worktrees/` are now gitignored so this tracking stays machine-local going forward.
+
 ## 2026-07-25 — Plan, Tasks, Implement: User Comments Inform Transaction Classification (`/speckit-plan #003`, `/speckit-tasks #003`, `/speckit-implement #003`)
 
 **Prompt summary**: Chained `/speckit-plan #003`, `/speckit-tasks #003`, `/speckit-implement #003` against the already-written `specs/003-transaction-user-comments/spec.md` — design, break into tasks, then build all six user stories for real, across both `packs/gmail` and `packs/expenses`.
