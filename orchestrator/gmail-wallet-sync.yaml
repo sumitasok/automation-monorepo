@@ -6,3 +6,6 @@ steps:
   - job: gmail-categorize
     ai: deepseek
     args: ["--batch-size", "0"]
+  - job: expenses-update-event
+    ai: deepseek
+    args: ["--write-csv"]

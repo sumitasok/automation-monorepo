@@ -52,7 +52,7 @@ rules:
       merchant_contains: ["hungerbox"]
     outcome:
       category: "Food & Drinks"
-      subcategory: "Groceries"
+      subcategory: "Restaurant"
       labels: ["Work"]
       event_relevance: routine
 
@@ -66,7 +66,7 @@ rules:
     match:
       merchant_contains: ["uber"]
       day_of_week: [mon, tue, wed, thu, fri]
-      time_between: ["13:00", "20:00"]
+      time_between: ["12:00", "17:00"]
     outcome:
       category: "Transportation"
       subcategory: "Business trips"
