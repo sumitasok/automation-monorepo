@@ -11,11 +11,11 @@ import (
 
 // BulkAssignConfig parameterises a bulk-assign run.
 type BulkAssignConfig struct {
-	AssignmentCSVPath string // path to CSV with MessageID,EventID columns
+	AssignmentCSVPath  string // path to CSV with MessageID,EventID columns
 	TransactionCSVPath string // path to transactions.csv (to validate MessageIDs exist)
-	RegistryPath      string // path to the event registry (to validate EventIDs exist)
-	StatePath         string // path to the assignment ledger (to merge assignments)
-	DryRun            bool   // print assignments without writing state
+	RegistryPath       string // path to the event registry (to validate EventIDs exist)
+	StatePath          string // path to the assignment ledger (to merge assignments)
+	DryRun             bool   // print assignments without writing state
 }
 
 // BulkAssignResult summarises a bulk-assign run.
@@ -154,8 +154,8 @@ func BulkAssign(cfg BulkAssignConfig) (BulkAssignResult, error) {
 		}
 
 		if !cfg.DryRun {
-			st.Mark(msgID, eventID, 1.0, "manual") // manual = full confidence
-			reg.Touch(eventID, 1)        // increment transaction count for this event
+			st.Mark(msgID, eventID, 1.0, "manual", "") // manual = full confidence
+			reg.Touch(eventID, 1)                      // increment transaction count for this event
 		}
 		res.Valid++
 	}

@@ -7,7 +7,11 @@ description: >
   threshold. New-event proposals are grouped within a batch so several rows
   belonging to the same real-world event become one registry entry. Writes
   the assignment to a local ledger (state.json), keyed by MessageID; never
-  writes to transactions.csv itself.
+  writes to transactions.csv itself. Idempotent: a re-run only touches rows
+  still unassigned, or already-assigned rows whose hand-edited UserComment
+  column (transactions.csv, gmail-owned) was added or changed since it was
+  last considered (spec 003) — a present comment always takes precedence over
+  a matching expense-rules.yaml "routine" rule.
 category: expenses
 owner: sumit
 language: go
@@ -34,7 +38,11 @@ runtime:
 
 data:
   reads:  [../gmail/transactions.csv, config/events.json, ../../data/config/expense-rules.yaml]
-  writes: [config/events.json, state.json]     # state.json gains a Source field (ADR 0016)
+  writes: [config/events.json, state.json, ../../data/config/expense-rules.yaml]
+  # state.json gains a Source field (ADR 0016) and a Comment field (spec 003).
+  # expense-rules.yaml is only written when the user interactively approves
+  # an opt-in "capture as rule" prompt (spec 003, --suggest-similar / Story
+  # 6); never touched on a scheduled/unattended run.
 
 health:
   expect_run_every: ""

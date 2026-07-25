@@ -85,20 +85,22 @@ func runUpdateEvent(args []string) error {
 	limit := fs.Int("limit", 0, "stop after N unassigned rows (0 = all)")
 	dryRun := fs.Bool("dry-run", false, "print assignments/new events without writing the registry or state")
 	writeCsv := fs.Bool("write-csv", false, "enrich transactions.csv with EventID and EventDescription columns after processing")
+	suggestSimilar := fs.Bool("suggest-similar", false, "after a comment-driven correction, offer retroactive suggestions for similar already-assigned transactions (spec 003); only takes effect on an interactive run")
 	fs.Parse(args)
 
 	cfg := event.Config{
-		CSVPath:      *csvPath,
-		RegistryPath: *registryPath,
-		StatePath:    *statePath,
-		RulesFile:    *rulesFile,
-		Provider:     *provider,
-		Model:        *model,
-		Threshold:    *threshold,
-		BatchSize:    *batchSize,
-		Limit:        *limit,
-		DryRun:       *dryRun,
-		WriteCsv:     *writeCsv,
+		CSVPath:        *csvPath,
+		RegistryPath:   *registryPath,
+		StatePath:      *statePath,
+		RulesFile:      *rulesFile,
+		Provider:       *provider,
+		Model:          *model,
+		Threshold:      *threshold,
+		BatchSize:      *batchSize,
+		Limit:          *limit,
+		DryRun:         *dryRun,
+		WriteCsv:       *writeCsv,
+		SuggestSimilar: *suggestSimilar,
 	}
 
 	res, err := event.Run(context.Background(), cfg)
@@ -158,11 +160,11 @@ func runBulkAssign(args []string) error {
 	}
 
 	cfg := event.BulkAssignConfig{
-		AssignmentCSVPath: *assignmentPath,
+		AssignmentCSVPath:  *assignmentPath,
 		TransactionCSVPath: *txnPath,
-		RegistryPath:      *registryPath,
-		StatePath:         *statePath,
-		DryRun:            *dryRun,
+		RegistryPath:       *registryPath,
+		StatePath:          *statePath,
+		DryRun:             *dryRun,
 	}
 
 	res, err := event.BulkAssign(cfg)

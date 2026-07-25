@@ -27,6 +27,12 @@ type Config struct {
 	Limit        int     // stop after N unassigned rows sent to the AI (0 = all; rule-decided rows don't count against this)
 	DryRun       bool    // print assignments/new events without writing registry or state
 	WriteCsv     bool    // after processing, enrich the CSV with EventID and EventDescription columns
+	// SuggestSimilar (spec 003, Story 5) opts into offering retroactive
+	// suggestions for older, similar, already-assigned rows after each
+	// comment-driven correction this run. Only takes effect on an
+	// interactive run (isInteractive()) — never on a scheduled/cron run,
+	// regardless of this value (FR-017).
+	SuggestSimilar bool
 
 	// Matcher optionally injects the classifier (used in tests). When nil, Run
 	// builds one from Provider/Model via NewMatcher.
@@ -106,24 +112,48 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 	// a rule scoped to "event" whose outcome is event_relevance: routine
 	// marks the transaction as intentionally not event-worthy directly (the
 	// registry's existing "no event" representation — empty EventID), with
-	// no AI call for that row (FR-005).
+	// no AI call for that row (FR-005). needsReprocessing (spec 003) admits
+	// both never-assigned transactions and already-assigned ones whose
+	// UserComment was added or edited since the last assignment that
+	// considered it (FR-010/FR-011). A transaction with a non-empty comment
+	// always skips the routine-rule check and goes straight to the AI
+	// matcher with that comment attached — a comment takes precedence over a
+	// would-be rule match for as long as it remains present (FR-012).
+	// Tracked for Story 5 (spec 003): a transaction that was ALREADY assigned
+	// before this run, and gets a comment-influenced outcome this run, is a
+	// "correction" that may warrant offering the same fix to other, older,
+	// similar transactions. merchantByID/priorSourceByID snapshot the
+	// transaction's pre-correction state for that purpose.
+	alreadyAssignedByID := make(map[string]bool)
+	merchantByID := make(map[string]string)
+	priorSourceByID := make(map[string]string)
+
 	var items []Item
 	for _, t := range txns {
-		if st.Has(t.MessageID) {
+		if !st.needsReprocessing(t.MessageID, t.UserComment) {
 			continue
 		}
+		if entry, has := st.Assigned[t.MessageID]; has {
+			alreadyAssignedByID[t.MessageID] = true
+			priorSourceByID[t.MessageID] = entry.Source
+		}
+		merchantByID[t.MessageID] = t.Merchant
 
-		if rule, ok := rules.Match(ScopeEvent, MatchInput{
-			Merchant: t.Merchant, Info: t.Info, Subject: t.Subject, Amount: t.Amount, TxnDate: t.TxnDate,
-		}); ok && rule.Outcome.EventRelevance == EventRelevanceRoutine {
-			source := ruleSource(rule.Name)
-			if cfg.DryRun {
-				fmt.Printf("  %s -> no event (routine)  [%s]\n", t.MessageID, source)
-			} else {
-				st.Mark(t.MessageID, "", 1.0, source)
+		comment := strings.TrimSpace(t.UserComment)
+
+		if comment == "" {
+			if rule, ok := rules.Match(ScopeEvent, MatchInput{
+				Merchant: t.Merchant, Info: t.Info, Subject: t.Subject, Amount: t.Amount, TxnDate: t.TxnDate,
+			}); ok && rule.Outcome.EventRelevance == EventRelevanceRoutine {
+				source := ruleSource(rule.Name)
+				if cfg.DryRun {
+					fmt.Printf("  %s -> no event (routine)  [%s]\n", t.MessageID, source)
+				} else {
+					st.Mark(t.MessageID, "", 1.0, source, "")
+				}
+				res.RuleDecided++
+				continue
 			}
-			res.RuleDecided++
-			continue
 		}
 
 		items = append(items, Item{
@@ -135,6 +165,7 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 			Info:     t.Info,
 			Subject:  t.Subject,
 			Category: t.Category,
+			Comment:  comment,
 		})
 		if cfg.Limit > 0 && len(items) >= cfg.Limit {
 			break
@@ -168,6 +199,7 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 		batchSize = len(items)
 	}
 
+	var corrections []correction
 	for start := 0; start < len(items); start += batchSize {
 		end := start + batchSize
 		if end > len(items) {
@@ -191,14 +223,24 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 				log.Printf("  [WARN] update-event: no assignment returned for %s — will retry next run", item.ID)
 				continue
 			}
+			source := aiSource(matcher.Name())
+			if item.Comment != "" {
+				source += "+comment"
+			}
 
 			if r.EventID != "" {
 				if _, known := reg.Find(r.EventID); known && r.Confidence >= threshold {
 					if cfg.DryRun {
-						fmt.Printf("  %s -> event %q (existing, confidence %.2f)  [%s]\n", item.ID, r.EventID, r.Confidence, aiSource(matcher.Name()))
+						fmt.Printf("  %s -> event %q (existing, confidence %.2f)  [%s]\n", item.ID, r.EventID, r.Confidence, source)
 					} else {
-						st.Mark(item.ID, r.EventID, r.Confidence, aiSource(matcher.Name()))
+						st.Mark(item.ID, r.EventID, r.Confidence, source, item.Comment)
 						reg.Touch(r.EventID, 1)
+						if item.Comment != "" && alreadyAssignedByID[item.ID] {
+							corrections = append(corrections, correction{
+								ID: item.ID, Merchant: merchantByID[item.ID],
+								PriorSource: priorSourceByID[item.ID], NewSource: source, EventID: r.EventID,
+							})
+						}
 					}
 					res.Assigned++
 					continue
@@ -214,9 +256,15 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 
 			// Model deliberately found no event for this transaction.
 			if cfg.DryRun {
-				fmt.Printf("  %s -> no event  [%s]\n", item.ID, aiSource(matcher.Name()))
+				fmt.Printf("  %s -> no event  [%s]\n", item.ID, source)
 			} else {
-				st.Mark(item.ID, "", r.Confidence, aiSource(matcher.Name()))
+				st.Mark(item.ID, "", r.Confidence, source, item.Comment)
+				if item.Comment != "" && alreadyAssignedByID[item.ID] {
+					corrections = append(corrections, correction{
+						ID: item.ID, Merchant: merchantByID[item.ID],
+						PriorSource: priorSourceByID[item.ID], NewSource: source, EventID: "",
+					})
+				}
 			}
 			res.NoEvent++
 		}
@@ -244,7 +292,17 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 			}
 			eventID := reg.CreateEvent(first.NewEventName, first.NewEventDescription, mergeKeywords(group), len(group))
 			for _, p := range group {
-				st.Mark(p.item.ID, eventID, 1.0, aiSource(matcher.Name()))
+				source := aiSource(matcher.Name())
+				if p.item.Comment != "" {
+					source += "+comment"
+				}
+				st.Mark(p.item.ID, eventID, 1.0, source, p.item.Comment)
+				if p.item.Comment != "" && alreadyAssignedByID[p.item.ID] {
+					corrections = append(corrections, correction{
+						ID: p.item.ID, Merchant: merchantByID[p.item.ID],
+						PriorSource: priorSourceByID[p.item.ID], NewSource: source, EventID: eventID,
+					})
+				}
 			}
 			res.NewEvents++
 			res.Assigned += len(group)
@@ -264,6 +322,33 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 	}
 	if err := st.Save(); err != nil {
 		return res, fmt.Errorf("saving state: %w", err)
+	}
+
+	// Story 5/6 (spec 003): only on an interactive run, walk through
+	// candidates for each correction just made; Story 5's opt-in flag also
+	// gates the suggestion walk itself. Neither ever triggers on a
+	// scheduled/cron run regardless of configuration (FR-017).
+	if len(corrections) > 0 && cfg.SuggestSimilar && isInteractive() {
+		approved := 0
+		for _, corr := range corrections {
+			approved += suggestSimilar(st, reg, txns, corr)
+		}
+		if approved > 0 {
+			if err := st.Save(); err != nil {
+				return res, fmt.Errorf("saving state after suggestions: %w", err)
+			}
+			res.Assigned += approved
+		}
+	}
+	if len(corrections) > 0 && isInteractive() {
+		for _, corr := range corrections {
+			// Only a "no event" (routine) correction is capturable — the
+			// rules engine has no per-event outcome field, only
+			// event_relevance: routine (data-model.md).
+			if corr.EventID == "" {
+				offerRuleCapture(cfg.RulesFile, corr.Merchant)
+			}
+		}
 	}
 
 	// Optionally enrich the CSV with EventID and EventDescription columns

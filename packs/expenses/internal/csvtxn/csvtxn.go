@@ -19,16 +19,20 @@ import (
 // needs. MessageID is the stable join key used everywhere else in this pack
 // (the assignment ledger, the AI request/response).
 type Txn struct {
-	MessageID string
-	TxnDate   string
-	Type      string
-	Amount    string
-	Merchant  string
-	Info      string
-	Subject   string
-	BankFrom  string
-	Category  string
+	MessageID   string
+	TxnDate     string
+	Type        string
+	Amount      string
+	Merchant    string
+	Info        string
+	Subject     string
+	BankFrom    string
+	Category    string
 	SubCategory string
+	// UserComment (spec 003) mirrors gmail's transactions.csv UserComment
+	// column, read-only — the user's own hand-written context for this
+	// transaction, when present.
+	UserComment string
 }
 
 // Skip records a row that could not be read.
@@ -94,6 +98,7 @@ func Read(path string) (txns []Txn, skipped []Skip, err error) {
 			BankFrom:    get("BankFrom"),
 			Category:    get("Category"),
 			SubCategory: get("SubCategory"),
+			UserComment: get("UserComment"),
 		})
 	}
 	return txns, skipped, nil

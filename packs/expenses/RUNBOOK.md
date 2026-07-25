@@ -99,6 +99,7 @@ on once you're happy with the assignments it produces.
 | `--dry-run` | off | report only; nothing written |
 | `--write-csv` | off | enrich transactions.csv with `EventID` and `EventDescription` columns |
 | `--rules-file PATH` | `$AUTO_DATA_DIR/config/expense-rules.yaml` (or `../../data/config/expense-rules.yaml` outside `auto`) | shared expense classification rules, evaluated before the AI matcher (spec 002, ADR 0016) |
+| `--suggest-similar` | off | after a comment-driven correction, offer retroactive suggestions for similar already-assigned transactions (spec 003); only takes effect on an interactive run (real terminal), never on cron |
 
 ## Environment (from `config/expenses/config.yaml`)
 
@@ -138,6 +139,32 @@ See `internal/event/rules.go` for the rule schema
 (`ExpenseRule`/`MatchCondition`/`Outcome`) and
 `specs/002-expense-rules-engine/` in the parent workspace repo for the full
 spec/plan/contracts.
+
+## User comments inform matching (spec 003)
+
+The gmail pack's `transactions.csv` gains a hand-edited `UserComment` column
+(never written by any job — the user types directly into the cell). When a
+row being matched has a non-empty comment, it's included as context for the
+AI matcher (never as an instruction — the event registry stays the sole
+vocabulary the model can choose from), and `Source` gains a `+comment` suffix
+(e.g. `ai:deepseek+comment`) so it's visible whether a comment shaped the
+outcome.
+
+A comment added or edited on an **already-assigned** transaction re-opens it
+for matching on the next run — overriding a matching `event_relevance:
+routine` rule for as long as the comment stays in place. An unchanged
+comment is left alone; a comment cleared back to empty is not reprocessed.
+
+`--suggest-similar` (interactive only) offers to walk you through other,
+older, already-assigned transactions resembling a correction you just made —
+approve or skip each individually. Right after an approved correction that
+lands on "no event," you're also offered the option to capture the merchant
+pattern as a lasting `event_relevance: routine` rule, git-committed
+automatically. Neither flow ever triggers on a scheduled/cron run.
+
+See `specs/003-transaction-user-comments/` in the parent workspace repo for
+the full spec/plan/research/data-model, and `internal/event/suggest.go` /
+`internal/event/rulecapture.go` for the implementation.
 
 ## How matching works
 

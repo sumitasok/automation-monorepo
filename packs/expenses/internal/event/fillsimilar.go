@@ -25,10 +25,10 @@ type FillSimilarConfig struct {
 
 // FillSimilarResult summarises a fill-similar run.
 type FillSimilarResult struct {
-	Total       int // unassigned rows considered
-	Assigned    int // rows matched to an event via similarity
-	NoMatch     int // rows the model left without a match
-	Malformed   int // rows that failed CSV normalisation
+	Total        int // unassigned rows considered
+	Assigned     int // rows matched to an event via similarity
+	NoMatch      int // rows the model left without a match
+	Malformed    int // rows that failed CSV normalisation
 	EventsToFill int // number of events with manual assignments
 }
 
@@ -101,8 +101,8 @@ func FillSimilar(ctx context.Context, cfg FillSimilarConfig) (FillSimilarResult,
 
 	// Group assigned transactions by event to use as examples
 	type eventContext struct {
-		Event        Event
-		Examples     []Item // up to 3 examples of transactions in this event
+		Event    Event
+		Examples []Item // up to 3 examples of transactions in this event
 	}
 	eventContexts := make(map[string]eventContext)
 
@@ -209,7 +209,7 @@ func FillSimilar(ctx context.Context, cfg FillSimilarConfig) (FillSimilarResult,
 				if cfg.DryRun {
 					fmt.Printf("      %s -> %q (similar, confidence %.2f)\n", result.ID, eventCtx.Event.ID, result.Confidence)
 				} else {
-					st.Mark(result.ID, eventCtx.Event.ID, result.Confidence, "ai:"+matcher.Name())
+					st.Mark(result.ID, eventCtx.Event.ID, result.Confidence, "ai:"+matcher.Name(), "")
 					reg.Touch(eventCtx.Event.ID, 1)
 				}
 				res.Assigned++
