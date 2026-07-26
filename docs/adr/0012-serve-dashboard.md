@@ -1,5 +1,14 @@
 # ADR 0012 — `auto serve` / `make serve`: local read-only workspace dashboard
 
+> **Partially superseded by [ADR 0018](0018-dashboard-job-runner.md) — 2026-07-26.**
+> The dashboard is no longer read-only: it can launch jobs, pipelines and
+> workspace commands. Point 3 ("Nothing is written; there's no POST handler")
+> and point 5's framing are superseded, **as is point 4's reasoning that no auth
+> was needed because nothing could be triggered** — ADR 0018 re-derives that and
+> adds compensating controls (POST-only mutations, Host-header allowlist,
+> server-side confirmation for machine-altering actions). Point 1 (the
+> subcommand), point 2 (stdlib only), and the `127.0.0.1` bind itself all stand.
+
 **Status:** accepted — 2026-07-23
 
 ## Context

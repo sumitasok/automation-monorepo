@@ -4,6 +4,45 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-07-26 — Plan/Tasks/Implement: One-Click Job Runner UI (`/speckit-implement` → feature 005)
+
+**Prompt summary**: `/speckit-implement` for feature 005, which had only a spec. Ran plan → tasks → implement (the sequence established for feature 004), turning the read-only `auto serve` dashboard into a one-click runner.
+
+### How to use it
+
+```bash
+brew install tmux          # hard prerequisite, no fallback
+./auto serve               # or: make serve   (PORT=… to override 4321)
+```
+
+Then at `http://127.0.0.1:4321`:
+- **Run something** — a described button per job, pipeline, and safe `auto` command. Jobs get an AI-profile dropdown (real profiles only; `*.example.yaml` excluded). Pipelines don't — they set `ai:` per step in their own YAML and `auto orchestrate` has no `--ai` flag.
+- **Runs** — every run with status/elapsed/audit ID; open one for a live-tailing log and (for pipelines) step-by-step progress. Cancel in-flight runs from here.
+- Machine-altering actions (`Install scheduled tasks`, `Bootstrap workspace`) are visually distinct and require confirming; the server rejects an unconfirmed request too.
+- Logs: `logs/runs/<audit-id>.log`, every line `<ISO-8601 UTC> <audit-id> <text>` (git-ignored).
+
+**Files affected**:
+- `specs/005-job-runner-ui/{plan,research,data-model,quickstart,tasks}.md`, `contracts/dashboard-api.md` — design artifacts and a 36-task breakdown, all complete.
+- `framework/tools/auto` — new sections: run store (`ui_runs`/`ui_run_steps` tables), run logs, tmux runner, action catalog, `start_run`/`cancel_run`, the internal `_exec-run` wrapper, JSON API + `do_POST` on the serve handler, and the Actions/Runs dashboard sections with live tailing. Also fixed two pre-existing `datetime.utcnow()` deprecation warnings that were polluting every captured run log.
+- `framework/tools/test_auto.py` (new) — first test suite for the CLI, 46 tests.
+- `docs/adr/0018-dashboard-job-runner.md` (new) + a supersession note on `docs/adr/0012-serve-dashboard.md`.
+- `README.md`, `Makefile`, `auto`'s usage docstring — updated to say the dashboard now runs things.
+
+**Steps taken**:
+1. Verified the risky assumptions empirically *before* planning rather than discovering them later: tmux gives each pane a real PTY (so `isInteractive()` would be true and prompts would hang), `< /dev/null` flips it false, and tmux sessions self-destruct when their command exits.
+2. Built foundational layers first (run store → logs → tmux control), each with tests, keeping `./auto`'s existing behavior untouched throughout.
+3. Made dashboard runs re-enter the real CLI (`auto run` / `auto orchestrate`) instead of calling `execute_job()` in-process, so a UI run is identical to a hand-typed one by construction.
+4. Ran all 14 quickstart validation scenarios against a live server, plus a synthetic chatty job in a temp workspace to prove incremental log tailing.
+
+**Outcome**: All 36 tasks complete, 46 tests green, every quickstart scenario verified live. Confirmed: no credential ever reaches the page, the API, the logs, or the DB; three concurrent runs produced 24 log lines with zero ambiguous attribution; no leftover tmux sessions; nine replayed GETs started nothing.
+
+**Caveats & findings**:
+- **Caught a real bug mid-implementation**: I first gated the buttons on `job_runs_here()`, but that is a *scheduling* constraint — only `cmd_schedule` consults it, and `cmd_run` never does. That would have disabled `gmail-extract` and `wallet-sync` (pinned to `home-server`) on this laptop — the exact jobs the request named. Machine pinning is now an informational note, so the dashboard is never stricter than the CLI it wraps.
+- Two apparent failures during validation were **my test scripts' bugs, not the product's**: `head -3 && echo LEAK` always fires (head exits 0 on empty input), and `echo "$JSON"` in zsh interprets the `\n` escapes inside JSON and corrupts it. Both re-verified correctly afterwards.
+- **Interactive-only pack features stay terminal-only** by design — `categorize --suggest-similar` and rule capture never prompt from the UI. Verified `gmail-categorize` completes rather than hanging.
+- `./auto` is a shim that exports its own `AUTO_WORKSPACE`, so pointing it at another workspace needs `python3 framework/tools/auto` directly (used only for testing).
+- The dashboard is still `127.0.0.1`-only with no auth; ADR 0018 re-derives why that's acceptable now that it executes things, and adds POST-only mutations, a Host-header allowlist, and the server-side confirm gate.
+
 ## 2026-07-26 — Specify: One-Click Job Runner UI (`/speckit-specify` → feature 005)
 
 **Prompt summary**: Turn the workspace dashboard into a one-click runner — every feasible command as a described button, an `--ai` profile dropdown, runnable orchestrations and jobs, each run in an app-managed tmux session that's torn down afterwards, per-run log files with an audit ID on every line, and a Jenkins-style live-updating per-run log view in the jobs section.

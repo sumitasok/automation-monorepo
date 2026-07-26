@@ -19,7 +19,8 @@ Usage:
   auto log "<message>"
   auto doctor                  # validate manifests + enforce visibility rules
   auto bootstrap
-  auto serve [--port N]        # local dashboard: packs, config status, jobs, command help
+  auto serve [--port N]        # local dashboard: run jobs/pipelines one-click, watch live logs,
+                               #   plus packs, config status, jobs, command help (needs tmux)
 """
 from __future__ import annotations
 import argparse, html, json, os, platform, re, shlex, socket, subprocess, sys, textwrap, datetime, shutil, time

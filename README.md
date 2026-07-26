@@ -37,9 +37,18 @@ keep others private — enforced by `auto doctor`, guaranteed by per-repo access
 ./auto schedule sync --dry-run
 ./auto log "what I did"
 ./auto doctor                # validate + check for visibility leaks
-./auto serve                 # local dashboard: packs, config status, jobs, command help
+./auto serve                 # local dashboard — ALSO a one-click runner: launch any job or
+                             #   pipeline, pick an --ai profile from a dropdown, and watch the
+                             #   run's log stream live (needs tmux; see docs/adr/0018)
 #   or: make serve  (PORT=... to override the default 4321)
 ```
+
+Every run started from the dashboard executes in its own tmux session (removed
+when it finishes) and is logged to `logs/runs/<audit-id>.log` with that run's
+audit ID on every line, so parallel runs stay tellable apart. Runs are
+non-interactive: prompts are skipped exactly as on a scheduled run, so the
+interactive-only flows (`categorize --suggest-similar`, rule capture) remain
+terminal-only.
 
 ### Wallet sync (gmail transactions → BudgetBakers Wallet)
 

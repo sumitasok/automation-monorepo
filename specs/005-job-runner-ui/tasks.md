@@ -113,12 +113,12 @@ description: "Task list for feature implementation"
 
 ## Phase 7: Polish & Cross-Cutting Concerns
 
-- [ ] T031 Write `docs/adr/0018-dashboard-job-runner.md` superseding ADR 0012's read-only decision: record why the "no auth because nothing can be triggered" justification no longer holds, and the controls that replace it (localhost bind retained, POST-only mutations, Host-header allowlist, server-side confirm gate). Add a "Superseded by ADR 0018" note to `docs/adr/0012-*.md` itself.
-- [ ] T032 [P] Update the `auto` module docstring usage block with the dashboard's new capability, and update root `README.md`'s Quickstart line for `./auto serve` to say it can now launch jobs — not just display them.
-- [ ] T033 [P] Add a RUNBOOK entry describing the runner: how to start it, where logs live, what an audit id is, the tmux prerequisite, and the deliberate non-interactive limitation (interactive-only pack features stay terminal-only).
-- [ ] T034 Run the full test suite (`python3 -m unittest discover -s framework/tools -p 'test_*.py'`) and fix any failures.
-- [ ] T035 Execute every quickstart.md validation scenario (1–14) against a real `./auto serve`, including the credential-leak grep (scenario 6), the non-interactive check on `gmail-categorize` (scenario 7), and reconciliation after an out-of-band `tmux kill-session` (scenario 12). Record the outcome.
-- [ ] T036 Confirm no stray `auto-*` tmux sessions and no committed log files remain after all validation (`tmux ls`, `git status`).
+- [X] T031 Write `docs/adr/0018-dashboard-job-runner.md` superseding ADR 0012's read-only decision: record why the "no auth because nothing can be triggered" justification no longer holds, and the controls that replace it (localhost bind retained, POST-only mutations, Host-header allowlist, server-side confirm gate). Add a "Superseded by ADR 0018" note to `docs/adr/0012-*.md` itself.
+- [X] T032 [P] Update the `auto` module docstring usage block with the dashboard's new capability, and update root `README.md`'s Quickstart line for `./auto serve` to say it can now launch jobs — not just display them.
+- [X] T033 [P] Add a RUNBOOK entry describing the runner: how to start it, where logs live, what an audit id is, the tmux prerequisite, and the deliberate non-interactive limitation (interactive-only pack features stay terminal-only).
+- [X] T034 Run the full test suite (`python3 -m unittest discover -s framework/tools -p 'test_*.py'`) and fix any failures.
+- [X] T035 Execute every quickstart.md validation scenario (1–14) against a real `./auto serve`, including the credential-leak grep (scenario 6), the non-interactive check on `gmail-categorize` (scenario 7), and reconciliation after an out-of-band `tmux kill-session` (scenario 12). Record the outcome.
+- [X] T036 Confirm no stray `auto-*` tmux sessions and no committed log files remain after all validation (`tmux ls`, `git status`).
 
 ---
 
