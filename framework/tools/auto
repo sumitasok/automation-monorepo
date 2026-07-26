@@ -289,13 +289,38 @@ def execute_job(job_id: str, extra_args: list[str] | None = None, ai: str = "",
         shell = False; show = " ".join(cmd)
     start = datetime.datetime.now()
     print(f">> running {j['id']} [{j['_pack']}] in {workdir}: {show}")
+    _emit_step_marker(j["id"], "start")
     try:
         rc = subprocess.run(cmd, env=env, timeout=timeout, cwd=str(workdir), shell=shell).returncode
     except subprocess.TimeoutExpired:
         rc = 124; print(f"!! timed out after {timeout}s")
     dur = (datetime.datetime.now() - start).total_seconds()
     print(f"<< {j['id']} exited {rc} in {dur:.1f}s")
+    _emit_step_marker(j["id"], "end", rc)
     return rc, dur
+
+
+# Step counter for the dashboard's step-level progress. Only ever advanced
+# under a dashboard run — see _emit_step_marker.
+_STEP_SEQ = [0]
+
+
+def _emit_step_marker(job_id: str, event: str, rc: int | None = None):
+    """Emit a machine-readable step marker, but ONLY when running under the
+    dashboard (AUTO_RUN_AUDIT_ID set). A plain terminal `auto run` /
+    `auto orchestrate` prints exactly what it always did — that byte-for-byte
+    sameness is what lets a UI-launched run be considered equivalent to a
+    hand-typed one. The dashboard's wrapper strips these lines from the log.
+    """
+    if not os.environ.get("AUTO_RUN_AUDIT_ID"):
+        return
+    idx = _STEP_SEQ[0]
+    if event == "end":
+        _STEP_SEQ[0] += 1
+    line = f"{STEP_MARKER} idx={idx} job={job_id} event={event}"
+    if rc is not None:
+        line += f" rc={rc}"
+    print(line, flush=True)
 
 def cmd_run(args):
     j = get_job(args.id)
@@ -309,7 +334,7 @@ def _record_run(job_id, rc, dur):
         db = DATA / "state" / "runs.sqlite"; db.parent.mkdir(parents=True, exist_ok=True)
         c = sqlite3.connect(db)
         c.execute("CREATE TABLE IF NOT EXISTS runs(ts TEXT, job TEXT, host TEXT, rc INTEGER, dur REAL)")
-        c.execute("INSERT INTO runs VALUES (?,?,?,?,?)", (datetime.datetime.utcnow().isoformat(), job_id, socket.gethostname(), rc, dur))
+        c.execute("INSERT INTO runs VALUES (?,?,?,?,?)", (datetime.datetime.now(datetime.timezone.utc).isoformat(), job_id, socket.gethostname(), rc, dur))
         c.commit(); c.close()
     except Exception as e:
         print(f"(run history not recorded: {e})", file=sys.stderr)
@@ -558,6 +583,294 @@ def tmux_launch(name: str, argv: list[str], cwd: Path, env: dict | None = None) 
         raise RuntimeError(f"tmux failed to start session {name}: {r.stderr.strip()}")
 
 
+# ---------- action catalog (what the dashboard offers as buttons) ------------
+# Rebuilt from source on every request, so a newly added job or orchestration
+# shows up with no registration step — same "never drift" rule as auto list /
+# catalog / the read-only dashboard sections.
+#
+# Commands deliberately excluded: `new` (prompts for every field), `log`
+# (needs free text), `share`/`search` (need an argument). They aren't
+# meaningfully "one-click".
+COMMAND_ACTIONS = [
+    {"id": "list",     "argv": ["list"],           "name": "List jobs",
+     "description": "Every job visible across all mounted packs, with pack and visibility.",
+     "danger": False},
+    {"id": "packs",    "argv": ["packs"],          "name": "List packs",
+     "description": "Which packs are mounted, their paths and default visibility.",
+     "danger": False},
+    {"id": "doctor",   "argv": ["doctor"],         "name": "Validate workspace",
+     "description": "Check manifests and enforce private/shared/public visibility rules.",
+     "danger": False},
+    {"id": "catalog",  "argv": ["catalog"],        "name": "Regenerate catalog",
+     "description": "Rewrite CATALOG.md from the current job manifests.",
+     "danger": False},
+    {"id": "schedule-sync", "argv": ["schedule", "sync"], "name": "Install scheduled tasks",
+     "description": "Write this machine's cron/launchd entries from the job manifests. "
+                    "Modifies your machine's scheduler, outside this workspace.",
+     "danger": True},
+    {"id": "bootstrap", "argv": ["bootstrap"],     "name": "Bootstrap workspace",
+     "description": "Initialise/update git submodules and report tool availability. "
+                    "Touches the working tree.",
+     "danger": True},
+]
+
+
+def list_ai_profiles() -> list[dict]:
+    """Named AI profiles usable for a run — name and provider only.
+
+    Credential values are never included: only the profile NAME ever reaches
+    the browser or a log, exactly as `auto run --ai <name>` already works.
+    *.example.yaml templates are excluded because their placeholder api_key
+    would fail confusingly at run time rather than up front.
+    """
+    d = ai_profile_dir()
+    if not d.exists():
+        return []
+    out = []
+    for p in sorted(d.glob("*.yaml")):
+        if p.name.endswith(".example.yaml"):
+            continue
+        name = p.stem
+        try:
+            prof = load_yaml(p)
+            provider = str(prof.get("provider") or "").strip().lower()
+            usable = bool(provider) and bool(str(prof.get("api_key") or "")) \
+                and provider in ("deepseek", "claude", "anthropic")
+        except Exception:
+            provider, usable = "", False
+        out.append({"name": name, "provider": provider, "usable": usable})
+    return out
+
+
+def list_actions() -> list[dict]:
+    """Every launchable action: jobs, orchestrations, and safe auto commands."""
+    actions = []
+    mach = current_machine()
+
+    for j in sorted(load_jobs(), key=lambda x: (x["_pack"], x.get("id", ""))):
+        available, reason, note = True, None, None
+        if not j["_packpath"].exists():
+            available, reason = False, f"pack directory missing: {j['_pack']}"
+        elif not job_runs_here(j, mach):
+            # runs_on is a SCHEDULING constraint, not a manual-run permission:
+            # cmd_schedule uses job_runs_here to decide what to install on this
+            # machine, but cmd_run deliberately never checks it, so `auto run
+            # gmail-extract` works by hand on any machine. Blocking the button
+            # here would make the dashboard stricter than the CLI it wraps, so
+            # this is surfaced as context rather than as an obstacle.
+            ro = j.get("runs_on") or {}
+            note = (f"scheduled only on {ro.get('machines', ['any'])} "
+                    f"(os {ro.get('os', 'any')}) — running it here is still fine")
+        actions.append({
+            "kind": "job", "id": j.get("id", ""),
+            "name": j.get("name") or j.get("id", ""),
+            "description": (j.get("description") or "").strip(),
+            "pack": j["_pack"],
+            # Only `auto run` accepts --ai (see _extract_ai_flag), so only jobs
+            # can take a profile.
+            "accepts_ai": True, "danger": False,
+            "available": available, "unavailable_reason": reason, "note": note,
+        })
+
+    for o in load_orchestrations():
+        problems = validate_orchestration(o)
+        actions.append({
+            "kind": "orchestration", "id": o["_id"],
+            "name": o.get("name") or o["_id"],
+            "description": (o.get("description") or "").strip(),
+            "pack": None,
+            # Orchestrations pick their AI profile per step in their own YAML;
+            # `auto orchestrate` has no --ai flag, so offering a dropdown here
+            # would imply an override that does not exist.
+            "accepts_ai": False, "danger": False,
+            "available": not problems,
+            "unavailable_reason": ("; ".join(problems) if problems else None),
+            "note": None,
+        })
+
+    for c in COMMAND_ACTIONS:
+        actions.append({
+            "kind": "command", "id": c["id"], "name": c["name"],
+            "description": c["description"], "pack": None,
+            "accepts_ai": False, "danger": c["danger"],
+            "available": True, "unavailable_reason": None, "note": None,
+        })
+    return actions
+
+
+def find_action(kind: str, action_id: str) -> dict | None:
+    for a in list_actions():
+        if a["kind"] == kind and a["id"] == action_id:
+            return a
+    return None
+
+
+class RunRefused(Exception):
+    """A launch was rejected for a reason the UI should show verbatim.
+    `code` maps to the HTTP status in contracts/dashboard-api.md."""
+    def __init__(self, code: str, message: str, **extra):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.extra = extra
+
+
+def action_argv(action: dict, ai_profile: str = "") -> list[str]:
+    """The real CLI invocation for an action.
+
+    Dashboard runs deliberately re-enter the actual `auto` CLI rather than
+    calling execute_job() in-process, so a UI-launched run takes the identical
+    path as a terminal one — including run-history recording, pack config
+    linking, AI profile injection and orchestration retry/loop semantics.
+    """
+    if action["kind"] == "job":
+        argv = ["run", action["id"]]
+        if ai_profile:
+            argv += ["--ai", ai_profile]
+        return argv
+    if action["kind"] == "orchestration":
+        return ["orchestrate", action["id"]]
+    spec = next((c for c in COMMAND_ACTIONS if c["id"] == action["id"]), None)
+    if not spec:
+        raise RunRefused("unknown_action", f"no command action '{action['id']}'")
+    return list(spec["argv"])
+
+
+def active_run_for(kind: str, action_id: str) -> dict | None:
+    """An in-flight run of the same action, if any. Used to stop a second
+    concurrent run: several jobs read-modify-write the same shared CSVs, so
+    overlapping runs of one action can corrupt data."""
+    reconcile_running_runs()
+    for r in list_runs(limit=500):
+        if r["status"] == "running" and r["kind"] == kind and r["action_id"] == action_id:
+            return r
+    return None
+
+
+def start_run(kind: str, action_id: str, ai_profile: str = "", confirm: bool = False) -> str:
+    """Validate, record, and launch a run. Returns the audit id.
+    Raises RunRefused with a contract error code on any rejection."""
+    if not tmux_available():
+        raise RunRefused("tmux_missing",
+                         "tmux is not installed — install it (macOS: brew install tmux) "
+                         "and restart the dashboard.")
+    action = find_action(kind, action_id)
+    if not action:
+        raise RunRefused("unknown_action", f"no {kind} action '{action_id}'")
+    if not action["available"]:
+        raise RunRefused("unavailable", action["unavailable_reason"] or "action is unavailable")
+    # Enforced server-side so the UI dialog can't be bypassed by posting directly.
+    if action["danger"] and not confirm:
+        raise RunRefused("confirm_required",
+                         f"'{action['name']}' changes state outside this workspace "
+                         f"and needs explicit confirmation.")
+    existing = active_run_for(kind, action_id)
+    if existing:
+        raise RunRefused("already_running",
+                         f"'{action['name']}' is already running as {existing['audit_id']}.",
+                         audit_id=existing["audit_id"])
+    if not action["accepts_ai"]:
+        ai_profile = ""
+
+    audit_id = new_audit_id()
+    session = tmux_session_name(audit_id)
+    log_path = run_log_path(audit_id)
+    rel_log = str(log_path.relative_to(WS))
+    create_run(audit_id, kind, action_id, ai_profile, session, rel_log)
+    try:
+        tmux_launch(session,
+                    [sys.executable, "-u", str(Path(__file__).resolve()), "_exec-run", audit_id],
+                    WS,
+                    {"AUTO_WORKSPACE": str(WS), "PYTHONUNBUFFERED": "1"})
+    except Exception as e:
+        finish_run(audit_id, 1, status="failed", note=f"failed to start: {e}")
+        raise RunRefused("launch_failed", f"could not start tmux session: {e}")
+    return audit_id
+
+
+def cancel_run(audit_id: str) -> dict:
+    r = get_run(audit_id)
+    if not r:
+        raise RunRefused("unknown_run", f"no run '{audit_id}'")
+    if r["status"] != "running":
+        raise RunRefused("not_running", f"run {audit_id} already finished ({r['status']}).")
+    tmux_kill_session(r["tmux_session"])
+    set_run_status(audit_id, "cancelled", note="cancelled from the dashboard")
+    return get_run(audit_id)
+
+
+# ---------- _exec-run (the in-tmux wrapper; internal) ------------------------
+STEP_MARKER = "##AUTO-STEP##"
+
+
+def cmd_exec_run(args):
+    """Run one recorded action inside its tmux session, streaming every line
+    into the run's audit-tagged log, then record the true exit code.
+
+    Not advertised in the usage block: this is how the dashboard executes a
+    run, not something to invoke by hand.
+    """
+    audit_id = args.audit_id
+    r = get_run(audit_id)
+    if not r:
+        sys.exit(f"no run '{audit_id}'")
+    action = find_action(r["kind"], r["action_id"])
+    log = WS / r["log_path"]
+    log.parent.mkdir(parents=True, exist_ok=True)
+
+    if not action:
+        with open(log, "a") as f:
+            f.write(format_log_line(audit_id, f"!! action {r['kind']}/{r['action_id']} no longer exists"))
+        finish_run(audit_id, 1, note="action no longer exists")
+        sys.exit(1)
+
+    argv = [sys.executable, "-u", str(Path(__file__).resolve())] + action_argv(action, r["ai_profile"] or "")
+    env = {**os.environ,
+           "AUTO_WORKSPACE": str(WS),
+           "PYTHONUNBUFFERED": "1",
+           # Tells execute_job to emit step markers; unset in terminal runs, so
+           # ordinary CLI output stays byte-for-byte unchanged.
+           "AUTO_RUN_AUDIT_ID": audit_id}
+
+    rc = 1
+    with open(log, "a", buffering=1) as f:
+        f.write(format_log_line(audit_id,
+                f"=== {action['kind']} '{action['id']}'"
+                + (f" (ai profile: {r['ai_profile']})" if r["ai_profile"] else "")
+                + " ==="))
+        try:
+            proc = subprocess.Popen(argv, cwd=str(WS), env=env, stdin=subprocess.DEVNULL,
+                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                    text=True, bufsize=1)
+            for line in proc.stdout:
+                if line.startswith(STEP_MARKER):
+                    _handle_step_marker(audit_id, line)
+                    continue
+                f.write(format_log_line(audit_id, line))
+            proc.wait()
+            rc = proc.returncode
+        except Exception as e:
+            f.write(format_log_line(audit_id, f"!! runner error: {e}"))
+            rc = 1
+        f.write(format_log_line(audit_id, f"=== exited {rc} ==="))
+
+    finish_run(audit_id, rc)
+    sys.exit(rc)
+
+
+def _handle_step_marker(audit_id: str, line: str):
+    """Parse '##AUTO-STEP## idx=<n> job=<id> event=start|end [rc=<n>]'."""
+    try:
+        fields = dict(kv.split("=", 1) for kv in line.split()[1:] if "=" in kv)
+        idx = int(fields.get("idx", "0"))
+        job = fields.get("job", "")
+        event = fields.get("event", "")
+        rc = int(fields["rc"]) if "rc" in fields else None
+        record_step(audit_id, idx, job, event, rc)
+    except Exception:
+        pass  # never let a malformed marker kill a run
+
+
 # ---------- orchestrator (multi-step pipelines spanning packs) --------------
 def load_orchestrations() -> list[dict]:
     """Every orchestrator/*.yaml, parsed. Each gets '_id' (filename stem, the
@@ -640,7 +953,7 @@ def _record_orchestration_run(orch_id: str, rc: int, dur: float) -> int:
         c = sqlite3.connect(_orchestrations_db())
         _orchestrations_schema(c)
         cur = c.execute("INSERT INTO orchestration_runs(ts, orchestration, host, rc, dur) VALUES (?,?,?,?,?)",
-                         (datetime.datetime.utcnow().isoformat(), orch_id, socket.gethostname(), rc, dur))
+                         (datetime.datetime.now(datetime.timezone.utc).isoformat(), orch_id, socket.gethostname(), rc, dur))
         run_id = cur.lastrowid
         c.commit(); c.close()
         return run_id
@@ -979,11 +1292,43 @@ def _dashboard_html():
     if __doc__ and "Usage:" in __doc__:
         auto_usage = html.escape(textwrap.dedent(__doc__.split("Usage:", 1)[1]).strip())
 
+    tmux_warning = "" if tmux_available() else (
+        '<div class="warn"><strong>tmux is not installed.</strong> '
+        'Every run executes inside its own tmux session, so no action can be launched '
+        'until it is available. Install it (macOS: <code>brew install tmux</code>) and '
+        'restart the dashboard.</div>')
+
     return f"""<!doctype html>
 <html><head><meta charset="utf-8"><title>auto — workspace dashboard</title>
 <style>
  body{{font-family:-apple-system,Helvetica,Arial,sans-serif;max-width:1000px;margin:2rem auto;padding:0 1rem;color:#1a1a1a;background:#fafafa}}
  h1{{font-size:1.4rem}} h2{{margin-top:2.5rem;border-bottom:1px solid #ddd;padding-bottom:.3rem}}
+ .warn{{background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:.75rem 1rem;margin:1rem 0}}
+ .actions{{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:.75rem;margin:1rem 0}}
+ .action{{background:#fff;border:1px solid #ddd;border-radius:8px;padding:.75rem}}
+ .action.danger{{border-color:#f59e0b;background:#fffbeb}}
+ .action.off{{opacity:.55}}
+ .action h4{{margin:0 0 .3rem;font-size:.95rem}}
+ .action p{{margin:0 0 .6rem;font-size:.8rem;color:#555}}
+ .action .why{{color:#b3261e;font-size:.75rem}}
+ button{{font:inherit;font-size:.85rem;padding:.3rem .7rem;border:1px solid #bbb;border-radius:6px;
+         background:#fff;cursor:pointer}}
+ button:hover:not(:disabled){{background:#f0f0f0}}
+ button:disabled{{cursor:not-allowed;opacity:.5}}
+ button.run{{background:#2563eb;border-color:#2563eb;color:#fff}}
+ button.run:hover:not(:disabled){{background:#1d4ed8}}
+ button.danger{{background:#b45309;border-color:#b45309;color:#fff}}
+ select{{font:inherit;font-size:.8rem;padding:.25rem;margin-right:.4rem}}
+ .badge{{display:inline-block;font-size:.7rem;padding:.1rem .45rem;border-radius:10px;color:#fff}}
+ .b-running{{background:#2563eb}} .b-succeeded{{background:#0a7a2f}} .b-failed{{background:#b3261e}}
+ .b-cancelled{{background:#666}} .b-timed_out{{background:#b45309}}
+ .aid{{font-family:ui-monospace,Menlo,monospace;font-size:.75rem}}
+ #logbox{{background:#111;color:#eee;font-family:ui-monospace,Menlo,monospace;font-size:.75rem;
+          padding:.75rem;border-radius:8px;height:22rem;overflow-y:auto;white-space:pre-wrap;margin:0}}
+ .steps{{font-size:.8rem;margin:.5rem 0}}
+ .steps li{{margin:.15rem 0}}
+ .toast{{position:fixed;right:1rem;bottom:1rem;background:#111;color:#fff;padding:.6rem .9rem;
+         border-radius:8px;font-size:.85rem;max-width:26rem}}
  .card{{background:#fff;border:1px solid #ddd;border-radius:8px;padding:1rem;margin:1rem 0}}
  .tag{{display:inline-block;font-size:.7rem;background:#eee;border-radius:4px;padding:.1rem .4rem;margin-left:.4rem;vertical-align:middle}}
  .ok{{color:#0a7a2f}} .bad{{color:#b3261e;font-weight:600}}
@@ -1000,6 +1345,18 @@ def _dashboard_html():
 <p class="meta">os: {this_os()} &middot; host: {html.escape(socket.gethostname())} &middot;
    machine: {html.escape(mach['id']) if mach else 'unregistered'} &middot; regenerated fresh on every reload</p>
 
+{tmux_warning}
+
+<h2>Run something</h2>
+<p class="meta">Each run executes in its own tmux session, torn down when it finishes.
+   Runs are non-interactive: prompts are skipped exactly as on a scheduled run.</p>
+<div id="actions" class="actions"><em>loading…</em></div>
+
+<h2>Runs</h2>
+<p class="meta">Newest first. Open one to follow its log live.</p>
+<div id="runs"><em>loading…</em></div>
+<div id="rundetail"></div>
+
 <h2>Packs &amp; config</h2>
 {''.join(pack_blocks)}
 
@@ -1011,22 +1368,321 @@ def _dashboard_html():
 
 <h3>auto CLI usage</h3>
 <pre>{auto_usage}</pre>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let OPEN_RUN = null, LOG_OFFSET = 0, LOG_TIMER = null, PINNED = true;
+
+function toast(msg) {{
+  const d = document.createElement('div');
+  d.className = 'toast'; d.textContent = msg;
+  document.body.appendChild(d);
+  setTimeout(() => d.remove(), 6000);
+}}
+
+async function api(path, opts) {{
+  const res = await fetch(path, opts);
+  let body = {{}};
+  try {{ body = await res.json(); }} catch (e) {{}}
+  return {{ ok: res.ok, status: res.status, body }};
+}}
+
+// ---- actions ----
+async function loadActions() {{
+  const {{ body }} = await api('/api/actions');
+  const profiles = (body.ai_profiles || []).filter(p => p.usable);
+  const groups = {{ job: [], orchestration: [], command: [] }};
+  (body.actions || []).forEach(a => groups[a.kind] && groups[a.kind].push(a));
+  const titles = {{ job: 'Jobs', orchestration: 'Pipelines', command: 'Workspace commands' }};
+  let html = '';
+  for (const kind of ['orchestration', 'job', 'command']) {{
+    if (!groups[kind].length) continue;
+    html += `<h3 style="grid-column:1/-1;margin:.5rem 0 0;font-size:.9rem;color:#666">${{titles[kind]}}</h3>`;
+    for (const a of groups[kind]) {{
+      const dis = !a.available || !body.tmux_available;
+      // Only jobs take --ai: orchestrations set it per step in their own YAML.
+      const sel = (a.accepts_ai && profiles.length)
+        ? `<select id="ai-${{a.kind}}-${{a.id}}"><option value="">(no AI profile)</option>` +
+          profiles.map(p => `<option value="${{p.name}}">${{p.name}} — ${{p.provider}}</option>`).join('') +
+          `</select>` : '';
+      html += `<div class="action ${{a.danger ? 'danger' : ''}} ${{dis ? 'off' : ''}}">
+        <h4>${{esc(a.name)}}${{a.danger ? ' <span class="tag">changes your machine</span>' : ''}}</h4>
+        <p>${{esc(a.description || '')}}</p>
+        ${{sel}}
+        <button class="run ${{a.danger ? 'danger' : ''}}" ${{dis ? 'disabled' : ''}}
+                onclick="launch('${{a.kind}}','${{a.id}}',${{a.danger}})">Run</button>
+        ${{a.unavailable_reason ? `<div class="why">${{esc(a.unavailable_reason)}}</div>` : ''}}
+        ${{a.note ? `<div class="meta" style="font-size:.72rem">${{esc(a.note)}}</div>` : ''}}
+      </div>`;
+    }}
+  }}
+  $('actions').innerHTML = html || '<em>no actions found</em>';
+}}
+
+function esc(s) {{
+  const d = document.createElement('div'); d.textContent = s == null ? '' : s;
+  return d.innerHTML;
+}}
+
+async function launch(kind, id, danger) {{
+  // Server enforces this too (a confirm-less POST is rejected) — the dialog is
+  // the friendly half of the same gate.
+  if (danger && !confirm('This changes state outside the workspace (your machine\\'s scheduler or working tree).\\n\\nRun it anyway?')) return;
+  const sel = $(`ai-${{kind}}-${{id}}`);
+  const payload = {{ kind, id, confirm: !!danger }};
+  if (sel && sel.value) payload.ai_profile = sel.value;
+  const {{ ok, body }} = await api('/api/runs', {{
+    method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
+    body: JSON.stringify(payload)
+  }});
+  if (!ok) {{ toast(body.message || 'could not start the run'); await loadRuns(); return; }}
+  toast(`started ${{body.audit_id}}`);
+  await loadRuns();
+  openRun(body.audit_id);
+}}
+
+// ---- runs ----
+async function loadRuns() {{
+  const {{ body }} = await api('/api/runs');
+  const runs = body.runs || [];
+  if (!runs.length) {{ $('runs').innerHTML = '<em>nothing has been run yet</em>'; return; }}
+  $('runs').innerHTML = '<table><tr><th>action</th><th>audit id</th><th>started</th>' +
+    '<th>elapsed</th><th>ai</th><th>status</th><th></th></tr>' +
+    runs.map(r => `<tr>
+      <td>${{esc(r.action_id)}} <span class="tag">${{r.kind}}</span></td>
+      <td><a href="#" class="aid" onclick="openRun('${{r.audit_id}}');return false">${{r.audit_id}}</a></td>
+      <td>${{esc(r.started_at)}}</td>
+      <td>${{r.elapsed_seconds == null ? '' : r.elapsed_seconds + 's'}}</td>
+      <td>${{esc(r.ai_profile || '')}}</td>
+      <td><span class="badge b-${{r.status}}">${{r.status}}</span></td>
+      <td>${{r.status === 'running'
+            ? `<button onclick="cancelRun('${{r.audit_id}}')">Cancel</button>` : ''}}</td>
+    </tr>`).join('') + '</table>';
+}}
+
+async function cancelRun(aid) {{
+  const {{ ok, body }} = await api(`/api/runs/${{aid}}/cancel`, {{ method: 'POST' }});
+  toast(ok ? `cancelled ${{aid}}` : (body.message || 'could not cancel'));
+  await loadRuns();
+}}
+
+function openRun(aid) {{
+  OPEN_RUN = aid; LOG_OFFSET = 0; PINNED = true;
+  $('rundetail').innerHTML = `
+    <h3>Run <span class="aid">${{aid}}</span>
+        <button onclick="closeRun()" style="float:right">close</button></h3>
+    <div id="runmeta" class="meta"></div>
+    <ul id="runsteps" class="steps"></ul>
+    <pre id="logbox"></pre>`;
+  $('logbox').addEventListener('scroll', () => {{
+    const el = $('logbox');
+    PINNED = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+  }});
+  if (LOG_TIMER) clearInterval(LOG_TIMER);
+  pollLog();
+  LOG_TIMER = setInterval(pollLog, 1000);
+}}
+
+function closeRun() {{
+  OPEN_RUN = null;
+  if (LOG_TIMER) clearInterval(LOG_TIMER);
+  LOG_TIMER = null;
+  $('rundetail').innerHTML = '';
+}}
+
+async function pollLog() {{
+  if (!OPEN_RUN) return;
+  const aid = OPEN_RUN;
+  const meta = await api(`/api/runs/${{aid}}`);
+  if (meta.ok && $('runmeta')) {{
+    const r = meta.body.run;
+    $('runmeta').innerHTML =
+      `${{esc(r.action_id)}} · <span class="badge b-${{r.status}}">${{r.status}}</span>` +
+      (r.rc == null ? '' : ` · exit ${{r.rc}}`) +
+      (r.ai_profile ? ` · ai: ${{esc(r.ai_profile)}}` : '') +
+      (r.note ? ` · ${{esc(r.note)}}` : '');
+    const steps = meta.body.steps || [];
+    $('runsteps').innerHTML = steps.map(s =>
+      `<li>step ${{s.step_index}}: ${{esc(s.job)}} <span class="badge b-${{s.status}}">${{s.status}}</span></li>`
+    ).join('');
+  }}
+  const {{ ok, body }} = await api(`/api/runs/${{aid}}/log?from=${{LOG_OFFSET}}`);
+  if (!ok || OPEN_RUN !== aid) return;
+  if (body.text) {{
+    const box = $('logbox');
+    if (!box) return;
+    box.textContent += body.text;
+    // Keep the rendered buffer bounded so a very chatty run can't freeze the page.
+    if (box.textContent.length > 400000) box.textContent = box.textContent.slice(-300000);
+    if (PINNED) box.scrollTop = box.scrollHeight;
+  }}
+  LOG_OFFSET = body.next;
+  if (body.eof) {{ clearInterval(LOG_TIMER); LOG_TIMER = null; await loadRuns(); }}
+}}
+
+loadActions();
+loadRuns();
+setInterval(loadRuns, 4000);
+</script>
 </body></html>"""
+
+# Error code -> HTTP status, per contracts/dashboard-api.md.
+REFUSAL_STATUS = {
+    "unknown_action": 404, "unknown_run": 404,
+    "already_running": 409, "not_running": 409,
+    "confirm_required": 412, "unavailable": 422,
+    "tmux_missing": 503, "launch_failed": 500,
+}
+
+ALLOWED_HOSTS = ("127.0.0.1", "localhost", "::1", "[::1]")
+
+
+def _host_allowed(host_header: str | None) -> bool:
+    """Only accept requests addressed to a loopback host.
+
+    This is the DNS-rebinding defense: a malicious page can point its own
+    hostname at 127.0.0.1 and POST here, but it cannot change the Host header
+    it sends. ADR 0012 could skip this because nothing was executable; now
+    that runs can be launched, it matters.
+    """
+    if not host_header:
+        return False
+    h = host_header.rsplit(":", 1)[0] if not host_header.startswith("[") else host_header.split("]")[0] + "]"
+    return h in ALLOWED_HOSTS
+
 
 def cmd_serve(args):
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from urllib.parse import urlparse, parse_qs
 
     class Handler(BaseHTTPRequestHandler):
-        def do_GET(self):
-            body = _dashboard_html().encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
+        # ---- helpers ----
+        def _json(self, status, payload):
+            body = json.dumps(payload).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
 
+        def _err(self, status, code, message, **extra):
+            self._json(status, {"error": code, "message": message, **extra})
+
+        def _guard(self) -> bool:
+            if not _host_allowed(self.headers.get("Host")):
+                self._err(403, "forbidden_host",
+                          "This dashboard only accepts requests addressed to localhost.")
+                return False
+            return True
+
+        def _body(self) -> dict:
+            n = int(self.headers.get("Content-Length") or 0)
+            if not n:
+                return {}
+            try:
+                return json.loads(self.rfile.read(n).decode("utf-8"))
+            except Exception:
+                return {}
+
+        def _run_payload(self, r: dict) -> dict:
+            started = r["started_at"]
+            try:
+                t0 = datetime.datetime.strptime(started, "%Y-%m-%dT%H:%M:%SZ").replace(
+                    tzinfo=datetime.timezone.utc)
+                end = (datetime.datetime.strptime(r["ended_at"], "%Y-%m-%dT%H:%M:%SZ").replace(
+                    tzinfo=datetime.timezone.utc) if r["ended_at"]
+                    else datetime.datetime.now(datetime.timezone.utc))
+                elapsed = round((end - t0).total_seconds(), 1)
+            except Exception:
+                elapsed = None
+            return {**r, "elapsed_seconds": elapsed}
+
+        # ---- GET: never has side effects (spec FR-029) ----
+        def do_GET(self):
+            if not self._guard():
+                return
+            u = urlparse(self.path)
+            path, qs = u.path, parse_qs(u.query)
+
+            if path == "/":
+                body = _dashboard_html().encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+
+            if path == "/api/actions":
+                self._json(200, {"tmux_available": tmux_available(),
+                                 "ai_profiles": list_ai_profiles(),
+                                 "actions": list_actions()})
+                return
+
+            if path == "/api/runs":
+                reconcile_running_runs()
+                self._json(200, {"runs": [self._run_payload(r) for r in list_runs()]})
+                return
+
+            m = re.fullmatch(r"/api/runs/([^/]+)", path)
+            if m:
+                r = get_run(m.group(1))
+                if not r:
+                    self._err(404, "unknown_run", f"no run '{m.group(1)}'"); return
+                self._json(200, {"run": self._run_payload(r), "steps": get_run_steps(r["audit_id"])})
+                return
+
+            m = re.fullmatch(r"/api/runs/([^/]+)/log", path)
+            if m:
+                r = get_run(m.group(1))
+                if not r:
+                    self._err(404, "unknown_run", f"no run '{m.group(1)}'"); return
+                try:
+                    offset = int((qs.get("from") or ["0"])[0])
+                except ValueError:
+                    offset = 0
+                text, nxt, size = read_log_slice(WS / r["log_path"], max(0, offset))
+                # eof only when the run has finished AND the client has caught
+                # up to the end of the file — otherwise it would stop polling
+                # while output was still being flushed.
+                eof = r["status"] != "running" and nxt >= size
+                self._json(200, {"from": offset, "next": nxt, "eof": eof, "text": text})
+                return
+
+            self._err(404, "not_found", f"no such path: {path}")
+
+        # ---- POST: every mutation lives here ----
+        def do_POST(self):
+            if not self._guard():
+                return
+            path = urlparse(self.path).path
+
+            if path == "/api/runs":
+                b = self._body()
+                try:
+                    aid = start_run(str(b.get("kind") or ""), str(b.get("id") or ""),
+                                    str(b.get("ai_profile") or ""), bool(b.get("confirm")))
+                except RunRefused as e:
+                    self._err(REFUSAL_STATUS.get(e.code, 400), e.code, e.message, **e.extra)
+                    return
+                r = get_run(aid)
+                self._json(201, {"audit_id": aid, "status": r["status"], "log_path": r["log_path"]})
+                return
+
+            m = re.fullmatch(r"/api/runs/([^/]+)/cancel", path)
+            if m:
+                try:
+                    r = cancel_run(m.group(1))
+                except RunRefused as e:
+                    self._err(REFUSAL_STATUS.get(e.code, 400), e.code, e.message)
+                    return
+                self._json(200, {"audit_id": r["audit_id"], "status": r["status"]})
+                return
+
+            self._err(404, "not_found", f"no such path: {path}")
+
         def log_message(self, fmt, *a):
-            pass  # quiet — read-only, localhost-only dashboard; see ADR 0012
+            pass  # quiet — localhost-only dashboard, polled continuously; see ADR 0018
 
     httpd = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     print(f"serving workspace dashboard on http://127.0.0.1:{args.port}  (Ctrl+C to stop)")
@@ -1147,11 +1803,15 @@ def main():
     scp = sub.add_parser("schedule"); scp.add_argument("action"); scp.add_argument("--dry-run", action="store_true")
     cfp = sub.add_parser("config"); cfp.add_argument("action", choices=["status", "init"], nargs="?", default="status"); cfp.add_argument("pack")
     svp = sub.add_parser("serve"); svp.add_argument("--port", type=int, default=4321)
+    # Internal: how `auto serve` executes a run inside its tmux session.
+    # Intentionally absent from the usage docstring — not a user-facing command.
+    xrp = sub.add_parser("_exec-run"); xrp.add_argument("audit_id")
     a = p.parse_args(argv)
     a.ai = ai_name  # only meaningful for cmd == "run" (ADR 0015)
     {"list": cmd_list, "packs": cmd_packs, "search": cmd_search, "run": cmd_run, "orchestrate": cmd_orchestrate,
      "new": cmd_new, "catalog": cmd_catalog, "share": cmd_share, "log": cmd_log, "doctor": cmd_doctor,
-     "bootstrap": cmd_bootstrap, "schedule": cmd_schedule, "config": cmd_config, "serve": cmd_serve}[a.cmd](a)
+     "bootstrap": cmd_bootstrap, "schedule": cmd_schedule, "config": cmd_config, "serve": cmd_serve,
+     "_exec-run": cmd_exec_run}[a.cmd](a)
 
 if __name__ == "__main__":
     main()

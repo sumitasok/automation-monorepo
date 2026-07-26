@@ -300,5 +300,362 @@ class TestTmuxRunner(unittest.TestCase):
                          "stdin must NOT be a tty inside a dashboard run (FR-015)")
 
 
+def write_job(ws: Path, pack: str, job_id: str, **manifest):
+    """Add a runnable script job to a temp workspace and mount its pack."""
+    jd = ws / "packs" / pack / "jobs" / "misc" / job_id
+    jd.mkdir(parents=True, exist_ok=True)
+    (jd / "main.sh").write_text("#!/usr/bin/env bash\necho hi\n")
+    m = {"id": job_id, "name": manifest.pop("name", job_id), "language": "bash",
+         "entrypoint": "main.sh", "description": manifest.pop("description", "a test job"),
+         "visibility": "private"}
+    m.update(manifest)
+    import yaml as _yaml
+    (jd / "manifest.yaml").write_text(_yaml.safe_dump(m, sort_keys=False))
+    (ws / "packs" / pack / "pack.yaml").write_text(_yaml.safe_dump(
+        {"name": pack, "default_visibility": "private"}, sort_keys=False))
+    (ws / "packs.yaml").write_text(_yaml.safe_dump(
+        {"packs": [{"name": pack, "path": f"packs/{pack}", "writable": True}]}, sort_keys=False))
+    return jd
+
+
+class TestActionCatalog(unittest.TestCase):
+    def setUp(self):
+        self._ws = temp_workspace()
+        self.ws = self._ws.__enter__()
+
+    def tearDown(self):
+        self._ws.__exit__(None, None, None)
+
+    def test_jobs_accept_ai_and_are_listed(self):
+        write_job(self.ws, "testpack", "job-a", description="does a thing")
+        auto = load_auto(self.ws)
+        acts = auto.list_actions()
+        job = next(a for a in acts if a["id"] == "job-a")
+        self.assertEqual(job["kind"], "job")
+        self.assertEqual(job["description"], "does a thing")
+        self.assertTrue(job["accepts_ai"], "jobs take --ai")
+        self.assertFalse(job["danger"])
+        self.assertTrue(job["available"])
+
+    def test_orchestrations_do_not_accept_ai(self):
+        """`auto orchestrate` has no --ai flag — each step names its own
+        profile — so offering a dropdown would imply an override that does
+        not exist (spec FR-010)."""
+        write_job(self.ws, "testpack", "job-a")
+        (self.ws / "orchestrator" / "pipe.yaml").write_text(
+            "name: pipe\ndescription: a pipeline\nsteps:\n  - job: job-a\n")
+        auto = load_auto(self.ws)
+        orch = next(a for a in auto.list_actions() if a["kind"] == "orchestration")
+        self.assertEqual(orch["id"], "pipe")
+        self.assertFalse(orch["accepts_ai"])
+        self.assertTrue(orch["available"])
+
+    def test_orchestration_with_unknown_job_is_unavailable_with_reason(self):
+        (self.ws / "orchestrator" / "broken.yaml").write_text(
+            "name: broken\nsteps:\n  - job: nope-not-real\n")
+        auto = load_auto(self.ws)
+        orch = next(a for a in auto.list_actions() if a["id"] == "broken")
+        self.assertFalse(orch["available"])
+        self.assertIn("nope-not-real", orch["unavailable_reason"])
+
+    def test_only_maintenance_commands_are_dangerous(self):
+        auto = load_auto(self.ws)
+        cmds = {a["id"]: a for a in auto.list_actions() if a["kind"] == "command"}
+        self.assertTrue(cmds["schedule-sync"]["danger"])
+        self.assertTrue(cmds["bootstrap"]["danger"])
+        for safe in ("list", "packs", "doctor", "catalog"):
+            self.assertFalse(cmds[safe]["danger"], f"{safe} must not be flagged dangerous")
+        # Interactive / argument-taking commands aren't one-click actions.
+        for excluded in ("new", "log", "share", "search"):
+            self.assertNotIn(excluded, cmds)
+
+    def test_machine_pinned_job_stays_runnable_with_a_note(self):
+        """runs_on is a SCHEDULING constraint, not a manual-run permission.
+
+        cmd_schedule uses job_runs_here to pick what to install on this
+        machine; cmd_run never checks it, so `auto run gmail-extract` works by
+        hand anywhere. The dashboard must not be stricter than the CLI it
+        wraps — otherwise machine-pinned jobs (gmail-extract, wallet-sync,
+        which are pinned to home-server) would be unclickable here.
+        """
+        write_job(self.ws, "testpack", "job-win",
+                  runs_on={"os": ["windows"], "machines": ["some-other-box"]})
+        auto = load_auto(self.ws)
+        job = next(a for a in auto.list_actions() if a["id"] == "job-win")
+        self.assertTrue(job["available"], "machine pinning must not block a manual run")
+        self.assertIsNone(job["unavailable_reason"])
+        self.assertIn("scheduled only on", job["note"])
+
+    def test_job_with_missing_pack_dir_is_unavailable(self):
+        write_job(self.ws, "testpack", "job-a")
+        shutil.rmtree(self.ws / "packs" / "testpack" / "jobs")
+        import yaml as _yaml
+        (self.ws / "packs.yaml").write_text(_yaml.safe_dump(
+            {"packs": [{"name": "gone", "path": "packs/gone", "writable": True}]}))
+        auto = load_auto(self.ws)
+        self.assertEqual([a for a in auto.list_actions() if a["kind"] == "job"], [])
+
+    def test_action_argv_shapes(self):
+        write_job(self.ws, "testpack", "job-a")
+        auto = load_auto(self.ws)
+        job = next(a for a in auto.list_actions() if a["id"] == "job-a")
+        self.assertEqual(auto.action_argv(job), ["run", "job-a"])
+        self.assertEqual(auto.action_argv(job, "deepseek"), ["run", "job-a", "--ai", "deepseek"])
+        cmd = next(a for a in auto.list_actions() if a["id"] == "schedule-sync")
+        self.assertEqual(auto.action_argv(cmd), ["schedule", "sync"])
+
+
+class TestAiProfiles(unittest.TestCase):
+    def setUp(self):
+        self._ws = temp_workspace()
+        self.ws = self._ws.__enter__()
+        self.aidir = self.ws / "config" / "ai"
+
+    def tearDown(self):
+        self._ws.__exit__(None, None, None)
+
+    def test_excludes_example_templates(self):
+        (self.aidir / "deepseek.example.yaml").write_text(
+            "provider: deepseek\napi_key: REPLACE_ME\n")
+        (self.aidir / "real.yaml").write_text("provider: deepseek\napi_key: sk-abc123\n")
+        auto = load_auto(self.ws)
+        names = [p["name"] for p in auto.list_ai_profiles()]
+        self.assertEqual(names, ["real"])
+
+    def test_invalid_profile_reported_unusable_not_dropped(self):
+        (self.aidir / "broken.yaml").write_text("provider: deepseek\n")  # no api_key
+        auto = load_auto(self.ws)
+        prof = next(p for p in auto.list_ai_profiles() if p["name"] == "broken")
+        self.assertFalse(prof["usable"])
+
+    def test_never_exposes_credentials(self):
+        """SC-007: only the profile name/provider may leave the server."""
+        secret = "sk-super-secret-value-000"
+        (self.aidir / "real.yaml").write_text(f"provider: deepseek\napi_key: {secret}\n")
+        auto = load_auto(self.ws)
+        self.assertNotIn(secret, repr(auto.list_ai_profiles()))
+
+
+@requires_tmux
+class TestStartRun(unittest.TestCase):
+    def setUp(self):
+        self._ws = temp_workspace()
+        self.ws = self._ws.__enter__()
+        write_job(self.ws, "testpack", "job-a")
+        self.auto = load_auto(self.ws)
+        self.started = []
+
+    def tearDown(self):
+        for aid in self.started:
+            self.auto.tmux_kill_session(self.auto.tmux_session_name(aid))
+        self._ws.__exit__(None, None, None)
+
+    def _wait_done(self, aid, timeout=30.0):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            r = self.auto.get_run(aid)
+            if r and r["status"] != "running":
+                return r
+            time.sleep(0.2)
+        return self.auto.get_run(aid)
+
+    def test_launches_and_completes_with_audit_tagged_log(self):
+        aid = self.auto.start_run("job", "job-a")
+        self.started.append(aid)
+        r = self._wait_done(aid)
+        self.assertEqual(r["status"], "succeeded")
+        self.assertEqual(r["rc"], 0)
+        log = (self.ws / r["log_path"]).read_text()
+        self.assertTrue(log.strip(), "log should not be empty")
+        for line in log.splitlines():
+            self.assertIn(aid, line, "every log line must carry the audit id")
+
+    def test_refuses_duplicate_concurrent_run(self):
+        write_job(self.ws, "testpack", "slow")
+        (self.ws / "packs" / "testpack" / "jobs" / "misc" / "slow" / "main.sh").write_text(
+            "#!/usr/bin/env bash\nsleep 20\n")
+        auto = load_auto(self.ws)
+        aid = auto.start_run("job", "slow")
+        self.started.append(aid)
+        with self.assertRaises(auto.RunRefused) as ctx:
+            auto.start_run("job", "slow")
+        self.assertEqual(ctx.exception.code, "already_running")
+        auto.cancel_run(aid)
+
+    def test_refuses_danger_action_without_confirm(self):
+        with self.assertRaises(self.auto.RunRefused) as ctx:
+            self.auto.start_run("command", "schedule-sync")
+        self.assertEqual(ctx.exception.code, "confirm_required")
+
+    def test_refuses_unknown_action(self):
+        with self.assertRaises(self.auto.RunRefused) as ctx:
+            self.auto.start_run("job", "no-such-job")
+        self.assertEqual(ctx.exception.code, "unknown_action")
+
+    def test_machine_pinned_job_can_still_be_launched(self):
+        """Mirror of the catalog test: pinning must not refuse a manual run."""
+        write_job(self.ws, "testpack", "pinned",
+                  runs_on={"os": ["windows"], "machines": ["some-other-box"]})
+        auto = load_auto(self.ws)
+        aid = auto.start_run("job", "pinned")
+        self.started.append(aid)
+        self._wait_done(aid)
+
+    def test_ai_profile_ignored_for_actions_that_cannot_take_one(self):
+        aid = self.auto.start_run("command", "list")
+        self.started.append(aid)
+        self.assertIsNone(self.auto.get_run(aid)["ai_profile"])
+        self._wait_done(aid)
+
+    def test_cancel_marks_run_cancelled_and_kills_session(self):
+        write_job(self.ws, "testpack", "slow2")
+        (self.ws / "packs" / "testpack" / "jobs" / "misc" / "slow2" / "main.sh").write_text(
+            "#!/usr/bin/env bash\nsleep 30\n")
+        auto = load_auto(self.ws)
+        aid = auto.start_run("job", "slow2")
+        self.started.append(aid)
+        time.sleep(1.0)
+        auto.cancel_run(aid)
+        self.assertEqual(auto.get_run(aid)["status"], "cancelled")
+        self.assertFalse(auto.tmux_has_session(auto.tmux_session_name(aid)))
+        with self.assertRaises(auto.RunRefused) as ctx:
+            auto.cancel_run(aid)
+        self.assertEqual(ctx.exception.code, "not_running")
+
+
+@requires_tmux
+class TestOrchestrationRun(unittest.TestCase):
+    """End-to-end step progress, without touching the real gmail pipeline."""
+
+    def setUp(self):
+        self._ws = temp_workspace()
+        self.ws = self._ws.__enter__()
+        write_job(self.ws, "testpack", "step-one")
+        write_job(self.ws, "testpack", "step-two")
+        (self.ws / "orchestrator" / "pipe.yaml").write_text(
+            "name: pipe\ndescription: two-step test pipeline\n"
+            "steps:\n  - job: step-one\n  - job: step-two\n")
+        self.auto = load_auto(self.ws)
+        self.started = []
+
+    def tearDown(self):
+        for aid in self.started:
+            self.auto.tmux_kill_session(self.auto.tmux_session_name(aid))
+        self._ws.__exit__(None, None, None)
+
+    def test_orchestration_records_step_progress(self):
+        aid = self.auto.start_run("orchestration", "pipe")
+        self.started.append(aid)
+        deadline = time.time() + 40
+        while time.time() < deadline:
+            r = self.auto.get_run(aid)
+            if r["status"] != "running":
+                break
+            time.sleep(0.3)
+        self.assertEqual(r["status"], "succeeded", msg=(self.ws / r["log_path"]).read_text())
+
+        steps = self.auto.get_run_steps(aid)
+        self.assertEqual(len(steps), 2, f"expected 2 steps, got {steps}")
+        self.assertEqual([s["job"] for s in steps], ["step-one", "step-two"])
+        self.assertTrue(all(s["status"] == "succeeded" for s in steps))
+
+        # Markers are control data, not output: they must not reach the log.
+        log = (self.ws / r["log_path"]).read_text()
+        self.assertNotIn("##AUTO-STEP##", log)
+
+
+@requires_tmux
+class TestParallelRunAudit(unittest.TestCase):
+    """spec SC-004: with several runs in flight, every log line must be
+    attributable to exactly one run."""
+
+    def setUp(self):
+        self._ws = temp_workspace()
+        self.ws = self._ws.__enter__()
+        for n in ("alpha", "beta", "gamma"):
+            jd = write_job(self.ws, "testpack", n)
+            # Chatty and staggered, so the three runs genuinely interleave.
+            (jd / "main.sh").write_text(
+                f"#!/usr/bin/env bash\nfor i in 1 2 3 4 5; do echo '{n} line '$i; sleep 0.2; done\n")
+        self.auto = load_auto(self.ws)
+        self.started = []
+
+    def tearDown(self):
+        for aid in self.started:
+            self.auto.tmux_kill_session(self.auto.tmux_session_name(aid))
+        self._ws.__exit__(None, None, None)
+
+    def test_three_concurrent_runs_stay_attributable(self):
+        ids = {n: self.auto.start_run("job", n) for n in ("alpha", "beta", "gamma")}
+        self.started.extend(ids.values())
+
+        deadline = time.time() + 60
+        while time.time() < deadline:
+            if all(self.auto.get_run(a)["status"] != "running" for a in ids.values()):
+                break
+            time.sleep(0.3)
+
+        for name, aid in ids.items():
+            r = self.auto.get_run(aid)
+            self.assertEqual(r["status"], "succeeded", f"{name} did not succeed")
+            lines = [l for l in (self.ws / r["log_path"]).read_text().splitlines() if l.strip()]
+            self.assertTrue(lines)
+            for line in lines:
+                self.assertIn(aid, line, "every line must carry its own audit id")
+                for other in ids.values():
+                    if other != aid:
+                        self.assertNotIn(other, line, "no line may carry a second run's id")
+            self.assertTrue(any(f"{name} line 5" in l for l in lines),
+                            f"{name}'s own output missing from its log")
+
+        self.assertEqual(len({*ids.values()}), 3, "audit ids must be distinct")
+
+
+class TestStepMarkers(unittest.TestCase):
+    """Terminal runs must stay byte-for-byte identical (research §10)."""
+
+    def setUp(self):
+        self._ws = temp_workspace()
+        self.ws = self._ws.__enter__()
+        self.auto = load_auto(self.ws)
+
+    def tearDown(self):
+        os.environ.pop("AUTO_RUN_AUDIT_ID", None)
+        self._ws.__exit__(None, None, None)
+
+    def _capture(self):
+        import io, contextlib as cl
+        buf = io.StringIO()
+        with cl.redirect_stdout(buf):
+            self.auto._emit_step_marker("job-a", "start")
+            self.auto._emit_step_marker("job-a", "end", 0)
+        return buf.getvalue()
+
+    def test_no_marker_without_audit_id(self):
+        os.environ.pop("AUTO_RUN_AUDIT_ID", None)
+        self.assertEqual(self._capture(), "",
+                         "terminal runs must emit no step markers at all")
+
+    def test_marker_emitted_under_dashboard_run(self):
+        os.environ["AUTO_RUN_AUDIT_ID"] = "r-20260726-000000-abc123"
+        out = self._capture()
+        self.assertIn("##AUTO-STEP##", out)
+        self.assertIn("job=job-a", out)
+        self.assertIn("event=start", out)
+        self.assertIn("rc=0", out)
+
+    def test_marker_parsing_roundtrip(self):
+        aid = "r-20260726-000000-parse1"
+        self.auto.create_run(aid, "orchestration", "pipe", "", "s", f"logs/runs/{aid}.log")
+        self.auto._handle_step_marker(aid, "##AUTO-STEP## idx=0 job=job-a event=start")
+        self.auto._handle_step_marker(aid, "##AUTO-STEP## idx=0 job=job-a event=end rc=0")
+        steps = self.auto.get_run_steps(aid)
+        self.assertEqual(len(steps), 1)
+        self.assertEqual(steps[0]["status"], "succeeded")
+
+    def test_malformed_marker_never_raises(self):
+        self.auto._handle_step_marker("r-x", "##AUTO-STEP## garbage")
+
+
 if __name__ == "__main__":
     unittest.main()

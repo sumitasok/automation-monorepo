@@ -53,14 +53,14 @@ description: "Task list for feature implementation"
 
 **Independent Test**: Open the dashboard, see the actions with descriptions, click a fast job (`hello-report`), and confirm it actually runs to completion.
 
-- [ ] T011 [US1] Add a `# ---------- action catalog ----------` section to `framework/tools/auto`: `list_actions()` returning Action dicts per data-model.md, built live from `load_jobs()` + `load_orchestrations()` + the fixed command table from research §7. Set `accepts_ai` true only for jobs, `danger` true for `schedule-sync`/`bootstrap`, and compute `available`/`unavailable_reason` from `job_runs_here()` and `validate_orchestration()` (FR-001, FR-003, FR-004).
-- [ ] T012 [P] [US1] Add tests for `list_actions()`: every loaded job and orchestration appears; `accepts_ai` is true for jobs and false for orchestrations (FR-010, research §7); `danger` is set only for the two maintenance commands; a job whose `runs_on` excludes this OS is `available: false` with a reason.
-- [ ] T013 [US1] Add the hidden `auto _exec-run <audit_id>` subcommand to `framework/tools/auto` (wire it into `main()`'s dispatch but deliberately **omit it from the module docstring's usage block** — it is a dashboard implementation detail, research §3). It loads the run row, builds the real CLI argv for that action (`auto run <id> [--ai <p>]`, `auto orchestrate <name>`, or `auto <command…>`), runs it as a subprocess with unbuffered output, writes every output line through `format_log_line` to the run's log, and calls `finish_run` with the true exit code.
-- [ ] T014 [US1] Add `start_run(kind, action_id, ai_profile, confirm)` to `framework/tools/auto`: validate the action exists and is available; enforce the duplicate guard (FR-006) and the `confirm` gate for `danger` actions (FR-005); create the run row; then `tmux_launch` a session running `python3 -u <auto> _exec-run <audit_id>` with `AUTO_RUN_AUDIT_ID` exported. Return the audit id or a typed error matching contracts/dashboard-api.md.
-- [ ] T015 [P] [US1] Add tests for `start_run`: refuses a second concurrent run of the same action (FR-006); refuses a `danger` action without `confirm` (FR-005); refuses an unavailable action; and refuses everything with a clear error when tmux is absent (FR-017).
-- [ ] T016 [US1] Extend `cmd_serve`'s handler in `framework/tools/auto` with a `do_POST` method plus JSON routing, and add `GET /api/actions` and `POST /api/runs` per contracts/dashboard-api.md. Enforce the shared rules: `Host` header allowlist (403 otherwise) and side-effect-free `GET` (FR-028, FR-029, research §9).
-- [ ] T017 [US1] In `_dashboard_html()`, add an **Actions** section rendering each action as a button with its name and description, grouped by kind, with unavailable ones visibly disabled showing their reason, and `danger` ones visually distinguished (FR-005). Show a prominent banner instead of buttons when tmux is missing (FR-017).
-- [ ] T018 [US1] Add the client-side JavaScript in `_dashboard_html()` to POST a launch, show a confirmation dialog first for `danger` actions, and surface the returned audit id with a link to the run — plus readable handling of the `409`/`412`/`422`/`503` error bodies.
+- [X] T011 [US1] Add a `# ---------- action catalog ----------` section to `framework/tools/auto`: `list_actions()` returning Action dicts per data-model.md, built live from `load_jobs()` + `load_orchestrations()` + the fixed command table from research §7. Set `accepts_ai` true only for jobs, `danger` true for `schedule-sync`/`bootstrap`, and compute `available`/`unavailable_reason` from `job_runs_here()` and `validate_orchestration()` (FR-001, FR-003, FR-004).
+- [X] T012 [P] [US1] Add tests for `list_actions()`: every loaded job and orchestration appears; `accepts_ai` is true for jobs and false for orchestrations (FR-010, research §7); `danger` is set only for the two maintenance commands; a job whose `runs_on` excludes this OS is `available: false` with a reason.
+- [X] T013 [US1] Add the hidden `auto _exec-run <audit_id>` subcommand to `framework/tools/auto` (wire it into `main()`'s dispatch but deliberately **omit it from the module docstring's usage block** — it is a dashboard implementation detail, research §3). It loads the run row, builds the real CLI argv for that action (`auto run <id> [--ai <p>]`, `auto orchestrate <name>`, or `auto <command…>`), runs it as a subprocess with unbuffered output, writes every output line through `format_log_line` to the run's log, and calls `finish_run` with the true exit code.
+- [X] T014 [US1] Add `start_run(kind, action_id, ai_profile, confirm)` to `framework/tools/auto`: validate the action exists and is available; enforce the duplicate guard (FR-006) and the `confirm` gate for `danger` actions (FR-005); create the run row; then `tmux_launch` a session running `python3 -u <auto> _exec-run <audit_id>` with `AUTO_RUN_AUDIT_ID` exported. Return the audit id or a typed error matching contracts/dashboard-api.md.
+- [X] T015 [P] [US1] Add tests for `start_run`: refuses a second concurrent run of the same action (FR-006); refuses a `danger` action without `confirm` (FR-005); refuses an unavailable action; and refuses everything with a clear error when tmux is absent (FR-017).
+- [X] T016 [US1] Extend `cmd_serve`'s handler in `framework/tools/auto` with a `do_POST` method plus JSON routing, and add `GET /api/actions` and `POST /api/runs` per contracts/dashboard-api.md. Enforce the shared rules: `Host` header allowlist (403 otherwise) and side-effect-free `GET` (FR-028, FR-029, research §9).
+- [X] T017 [US1] In `_dashboard_html()`, add an **Actions** section rendering each action as a button with its name and description, grouped by kind, with unavailable ones visibly disabled showing their reason, and `danger` ones visually distinguished (FR-005). Show a prominent banner instead of buttons when tmux is missing (FR-017).
+- [X] T018 [US1] Add the client-side JavaScript in `_dashboard_html()` to POST a launch, show a confirmation dialog first for `danger` actions, and surface the returned audit id with a link to the run — plus readable handling of the `409`/`412`/`422`/`503` error bodies.
 
 **Checkpoint**: US1 fully usable — buttons launch real runs (quickstart scenarios 1, 2, 8, 9, 13).
 
@@ -72,12 +72,12 @@ description: "Task list for feature implementation"
 
 **Independent Test**: Launch a job that emits output over time; watch its log grow without reloading; confirm it reaches a terminal status.
 
-- [ ] T019 [US2] Add `GET /api/runs`, `GET /api/runs/{audit_id}`, and `GET /api/runs/{audit_id}/log?from=` to the serve section of `framework/tools/auto` per contracts/dashboard-api.md. The list endpoint MUST call `reconcile_running_runs()` first (FR-016), and the log endpoint returns `{from,next,eof,text}` for incremental tailing (FR-019, FR-021).
-- [ ] T020 [US2] Add `POST /api/runs/{audit_id}/cancel`: kill the tmux session and record the run as `cancelled` (FR-014); return `409 not_running` when already terminal.
-- [ ] T021 [US2] In `_dashboard_html()`, add a **Runs** section listing runs newest-first with action name, audit id, start time, elapsed, AI profile, and status badge (FR-018), plus a Cancel control for in-progress runs.
-- [ ] T022 [US2] Add the live-tail JavaScript: poll the log endpoint ~1s from the last byte offset and append (SC-003), auto-scroll unless the user has scrolled up, stop polling on `eof`, and keep each run's view isolated from every other run's (FR-020). Cap the rendered buffer so a very chatty run cannot freeze the page (spec edge case).
-- [ ] T023 [US2] Add step-level progress for orchestration runs: in `execute_job`, emit a machine-readable step marker **only when `AUTO_RUN_AUDIT_ID` is set** (research §10, so terminal output is byte-for-byte unchanged); have `_exec-run` parse those markers into `ui_run_steps`; surface them via `GET /api/runs/{audit_id}` and render them in the run view (FR-023).
-- [ ] T024 [P] [US2] Add tests: the log endpoint's offset arithmetic is correct across successive polls; `reconcile_running_runs` is invoked by the list path; cancelling sets `cancelled`; and `execute_job` emits **no** step marker when `AUTO_RUN_AUDIT_ID` is unset (guarding the "terminal behavior unchanged" requirement).
+- [X] T019 [US2] Add `GET /api/runs`, `GET /api/runs/{audit_id}`, and `GET /api/runs/{audit_id}/log?from=` to the serve section of `framework/tools/auto` per contracts/dashboard-api.md. The list endpoint MUST call `reconcile_running_runs()` first (FR-016), and the log endpoint returns `{from,next,eof,text}` for incremental tailing (FR-019, FR-021).
+- [X] T020 [US2] Add `POST /api/runs/{audit_id}/cancel`: kill the tmux session and record the run as `cancelled` (FR-014); return `409 not_running` when already terminal.
+- [X] T021 [US2] In `_dashboard_html()`, add a **Runs** section listing runs newest-first with action name, audit id, start time, elapsed, AI profile, and status badge (FR-018), plus a Cancel control for in-progress runs.
+- [X] T022 [US2] Add the live-tail JavaScript: poll the log endpoint ~1s from the last byte offset and append (SC-003), auto-scroll unless the user has scrolled up, stop polling on `eof`, and keep each run's view isolated from every other run's (FR-020). Cap the rendered buffer so a very chatty run cannot freeze the page (spec edge case).
+- [X] T023 [US2] Add step-level progress for orchestration runs: in `execute_job`, emit a machine-readable step marker **only when `AUTO_RUN_AUDIT_ID` is set** (research §10, so terminal output is byte-for-byte unchanged); have `_exec-run` parse those markers into `ui_run_steps`; surface them via `GET /api/runs/{audit_id}` and render them in the run view (FR-023).
+- [X] T024 [P] [US2] Add tests: the log endpoint's offset arithmetic is correct across successive polls; `reconcile_running_runs` is invoked by the list path; cancelling sets `cancelled`; and `execute_job` emits **no** step marker when `AUTO_RUN_AUDIT_ID` is unset (guarding the "terminal behavior unchanged" requirement).
 
 **Checkpoint**: US1 + US2 complete — the core Jenkins-style experience (quickstart scenarios 3, 10, 11, 12).
 
@@ -89,9 +89,9 @@ description: "Task list for feature implementation"
 
 **Independent Test**: Select `deepseek`, launch an AI-using job, and confirm from the run's own log and record that the profile was applied.
 
-- [ ] T025 [US3] Add `list_ai_profiles()` to `framework/tools/auto`: scan `config/ai/*.yaml`, exclude `*.example.yaml`, validate each via the existing `load_ai_profile`, and return `{name, provider, usable}` — **never any credential value** (FR-007, FR-008, FR-011, research §8).
-- [ ] T026 [P] [US3] Add tests: `*.example.yaml` files are excluded; a profile missing `api_key` is reported `usable: false` rather than dropped silently; and — asserting SC-007 — no returned structure contains the api_key string.
-- [ ] T027 [US3] Include `ai_profiles` in the `GET /api/actions` response and render a dropdown next to each action whose `accepts_ai` is true, with **no dropdown at all** for orchestrations and commands (FR-010). Pass the selection through on launch and display it on the run record (FR-009).
+- [X] T025 [US3] Add `list_ai_profiles()` to `framework/tools/auto`: scan `config/ai/*.yaml`, exclude `*.example.yaml`, validate each via the existing `load_ai_profile`, and return `{name, provider, usable}` — **never any credential value** (FR-007, FR-008, FR-011, research §8).
+- [X] T026 [P] [US3] Add tests: `*.example.yaml` files are excluded; a profile missing `api_key` is reported `usable: false` rather than dropped silently; and — asserting SC-007 — no returned structure contains the api_key string.
+- [X] T027 [US3] Include `ai_profiles` in the `GET /api/actions` response and render a dropdown next to each action whose `accepts_ai` is true, with **no dropdown at all** for orchestrations and commands (FR-010). Pass the selection through on launch and display it on the run record (FR-009).
 
 **Checkpoint**: quickstart scenario 4 passes.
 
@@ -103,9 +103,9 @@ description: "Task list for feature implementation"
 
 **Independent Test**: Run three actions concurrently, then confirm from the log files that every line is unambiguously attributable.
 
-- [ ] T028 [US4] Surface the audit id prominently in both the Runs list and the run detail view, and make it selectable/copyable (FR-024).
-- [ ] T029 [US4] Add a lookup affordance: entering an audit id opens that run's detail and full log, including for completed runs (FR-026). Return the contract's `404 unknown_run` for an unknown id.
-- [ ] T030 [P] [US4] Add a concurrency test: start three runs at once, assert each log file contains only its own audit id, that no line lacks an id, and that the three runs' records are all complete and distinct (FR-025, SC-004).
+- [X] T028 [US4] Surface the audit id prominently in both the Runs list and the run detail view, and make it selectable/copyable (FR-024).
+- [X] T029 [US4] Add a lookup affordance: entering an audit id opens that run's detail and full log, including for completed runs (FR-026). Return the contract's `404 unknown_run` for an unknown id.
+- [X] T030 [P] [US4] Add a concurrency test: start three runs at once, assert each log file contains only its own audit id, that no line lacks an id, and that the three runs' records are all complete and distinct (FR-025, SC-004).
 
 **Checkpoint**: all four user stories independently functional (quickstart scenarios 5, 6).
 
