@@ -4,6 +4,33 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-07-26 — Specify: One-Click Job Runner UI (`/speckit-specify` → feature 005)
+
+**Prompt summary**: Turn the workspace dashboard into a one-click runner — every feasible command as a described button, an `--ai` profile dropdown, runnable orchestrations and jobs, each run in an app-managed tmux session that's torn down afterwards, per-run log files with an audit ID on every line, and a Jenkins-style live-updating per-run log view in the jobs section.
+
+**Files affected**:
+- `specs/005-job-runner-ui/spec.md` (new) — 4 prioritized user stories (launch, live logs, AI profile dropdown, audit trail), 29 functional requirements, 9 success criteria, assumptions and dependencies.
+- `specs/005-job-runner-ui/checklists/requirements.md` (new) — quality checklist, all items passing.
+- `.specify/feature.json` — repointed to `specs/005-job-runner-ui` for this worktree.
+
+**Steps taken**:
+1. Created `feature/job-runner-ui` branch + `.worktrees/job-runner-ui` worktree from `main` before any spec work, per the repo-wide spec-workflow rule.
+2. Surveyed the existing implementation before writing anything: `framework/tools/auto`'s `cmd_serve`/`_dashboard_html` (the current dashboard), `execute_job` (the shared run path `auto run` and `auto orchestrate` both already use), `_record_run`/`_record_orchestration_run` (existing SQLite run history), `ai_profile_env`/`config/ai/` (the profile mechanism the dropdown will drive), `orchestrator/*.yaml`, and `auto list` (11 jobs, 1 orchestration).
+3. Found three things that materially shaped the spec, none of them obvious from the prompt:
+   - **ADR 0012 makes the dashboard deliberately read-only** — "no POST handler and no state to get stale", and no auth *specifically because* nothing could be triggered. This feature inverts that premise, so the spec records it as superseding that decision.
+   - **tmux is not installed on this machine** (`which tmux` → not found). Recorded as a hard prerequisite/blocker rather than silently assumed.
+   - **Some jobs prompt on stdin when a TTY is present** (spec 003's `--suggest-similar` / rule capture, gated on `isInteractive()`). Since tmux *provides* a real TTY, a naive implementation would hang forever on a prompt no browser user can answer — surfaced as a clarification rather than discovered during implementation.
+4. Asked the user three clarifying questions (button-surface scope, interactive-prompt handling, missing-tmux behavior) instead of guessing. Answers: widest button surface including machine-altering maintenance commands; always run non-interactively; treat tmux as a hard requirement with a clear error and no fallback.
+5. Because the user chose the riskiest button scope, added FR-005/SC-008 unprompted: machine-altering actions must be visually distinguished and require an explicit confirmation, so a stray click can't rewrite the crontab or the working tree.
+
+**Outcome**: Spec complete, all checklist items pass, zero open clarifications. Ready for `/speckit-plan`.
+
+**Caveats**:
+- **Blocker for implementation**: `tmux` must be installed (`brew install tmux`) before this feature can run at all — the user chose no-fallback.
+- The interactive-only features of `gmail-categorize` (retroactive suggestions, rule capture) will be deliberately unreachable from the UI. That's a consequence of the non-interactive decision, documented in the spec's Assumptions, not an oversight.
+- ADR 0012 will need to be superseded or amended during `/speckit-plan`; the spec flags it but doesn't write the ADR.
+- No `.specify/extensions.yml` in this repo, so no specify hooks ran.
+
 ## 2026-07-25 — Fix: serve's default CSV path made consistent with siblings (feature 004 follow-up 2)
 
 **Prompt summary**: User rejected the previous fix's `../../data/gmail/transactions.csv` fallback as "not correct at all." Clarified via a follow-up question: the objection was inconsistency with `categorize`/`discover`, which default `--csv` to a plain `transactions.csv` in the current directory — `serve` should match that, not special-case a workspace-relative guess. Separately, the user's own attempt to pass `--data-dir` directly to `make serve` failed because this Makefile only forwards extra flags via `ARGS=`.
