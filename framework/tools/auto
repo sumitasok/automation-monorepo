@@ -22,7 +22,7 @@ Usage:
   auto serve [--port N]        # local dashboard: packs, config status, jobs, command help
 """
 from __future__ import annotations
-import argparse, html, os, platform, re, socket, subprocess, sys, textwrap, datetime, shutil, time
+import argparse, html, json, os, platform, re, shlex, socket, subprocess, sys, textwrap, datetime, shutil, time
 from pathlib import Path
 
 try:
@@ -313,6 +313,249 @@ def _record_run(job_id, rc, dur):
         c.commit(); c.close()
     except Exception as e:
         print(f"(run history not recorded: {e})", file=sys.stderr)
+
+
+# ---------- run store (dashboard-launched runs, spec 005) --------------------
+# Records runs started from the `auto serve` dashboard. Deliberately separate
+# from the `runs` table above: that one is the terse per-job history every
+# `auto run` writes and is left exactly as-is, while these tables carry the
+# extra state a UI needs (audit id, status, tmux session, log path).
+RUN_STATUSES = ("running", "succeeded", "failed", "timed_out", "cancelled")
+
+
+def _runs_db() -> Path:
+    db = DATA / "state" / "runs.sqlite"
+    db.parent.mkdir(parents=True, exist_ok=True)
+    return db
+
+
+def _ui_runs_connect():
+    import sqlite3
+    c = sqlite3.connect(_runs_db(), timeout=10)
+    c.row_factory = sqlite3.Row
+    _ui_runs_schema(c)
+    return c
+
+
+def _ui_runs_schema(c):
+    """Create the dashboard run tables if absent. Idempotent, and never
+    touches the pre-existing `runs` table."""
+    c.execute("""CREATE TABLE IF NOT EXISTS ui_runs(
+        audit_id     TEXT PRIMARY KEY,
+        kind         TEXT NOT NULL,
+        action_id    TEXT NOT NULL,
+        ai_profile   TEXT,
+        status       TEXT NOT NULL,
+        rc           INTEGER,
+        started_at   TEXT NOT NULL,
+        ended_at     TEXT,
+        host         TEXT NOT NULL,
+        tmux_session TEXT NOT NULL,
+        log_path     TEXT NOT NULL,
+        note         TEXT)""")
+    c.execute("CREATE INDEX IF NOT EXISTS ui_runs_started ON ui_runs(started_at DESC)")
+    c.execute("""CREATE TABLE IF NOT EXISTS ui_run_steps(
+        audit_id   TEXT NOT NULL,
+        step_index INTEGER NOT NULL,
+        job        TEXT NOT NULL,
+        status     TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        ended_at   TEXT,
+        rc         INTEGER,
+        PRIMARY KEY (audit_id, step_index, started_at))""")
+    c.commit()
+
+
+def _utcnow() -> str:
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def new_audit_id() -> str:
+    """r-<YYYYMMDD>-<HHMMSS>-<6 hex>. Sorts chronologically as a plain string,
+    stays unique for runs started within the same second, and is short enough
+    to read in a log line and use as a tmux session suffix."""
+    import uuid
+    now = datetime.datetime.now(datetime.timezone.utc)
+    return f"r-{now:%Y%m%d}-{now:%H%M%S}-{uuid.uuid4().hex[:6]}"
+
+
+def status_for_rc(rc: int) -> str:
+    """Map an exit code to a run status. 124 is execute_job's own timeout
+    convention (see its TimeoutExpired handler), so it is surfaced as
+    timed_out rather than a generic failure."""
+    if rc == 0:
+        return "succeeded"
+    return "timed_out" if rc == 124 else "failed"
+
+
+def create_run(audit_id: str, kind: str, action_id: str, ai_profile: str,
+               tmux_session: str, log_path: str):
+    c = _ui_runs_connect()
+    c.execute("INSERT INTO ui_runs(audit_id, kind, action_id, ai_profile, status, rc,"
+              " started_at, ended_at, host, tmux_session, log_path, note)"
+              " VALUES (?,?,?,?,'running',NULL,?,NULL,?,?,?,NULL)",
+              (audit_id, kind, action_id, ai_profile or None, _utcnow(),
+               socket.gethostname(), tmux_session, log_path))
+    c.commit(); c.close()
+
+
+def finish_run(audit_id: str, rc: int, status: str | None = None, note: str | None = None):
+    c = _ui_runs_connect()
+    c.execute("UPDATE ui_runs SET status=?, rc=?, ended_at=?, note=COALESCE(?, note)"
+              " WHERE audit_id=?",
+              (status or status_for_rc(rc), rc, _utcnow(), note, audit_id))
+    c.commit(); c.close()
+
+
+def set_run_status(audit_id: str, status: str, note: str | None = None):
+    c = _ui_runs_connect()
+    c.execute("UPDATE ui_runs SET status=?, ended_at=?, note=COALESCE(?, note)"
+              " WHERE audit_id=?", (status, _utcnow(), note, audit_id))
+    c.commit(); c.close()
+
+
+def get_run(audit_id: str) -> dict | None:
+    c = _ui_runs_connect()
+    row = c.execute("SELECT * FROM ui_runs WHERE audit_id=?", (audit_id,)).fetchone()
+    c.close()
+    return dict(row) if row else None
+
+
+def list_runs(limit: int = 200) -> list[dict]:
+    c = _ui_runs_connect()
+    rows = c.execute("SELECT * FROM ui_runs ORDER BY started_at DESC, rowid DESC LIMIT ?",
+                     (limit,)).fetchall()
+    c.close()
+    return [dict(r) for r in rows]
+
+
+def get_run_steps(audit_id: str) -> list[dict]:
+    c = _ui_runs_connect()
+    rows = c.execute("SELECT * FROM ui_run_steps WHERE audit_id=? ORDER BY step_index, started_at",
+                     (audit_id,)).fetchall()
+    c.close()
+    return [dict(r) for r in rows]
+
+
+def record_step(audit_id: str, step_index: int, job: str, event: str, rc: int | None = None):
+    """Upsert a step row from a marker emitted by execute_job under a
+    dashboard run (see AUTO_RUN_AUDIT_ID in execute_job)."""
+    c = _ui_runs_connect()
+    if event == "start":
+        c.execute("INSERT OR REPLACE INTO ui_run_steps(audit_id, step_index, job, status,"
+                  " started_at, ended_at, rc) VALUES (?,?,?, 'running', ?, NULL, NULL)",
+                  (audit_id, step_index, job, _utcnow()))
+    else:
+        c.execute("UPDATE ui_run_steps SET status=?, ended_at=?, rc=?"
+                  " WHERE audit_id=? AND step_index=?",
+                  ("succeeded" if rc == 0 else "failed", _utcnow(), rc, audit_id, step_index))
+    c.commit(); c.close()
+
+
+def reconcile_running_runs() -> int:
+    """Move any run that claims to be running but whose tmux session is gone to
+    a definite status (spec FR-016).
+
+    The normal path never needs this — `_exec-run` records the real outcome
+    itself. This only catches abnormal endings: the session killed out of band,
+    the machine sleeping, or the dashboard restarting mid-run. Liveness comes
+    from tmux rather than a stored PID so a recycled PID can't read as alive.
+    """
+    fixed = 0
+    for r in list_runs(limit=500):
+        if r["status"] != "running":
+            continue
+        if tmux_has_session(r["tmux_session"]):
+            continue
+        set_run_status(r["audit_id"], "failed",
+                       note="ended abnormally — tmux session disappeared without recording an exit code")
+        fixed += 1
+    return fixed
+
+
+# ---------- run logs ---------------------------------------------------------
+def run_log_path(audit_id: str) -> Path:
+    p = WS / "logs" / "runs" / f"{audit_id}.log"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def format_log_line(audit_id: str, text: str) -> str:
+    """'<ISO-8601 UTC> <audit_id> <text>' — the audit id on EVERY line is what
+    keeps concurrent runs disambiguable when logs are grepped together."""
+    ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    return f"{ts} {audit_id} {text.rstrip()}\n"
+
+
+def read_log_slice(path: Path, offset: int = 0) -> tuple[str, int, int]:
+    """Return (text, next_offset, size) starting at a byte offset — the
+    primitive the browser polls for live tailing. A missing file or an offset
+    past EOF yields empty text rather than raising, so a poll that races the
+    first write is harmless."""
+    try:
+        size = path.stat().st_size
+    except FileNotFoundError:
+        return "", offset, 0
+    if offset >= size:
+        return "", size, size
+    with open(path, "rb") as f:
+        f.seek(offset)
+        chunk = f.read(size - offset)
+    return chunk.decode("utf-8", errors="replace"), size, size
+
+
+# ---------- tmux runner ------------------------------------------------------
+# Every dashboard run gets its own detached tmux session. tmux's default
+# remain-on-exit=off means the session disappears by itself the moment the
+# command exits, which is exactly the "delete the session after the run"
+# requirement — no reaper needed on the normal path.
+def tmux_bin() -> str | None:
+    return shutil.which("tmux")
+
+
+def tmux_available() -> bool:
+    return tmux_bin() is not None
+
+
+def tmux_session_name(audit_id: str) -> str:
+    return f"auto-{audit_id}"
+
+
+def tmux_has_session(name: str) -> bool:
+    tb = tmux_bin()
+    if not tb:
+        return False
+    return subprocess.run([tb, "has-session", "-t", name],
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+
+
+def tmux_kill_session(name: str) -> bool:
+    tb = tmux_bin()
+    if not tb:
+        return False
+    return subprocess.run([tb, "kill-session", "-t", name],
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+
+
+def tmux_launch(name: str, argv: list[str], cwd: Path, env: dict | None = None) -> None:
+    """Start argv in a new detached tmux session.
+
+    CRITICAL: stdin is redirected from /dev/null. tmux allocates a real PTY per
+    pane, which would make the packs' isInteractive() check (stdin is a char
+    device) return true — so a job like gmail-categorize would stop at an
+    interactive prompt that no browser user can answer and hang until it timed
+    out. Redirecting stdin puts dashboard runs on exactly the same path those
+    features already take on an unattended cron run. Do not remove this.
+    """
+    tb = tmux_bin()
+    if not tb:
+        raise RuntimeError("tmux is not installed")
+    inner = " ".join(shlex.quote(a) for a in argv) + " < /dev/null"
+    cmd = [tb, "new-session", "-d", "-s", name, "-c", str(cwd), inner]
+    full_env = {**os.environ, **(env or {})}
+    r = subprocess.run(cmd, env=full_env, capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError(f"tmux failed to start session {name}: {r.stderr.strip()}")
 
 
 # ---------- orchestrator (multi-step pipelines spanning packs) --------------
