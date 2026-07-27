@@ -38,8 +38,8 @@ keep others private — enforced by `auto doctor`, guaranteed by per-repo access
 ./auto log "what I did"
 ./auto doctor                # validate + check for visibility leaks
 ./auto serve                 # local dashboard — ALSO a one-click runner: launch any job or
-                             #   pipeline, pick an --ai profile from a dropdown, and watch the
-                             #   run's log stream live (needs tmux; see docs/adr/0018)
+                             #   pipeline, pick the AI profile once (top right), watch logs live
+                             #   (needs tmux + the dirs below; docs/adr/0018, 0019)
 #   or: make serve  (PORT=... to override the default 4321)
 ```
 
@@ -48,7 +48,30 @@ when it finishes) and is logged to `logs/runs/<audit-id>.log` with that run's
 audit ID on every line, so parallel runs stay tellable apart. Runs are
 non-interactive: prompts are skipped exactly as on a scheduled run, so the
 interactive-only flows (`categorize --suggest-similar`, rule capture) remain
-terminal-only.
+terminal-only. One control at the top right picks the AI profile for
+everything you launch; a pipeline step that names its own `ai:` still wins.
+
+### Workspace directories are explicit (ADR 0019)
+
+`run`, `orchestrate`, `serve` and `schedule` **require** both directories — they
+refuse to start otherwise, so a run can never silently operate on the wrong or
+an unprepared workspace:
+
+```bash
+export AUTO_DATA_DIR="$PWD/data" AUTO_CONFIG_DIR="$PWD/config"   # once per shell
+./auto run gmail-extract
+#   …or per invocation:
+./auto run gmail-extract --data-dir ./data --config-dir ./config
+```
+
+The `make` targets pass them for you (see `DIRS` at the top of the `Makefile`).
+Inspection commands — `list`, `packs`, `doctor`, `catalog`, `config`, `search` —
+need neither, so they stay usable for diagnosing a bad setup.
+
+Both paths are validated, not just checked for existence: the data directory
+must contain `state/` and `config/`, the config directory `ai/` or a pack
+directory. **After upgrading, re-run `auto schedule sync`** so existing
+cron/launchd entries gain the directories — otherwise scheduled jobs will fail.
 
 ### Wallet sync (gmail transactions → BudgetBakers Wallet)
 

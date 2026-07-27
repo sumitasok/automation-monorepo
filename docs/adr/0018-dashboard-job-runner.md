@@ -1,6 +1,10 @@
 # ADR 0018 — `auto serve` becomes a job runner (supersedes 0012's read-only decision)
 
 **Status:** accepted — 2026-07-26
+**Amended by:** [ADR 0019](0019-explicit-workspace-directories.md) — the per-action AI profile
+dropdown described in point 8 below is replaced by a single session-wide control, applied by
+environment injection so a pipeline step's own `ai:` still wins.
+
 **Supersedes:** the read-only posture of [ADR 0012](0012-serve-dashboard.md) (points 3 and 5). The rest of 0012 — stdlib-only, regenerate-per-request, localhost bind, quiet logging — still stands.
 
 ## Context

@@ -4,6 +4,44 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-07-27 — Clarify/Plan/Tasks/Implement: explicit workspace dirs + one AI control (feature 005 rev. 2)
+
+**Prompt summary**: `/speckit-clarify` then `/speckit-plan` → `/speckit-tasks` → `/speckit-implement`. Two changes: every command that does workspace work must be given a valid `--data-dir`/`--config-dir` (or the env equivalents) or fail; and the per-job AI dropdowns become one control at the top right covering everything.
+
+### How to use it
+
+```bash
+export AUTO_DATA_DIR="$PWD/data" AUTO_CONFIG_DIR="$PWD/config"
+./auto serve                       # or per-invocation: --data-dir ./data --config-dir ./config
+make serve                         # make targets pass them via the DIRS variable
+```
+
+- **Required for**: `run`, `orchestrate`, `serve`, `schedule`. **Not required for**: `list`, `packs`, `doctor`, `catalog`, `config`, `search` — deliberately, so you can still diagnose a bad setup.
+- **Validated structurally**: data dir needs `state/` + `config/`; config dir needs `ai/` or a pack dir. Pointing at `$HOME` is refused, naming what was missing.
+- **AI profile**: one dropdown, top right. It sets a default for everything launched; an orchestration step naming its own `ai:` still wins.
+- **⚠️ After upgrading, re-run `auto schedule sync`** — generated cron/launchd entries now embed the directories, and old entries lack them.
+
+**Files affected**:
+- `specs/005-job-runner-ui/`: spec (Clarifications + US5 + FR-014..FR-021, 29→39 FRs), plan rev. 2, research §11–§17, data-model rev. 2, contracts rev. 2, quickstart 15–24, tasks T037–T061.
+- `framework/tools/auto`: new "workspace dirs" section; `DATA`/`CONFIG_DIR` resolved rather than derived; `_extract_ai_flag` → `_extract_opts`; session AI state + `PUT /api/session/ai-profile`; `accepts_ai` removed; `ui_runs` gains `data_dir`/`config_dir`; `_auto_cmd` embeds the dirs.
+- `framework/tools/test_auto.py`: 46 → 75 tests.
+- `docs/adr/0019-explicit-workspace-directories.md` (new); `docs/adr/0018` amended.
+- `README.md`, `Makefile` (new `DIRS` variable), `auto` usage block.
+
+**Steps taken**:
+1. Clarified four ambiguities before planning rather than guessing (button scope, validation strictness, serve behaviour, what a "common dropdown" means when pipelines set `ai:` per step).
+2. Verified the AI mechanism before designing around it: `execute_job`'s existing `{**cfg_env, **os.environ, **ai_env}` already yields "session default, per-step override", so FR-010 needed **no** new override logic and no `--ai` flag on `orchestrate`.
+3. Implemented foundational resolution first, then US5, then the AI control, keeping the 46 rev. 1 tests green throughout.
+4. Validated live: refusals for missing/nonexistent/structurally-wrong paths; env-var substitution; option-beats-env; inspection commands still working; `serve` refusing to bind; a real `gmail-categorize` run picking up the session profile with the dirs recorded on the run.
+
+**Outcome**: 61/61 tasks, 75 tests green. Zero credential occurrences in logs, page, API, or DB.
+
+**Caveats & findings**:
+- **The `./auto` shim is deliberately left alone.** Making it export the variables would restore exactly the implicit behaviour this change removes — the requirement would hold only on paper. The `Makefile` does pass them, via a visible `DIRS` variable, because a workspace declaring its own known layout is different from a shim silently guessing.
+- **`_auto_cmd` was the hidden landmine**: scheduled entries run with a bare environment, so without embedding the dirs every cron job would have started failing silently. Found by reading the scheduler code during planning, not after breaking it.
+- **The test fixture lacked `data/config/`**, so once validation landed every dashboard-run test hung to timeout rather than failing fast. That was a true positive — it is exactly how a half-prepared real workspace behaves.
+- `gmail-extract` fails in this worktree for an unrelated pre-existing reason (`credentials.json`, a gitignored OAuth secret, isn't checked out here); the plain CLI fails identically.
+
 ## 2026-07-26 — Plan/Tasks/Implement: One-Click Job Runner UI (`/speckit-implement` → feature 005)
 
 **Prompt summary**: `/speckit-implement` for feature 005, which had only a spec. Ran plan → tasks → implement (the sequence established for feature 004), turning the read-only `auto serve` dashboard into a one-click runner.

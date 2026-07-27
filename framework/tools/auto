@@ -21,6 +21,11 @@ Usage:
   auto bootstrap
   auto serve [--port N]        # local dashboard: run jobs/pipelines one-click, watch live logs,
                                #   plus packs, config status, jobs, command help (needs tmux)
+
+run / orchestrate / serve / schedule additionally REQUIRE (ADR 0019):
+  --data-dir <path>            # or AUTO_DATA_DIR   — must contain state/ and config/
+  --config-dir <path>          # or AUTO_CONFIG_DIR — must contain ai/ or a pack dir
+Inspection commands (list, packs, doctor, catalog, config, search) need neither.
 """
 from __future__ import annotations
 import argparse, html, json, os, platform, re, shlex, socket, subprocess, sys, textwrap, threading, datetime, shutil, time

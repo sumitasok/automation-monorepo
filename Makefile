@@ -20,6 +20,12 @@
 # JOB=<id>` works for ANY job, catalogued here or not.
 
 AUTO := ./auto
+# ADR 0019: run/orchestrate/serve/schedule require the workspace's data and
+# config directories explicitly. This workspace's layout is known, so it is
+# declared ONCE here rather than repeated on every target — visible in the file
+# and overridable (make gmail-extract DIRS="--data-dir /elsewhere/data ...").
+# Deliberately NOT hidden inside ./auto: see ADR 0019 point 6.
+DIRS ?= --data-dir ./data --config-dir ./config
 ARGS ?=
 Q    ?=
 MSG  ?=
@@ -53,16 +59,16 @@ doctor: ## validate manifests + check for visibility leaks
 	$(AUTO) doctor
 
 .PHONY: serve
-serve: ## start local dashboard + one-click job runner (needs tmux) — http://127.0.0.1:$(or $(PORT),4321) (Ctrl+C to stop)
-	$(AUTO) serve $(if $(PORT),--port $(PORT),)
+serve: ## start local dashboard + one-click job runner (needs tmux; AUTO_DATA_DIR + AUTO_CONFIG_DIR required, see ADR 0019) — http://127.0.0.1:$(or $(PORT),4321)
+	$(AUTO) serve $(DIRS) $(if $(PORT),--port $(PORT),)
 
 .PHONY: schedule-sync
 schedule-sync: ## install/refresh OS schedules for enabled jobs
-	$(AUTO) schedule sync
+	$(AUTO) schedule sync $(DIRS)
 
 .PHONY: schedule-dry
 schedule-dry: ## preview what `schedule sync` would install
-	$(AUTO) schedule sync --dry-run
+	$(AUTO) schedule sync $(DIRS) --dry-run
 
 .PHONY: log
 log: ## append a worklog entry: make log MSG="did a thing"
@@ -74,33 +80,33 @@ new: ## scaffold a new job into a pack (interactive)
 
 .PHONY: run
 run: ## run any job by id: make run JOB=gmail-extract ARGS="--backfill"
-	$(AUTO) run $(JOB) $(if $(ARGS),-- $(ARGS),)
+	$(AUTO) run $(DIRS) $(JOB) $(if $(ARGS),-- $(ARGS),)
 
 .PHONY: orchestrate
 orchestrate: ## run a pipeline from orchestrator/: make orchestrate NAME=gmail-wallet-sync (omit NAME to list)
-	$(AUTO) orchestrate $(NAME)
+	$(AUTO) orchestrate $(DIRS) $(NAME)
 
 ## ---- gmail pack ----------------------------------------------------------
 
 .PHONY: gmail-extract
 gmail-extract: ## extract transactions -> data/gmail/transactions.csv
-	$(AUTO) run gmail-extract $(if $(ARGS),-- $(ARGS),)
+	$(AUTO) run $(DIRS) gmail-extract $(if $(ARGS),-- $(ARGS),)
 
 .PHONY: gmail-discover
 gmail-discover: ## discover senders -> email_catalog.csv + filters/staging/
-	$(AUTO) run gmail-discover $(if $(ARGS),-- $(ARGS),)
+	$(AUTO) run $(DIRS) gmail-discover $(if $(ARGS),-- $(ARGS),)
 
 .PHONY: gmail-recategorize
 gmail-recategorize: ## re-tag rows in email_catalog.csv from categorizer rules
-	$(AUTO) run gmail-recategorize $(if $(ARGS),-- $(ARGS),)
+	$(AUTO) run $(DIRS) gmail-recategorize $(if $(ARGS),-- $(ARGS),)
 
 .PHONY: gmail-categorize
 gmail-categorize: ## AI-assign Category/SubCategory/Labels to transactions.csv (needs DEEPSEEK_API_KEY)
-	$(AUTO) run gmail-categorize $(if $(ARGS),-- $(ARGS),)
+	$(AUTO) run $(DIRS) gmail-categorize $(if $(ARGS),-- $(ARGS),)
 
 .PHONY: gmail-categorize-dry
 gmail-categorize-dry: ## preview AI categorisation; nothing written
-	$(AUTO) run gmail-categorize -- --dry-run $(ARGS)
+	$(AUTO) run $(DIRS) gmail-categorize -- --dry-run $(ARGS)
 
 .PHONY: config-gmail
 config-gmail: ## show gmail pack config/secret status
@@ -110,11 +116,11 @@ config-gmail: ## show gmail pack config/secret status
 
 .PHONY: wallet-sync
 wallet-sync: ## REAL RUN: push every not-yet-synced transactions.csv row into Wallet, day-by-day, deduped by MessageID in state.json, tagged with WALLET_LABEL — needs WALLET_API_TOKEN + accounts.json set (config-wallet to check); override source with CSV=path; run wallet-sync-dry first
-	$(AUTO) run wallet-sync -- --csv $(CSV) $(ARGS)
+	$(AUTO) run $(DIRS) wallet-sync -- --csv $(CSV) $(ARGS)
 
 .PHONY: wallet-sync-dry
 wallet-sync-dry: ## preview what would sync; no token, no API calls; override source with CSV=path
-	$(AUTO) run wallet-sync -- --dry-run --csv $(CSV) $(ARGS)
+	$(AUTO) run $(DIRS) wallet-sync -- --dry-run --csv $(CSV) $(ARGS)
 
 .PHONY: config-wallet
 config-wallet: ## show wallet pack config/secret status
@@ -124,35 +130,35 @@ config-wallet: ## show wallet pack config/secret status
 
 .PHONY: expenses-update-event
 expenses-update-event: ## match/create AI events for transactions.csv rows (needs DEEPSEEK_API_KEY)
-	$(AUTO) run expenses-update-event $(if $(ARGS),-- $(ARGS),)
+	$(AUTO) run $(DIRS) expenses-update-event $(if $(ARGS),-- $(ARGS),)
 
 .PHONY: expenses-update-event-dry
 expenses-update-event-dry: ## preview matches/new events; nothing written
-	$(AUTO) run expenses-update-event -- --dry-run $(ARGS)
+	$(AUTO) run $(DIRS) expenses-update-event -- --dry-run $(ARGS)
 
 .PHONY: expense-eventify
 expense-eventify: ## send transactions to AI assistant and enrich CSV with event descriptions
-	$(AUTO) run expenses-update-event -- --write-csv $(ARGS)
+	$(AUTO) run $(DIRS) expenses-update-event -- --write-csv $(ARGS)
 
 .PHONY: expense-eventify-dry
 expense-eventify-dry: ## preview AI event enrichment; nothing written
-	$(AUTO) run expenses-update-event -- --write-csv --dry-run $(ARGS)
+	$(AUTO) run $(DIRS) expenses-update-event -- --write-csv --dry-run $(ARGS)
 
 .PHONY: expense-bulk-assign
 expense-bulk-assign: ## import manual event assignments from CSV (MessageID,EventID); override source with ASSIGNMENTS=path
-	$(AUTO) run expenses-bulk-assign -- --assignments $(ASSIGNMENTS) $(ARGS)
+	$(AUTO) run $(DIRS) expenses-bulk-assign -- --assignments $(ASSIGNMENTS) $(ARGS)
 
 .PHONY: expense-bulk-assign-dry
 expense-bulk-assign-dry: ## preview manual assignments; nothing written; use ASSIGNMENTS=path
-	$(AUTO) run expenses-bulk-assign -- --assignments $(ASSIGNMENTS) --dry-run $(ARGS)
+	$(AUTO) run $(DIRS) expenses-bulk-assign -- --assignments $(ASSIGNMENTS) --dry-run $(ARGS)
 
 .PHONY: expense-fill-similar
 expense-fill-similar: ## find unassigned transactions similar to manually-assigned ones via AI (needs DEEPSEEK_API_KEY)
-	$(AUTO) run expenses-fill-similar $(if $(ARGS),-- $(ARGS),)
+	$(AUTO) run $(DIRS) expenses-fill-similar $(if $(ARGS),-- $(ARGS),)
 
 .PHONY: expense-fill-similar-dry
 expense-fill-similar-dry: ## preview AI similarity matching; nothing written
-	$(AUTO) run expenses-fill-similar -- --dry-run $(ARGS)
+	$(AUTO) run $(DIRS) expenses-fill-similar -- --dry-run $(ARGS)
 
 .PHONY: config-expenses
 config-expenses: ## show expenses pack config/secret status
@@ -162,7 +168,7 @@ config-expenses: ## show expenses pack config/secret status
 
 .PHONY: telegram-summary
 telegram-summary: ## generate the telegram daily digest
-	$(AUTO) run telegram-summary $(if $(ARGS),-- $(ARGS),)
+	$(AUTO) run $(DIRS) telegram-summary $(if $(ARGS),-- $(ARGS),)
 
 .PHONY: config-telegram
 config-telegram: ## show telegram pack config/secret status
@@ -172,11 +178,11 @@ config-telegram: ## show telegram pack config/secret status
 
 .PHONY: hello-report
 hello-report: ## run the daily hello report demo job
-	$(AUTO) run hello-report $(if $(ARGS),-- $(ARGS),)
+	$(AUTO) run $(DIRS) hello-report $(if $(ARGS),-- $(ARGS),)
 
 .PHONY: appdemo
 appdemo: ## run the app-backed job demo
-	$(AUTO) run appdemo $(if $(ARGS),-- $(ARGS),)
+	$(AUTO) run $(DIRS) appdemo $(if $(ARGS),-- $(ARGS),)
 
 ## ---- help --------------------------------------------------------------
 

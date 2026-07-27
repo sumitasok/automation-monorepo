@@ -229,11 +229,11 @@ T001–T036 above are complete and shipped. This block covers only the clarifica
 
 ## Phase 11: Polish (rev. 2)
 
-- [ ] T057 Write `docs/adr/0019-explicit-workspace-directories.md` recording the deliberate breaking change: why the implicit default was removed, the strict-validation choice, the exempt read-only commands, and the required `auto schedule sync` re-run. Add a note to `docs/adr/0018-dashboard-job-runner.md` that its per-action AI dropdown decision is superseded by the session-wide control.
-- [ ] T058 [P] Update `README.md`, the `auto` module docstring usage block, and `Makefile`'s `serve` help so all three show the now-required options; include the upgrade note about re-running `schedule sync`.
-- [ ] T059 [P] Add a RUNBOOK entry covering the new options, the env-var alternative, what a validation failure looks like, and the single AI control.
-- [ ] T060 Run the full suite (`python3 -m unittest discover -s framework/tools -p 'test_*.py'`) and fix any failures, including the 46 rev. 1 tests.
-- [ ] T061 Execute quickstart scenarios 15–24 against a live `./auto serve`, plus a regression pass over rev. 1 scenarios 1–14 with the new options supplied. Record the outcome.
+- [X] T057 Write `docs/adr/0019-explicit-workspace-directories.md` recording the deliberate breaking change: why the implicit default was removed, the strict-validation choice, the exempt read-only commands, and the required `auto schedule sync` re-run. Add a note to `docs/adr/0018-dashboard-job-runner.md` that its per-action AI dropdown decision is superseded by the session-wide control.
+- [X] T058 [P] Update `README.md`, the `auto` module docstring usage block, and `Makefile`'s `serve` help so all three show the now-required options; include the upgrade note about re-running `schedule sync`.
+- [X] T059 [P] Add a RUNBOOK entry covering the new options, the env-var alternative, what a validation failure looks like, and the single AI control.
+- [X] T060 Run the full suite (`python3 -m unittest discover -s framework/tools -p 'test_*.py'`) and fix any failures, including the 46 rev. 1 tests.
+- [X] T061 Execute quickstart scenarios 15–24 against a live `./auto serve`, plus a regression pass over rev. 1 scenarios 1–14 with the new options supplied. Record the outcome.
 
 ---
 
