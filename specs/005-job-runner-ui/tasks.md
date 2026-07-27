@@ -167,3 +167,91 @@ description: "Task list for feature implementation"
 - Commit after each phase, per this repo's RUNBOOK-per-run convention.
 - **Do not** modify the existing `runs` table, `_record_run`, or `execute_job`'s terminal-visible output — the only change to `execute_job` is a step marker gated behind `AUTO_RUN_AUDIT_ID` (T023).
 - Runs must never be launched by a `GET`; keep every mutation on `POST` (FR-029).
+
+---
+
+# Tasks — Revision 2 (2026-07-27)
+
+**Input**: plan.md rev. 2, research §11–§17, data-model rev. 2, contracts rev. 2, quickstart scenarios 15–24.
+
+T001–T036 above are complete and shipped. This block covers only the clarification delta: mandatory validated directories (US5) and the single session-wide AI control (US3, revised).
+
+## Phase 8: Foundational — directory resolution
+
+**⚠️ BLOCKS everything else in rev. 2**: US5 and the revised US3 both depend on resolution existing.
+
+- [ ] T037 In `framework/tools/auto`, add a `# ---------- workspace dirs ----------` section with `validate_data_dir(path)` and `validate_config_dir(path)` returning `(ok, reason)` per data-model rev. 2: exist, be a directory, and contain `state/`+`config/` (data) or `ai/`-or-a-pack-subdir (config). Reason strings must name the path and the missing child (SC-011).
+- [ ] T038 [P] Add tests in `framework/tools/test_auto.py` for both validators: absent path, file-not-directory, existing-but-empty, existing-but-wrong-structure (the `$HOME`-like case), and the valid case. Assert each failure reason names the path and what was expected.
+- [ ] T039 In `framework/tools/auto`, generalise `_extract_ai_flag` into `_extract_opts(argv, names)` that pulls `--name value` and `--name=value` for a set of option names before argparse sees them, preserving the existing `--ai` behaviour exactly (research §12). Keep `_extract_ai_flag` as a thin wrapper so no existing call site changes meaning.
+- [ ] T040 [P] Add tests for `_extract_opts`: both syntaxes, multiple options, options appearing after a bare `--`, and absent options — plus a regression test that `--ai` still parses exactly as before.
+- [ ] T041 In `framework/tools/auto`, add `resolve_workspace_dirs(data_opt, config_opt, *, required)` that resolves option → env var, validates via T037, and on success assigns the module-level `DATA` and a new `CONFIG_DIR`; on failure exits with a message naming the option, the env var, the path, and what was expected. Change `DATA = WS / "data"` to a non-authoritative default and add `CONFIG_DIR` beside it.
+- [ ] T042 Point `pack_config_dir()` and `ai_profile_dir()` at `CONFIG_DIR` instead of `WS / "config"` in `framework/tools/auto` (the only two config readers, per research §13).
+- [ ] T043 In `main()` of `framework/tools/auto`, extract `--data-dir`/`--config-dir` via T039 and call `resolve_workspace_dirs` with `required=True` for `run`, `orchestrate`, `serve`, `schedule`; skip resolution entirely for the read-only inspection commands (research §15, FR-019).
+- [ ] T044 [P] Add tests asserting the command split: `list`/`packs`/`doctor`/`catalog` succeed with both env vars unset, while `run`/`orchestrate` refuse (SC-012).
+
+**Checkpoint**: `./auto list` works with no dirs; `./auto run …` refuses without them; existing 46 tests still green.
+
+---
+
+## Phase 9: User Story 5 - Never run against the wrong directories (Priority: P1)
+
+**Goal**: Any action performing workspace work refuses to start unless told explicitly and validly where the directories are.
+
+**Independent Test**: Invoke a job with no directory, a nonexistent one, and an existing-but-wrong one; each is refused naming the fault, with nothing read or written.
+
+- [ ] T045 [US5] Add the `data_dir`/`config_dir` columns to `ui_runs` in `framework/tools/auto`: include them in `_ui_runs_schema`'s `CREATE TABLE`, plus a `PRAGMA table_info`-guarded `ALTER TABLE … ADD COLUMN` migration so the rev. 1 rows already in `data/state/runs.sqlite` keep loading (research §17).
+- [ ] T046 [US5] Populate both columns in `create_run` and surface them in `GET /api/runs` and `GET /api/runs/{audit_id}` in `framework/tools/auto` (FR-021, contracts rev. 2).
+- [ ] T047 [P] [US5] Add tests: the migration is idempotent and preserves pre-existing rows (write a row without the columns, migrate, assert it still reads); a new run records both directories (SC-014).
+- [ ] T048 [US5] Make `_exec-run` in `framework/tools/auto` pass the run's recorded directories to the child CLI invocation, so the launched `auto run`/`auto orchestrate` inherits exactly the directories the dashboard validated.
+- [ ] T049 [US5] Make `auto serve` resolve and validate before binding its port in `framework/tools/auto`, exiting non-zero with the CLI's message rather than starting degraded (FR-020, contracts rev. 2 "Startup precondition").
+- [ ] T050 [US5] Update `_auto_cmd()` in `framework/tools/auto` to embed `--data-dir`/`--config-dir` in generated cron/launchd entries, so scheduled jobs remain self-sufficient after this change (research §16 — without this every scheduled job silently starts failing).
+- [ ] T051 [P] [US5] Add a test that `_auto_cmd()`'s output contains both directory options, guarding the scheduler regression specifically.
+
+**Checkpoint**: quickstart scenarios 15–21, 24 pass.
+
+---
+
+## Phase 10: User Story 3 (revised) - One AI profile for everything
+
+**Goal**: One top-right control sets the AI profile for every run; a pipeline step's own `ai:` still wins.
+
+**Independent Test**: Select a profile, launch a job, confirm the record names it; launch the pipeline whose steps declare their own, confirm those steps use theirs.
+
+- [ ] T052 [US3] Add session state to the `Server` in `framework/tools/auto`: a mutex-guarded selected-profile value (nullable), plus `PUT /api/session/ai-profile` returning `422 unknown_profile` when the name does not resolve to a usable profile (contracts rev. 2, FR-012).
+- [ ] T053 [US3] In `start_run`, stop accepting `ai_profile` from the request body; read the session selection instead, re-validate it at launch (FR-012), and record it on the run. Remove `accepts_ai` from the action catalog and from `GET /api/actions`; add the `session` block (contracts rev. 2).
+- [ ] T054 [US3] In `_exec-run`, apply the recorded profile by injecting `ai_profile_env(name)` into the child process environment rather than passing `--ai` — this is what makes a step's own `ai:` still win via `execute_job`'s existing precedence (research §11). Keep writing the profile name into the run's log header so provenance survives.
+- [ ] T055 [P] [US3] Add tests: setting a valid profile returns 200 and is reflected in `GET /api/actions`; an unknown or unusable name returns 422; a launch with a since-deleted profile is refused; and — the FR-010 guard — that a step-level `ai_env` overrides an injected session default in the precedence expression.
+- [ ] T056 [US3] Replace the per-action `<select>` in `_dashboard_html()` with a single control in the page header (top right), wired to `PUT /api/session/ai-profile`, showing the current selection and the bound data/config directories from the `session` block.
+
+**Checkpoint**: quickstart scenarios 22–23 pass; exactly one `<select>` in the served page.
+
+---
+
+## Phase 11: Polish (rev. 2)
+
+- [ ] T057 Write `docs/adr/0019-explicit-workspace-directories.md` recording the deliberate breaking change: why the implicit default was removed, the strict-validation choice, the exempt read-only commands, and the required `auto schedule sync` re-run. Add a note to `docs/adr/0018-dashboard-job-runner.md` that its per-action AI dropdown decision is superseded by the session-wide control.
+- [ ] T058 [P] Update `README.md`, the `auto` module docstring usage block, and `Makefile`'s `serve` help so all three show the now-required options; include the upgrade note about re-running `schedule sync`.
+- [ ] T059 [P] Add a RUNBOOK entry covering the new options, the env-var alternative, what a validation failure looks like, and the single AI control.
+- [ ] T060 Run the full suite (`python3 -m unittest discover -s framework/tools -p 'test_*.py'`) and fix any failures, including the 46 rev. 1 tests.
+- [ ] T061 Execute quickstart scenarios 15–24 against a live `./auto serve`, plus a regression pass over rev. 1 scenarios 1–14 with the new options supplied. Record the outcome.
+
+---
+
+## Dependencies & Execution Order (rev. 2)
+
+- **Phase 8 blocks Phases 9 and 10** — both need resolution and the option parsing.
+- **Phase 9 (US5, P1)** before Phase 10 (US3, P2): US5 is the safety guard, and T048 (passing dirs through `_exec-run`) is touched again by T054.
+- **Phase 11** last.
+- **Critical**: T050 must land in the same change as T043. The moment `run` requires the directories, every previously-generated scheduler entry is broken until `_auto_cmd` embeds them and `schedule sync` is re-run.
+
+### Parallel Opportunities
+
+- Test tasks (T038, T040, T044, T047, T051, T055) can be written alongside their implementation counterparts.
+- T058 and T059 touch different files and are independent.
+- Implementation tasks within a phase are largely sequential — they edit the single `framework/tools/auto` file.
+
+## Notes (rev. 2)
+
+- Do **not** make the `./auto` shim export `AUTO_DATA_DIR`/`AUTO_CONFIG_DIR` — that would restore the implicit behaviour this revision removes and make the requirement decorative (research §16).
+- Do **not** add an `--ai` flag to `auto orchestrate`; the env-injection approach deliberately avoids it (research §11).
+- The 46 existing tests must stay green; several invoke `auto` in ways that now need directories supplied.
