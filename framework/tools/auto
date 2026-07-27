@@ -29,7 +29,25 @@ from pathlib import Path
 try:
     import yaml
 except ImportError:
-    sys.exit("PyYAML is required.  pip install pyyaml  (or: pip install --break-system-packages pyyaml)")
+    # Name the interpreter that's actually running. `auto` is launched via
+    # `exec python3`, so with a venv active — or nix/pyenv on PATH — the python3
+    # that wins here can easily differ from the one `pip` writes to. Without
+    # this, the old message ("pip install pyyaml") sent you round a loop: pip
+    # reports "already satisfied" for a *different* interpreter every time.
+    sys.exit(
+        "PyYAML is required, and this interpreter cannot import it:\n"
+        f"  interpreter : {sys.executable}\n"
+        f"  version     : {sys.version.split()[0]}\n"
+        f"  venv active : {os.environ.get('VIRTUAL_ENV') or '(none)'}\n"
+        "\n"
+        "Install it FOR THIS INTERPRETER:\n"
+        f"  {sys.executable} -m pip install pyyaml\n"
+        "     (add --break-system-packages if it refuses)\n"
+        "\n"
+        "If that says 'already satisfied', a different python3 is winning on\n"
+        "PATH than the one pip targets — check `which -a python3`, then either\n"
+        "deactivate the venv or put the right one first, e.g.\n"
+        "  PATH=\"/opt/homebrew/bin:$PATH\" ./auto ...")
 
 FRAMEWORK = Path(__file__).resolve().parent.parent          # .../framework
 VISIBILITIES = ("private", "shared", "public")
