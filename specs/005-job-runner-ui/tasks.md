@@ -180,14 +180,14 @@ T001–T036 above are complete and shipped. This block covers only the clarifica
 
 **⚠️ BLOCKS everything else in rev. 2**: US5 and the revised US3 both depend on resolution existing.
 
-- [ ] T037 In `framework/tools/auto`, add a `# ---------- workspace dirs ----------` section with `validate_data_dir(path)` and `validate_config_dir(path)` returning `(ok, reason)` per data-model rev. 2: exist, be a directory, and contain `state/`+`config/` (data) or `ai/`-or-a-pack-subdir (config). Reason strings must name the path and the missing child (SC-011).
-- [ ] T038 [P] Add tests in `framework/tools/test_auto.py` for both validators: absent path, file-not-directory, existing-but-empty, existing-but-wrong-structure (the `$HOME`-like case), and the valid case. Assert each failure reason names the path and what was expected.
-- [ ] T039 In `framework/tools/auto`, generalise `_extract_ai_flag` into `_extract_opts(argv, names)` that pulls `--name value` and `--name=value` for a set of option names before argparse sees them, preserving the existing `--ai` behaviour exactly (research §12). Keep `_extract_ai_flag` as a thin wrapper so no existing call site changes meaning.
-- [ ] T040 [P] Add tests for `_extract_opts`: both syntaxes, multiple options, options appearing after a bare `--`, and absent options — plus a regression test that `--ai` still parses exactly as before.
-- [ ] T041 In `framework/tools/auto`, add `resolve_workspace_dirs(data_opt, config_opt, *, required)` that resolves option → env var, validates via T037, and on success assigns the module-level `DATA` and a new `CONFIG_DIR`; on failure exits with a message naming the option, the env var, the path, and what was expected. Change `DATA = WS / "data"` to a non-authoritative default and add `CONFIG_DIR` beside it.
-- [ ] T042 Point `pack_config_dir()` and `ai_profile_dir()` at `CONFIG_DIR` instead of `WS / "config"` in `framework/tools/auto` (the only two config readers, per research §13).
-- [ ] T043 In `main()` of `framework/tools/auto`, extract `--data-dir`/`--config-dir` via T039 and call `resolve_workspace_dirs` with `required=True` for `run`, `orchestrate`, `serve`, `schedule`; skip resolution entirely for the read-only inspection commands (research §15, FR-019).
-- [ ] T044 [P] Add tests asserting the command split: `list`/`packs`/`doctor`/`catalog` succeed with both env vars unset, while `run`/`orchestrate` refuse (SC-012).
+- [X] T037 In `framework/tools/auto`, add a `# ---------- workspace dirs ----------` section with `validate_data_dir(path)` and `validate_config_dir(path)` returning `(ok, reason)` per data-model rev. 2: exist, be a directory, and contain `state/`+`config/` (data) or `ai/`-or-a-pack-subdir (config). Reason strings must name the path and the missing child (SC-011).
+- [X] T038 [P] Add tests in `framework/tools/test_auto.py` for both validators: absent path, file-not-directory, existing-but-empty, existing-but-wrong-structure (the `$HOME`-like case), and the valid case. Assert each failure reason names the path and what was expected.
+- [X] T039 In `framework/tools/auto`, generalise `_extract_ai_flag` into `_extract_opts(argv, names)` that pulls `--name value` and `--name=value` for a set of option names before argparse sees them, preserving the existing `--ai` behaviour exactly (research §12). Keep `_extract_ai_flag` as a thin wrapper so no existing call site changes meaning.
+- [X] T040 [P] Add tests for `_extract_opts`: both syntaxes, multiple options, options appearing after a bare `--`, and absent options — plus a regression test that `--ai` still parses exactly as before.
+- [X] T041 In `framework/tools/auto`, add `resolve_workspace_dirs(data_opt, config_opt, *, required)` that resolves option → env var, validates via T037, and on success assigns the module-level `DATA` and a new `CONFIG_DIR`; on failure exits with a message naming the option, the env var, the path, and what was expected. Change `DATA = WS / "data"` to a non-authoritative default and add `CONFIG_DIR` beside it.
+- [X] T042 Point `pack_config_dir()` and `ai_profile_dir()` at `CONFIG_DIR` instead of `WS / "config"` in `framework/tools/auto` (the only two config readers, per research §13).
+- [X] T043 In `main()` of `framework/tools/auto`, extract `--data-dir`/`--config-dir` via T039 and call `resolve_workspace_dirs` with `required=True` for `run`, `orchestrate`, `serve`, `schedule`; skip resolution entirely for the read-only inspection commands (research §15, FR-019).
+- [X] T044 [P] Add tests asserting the command split: `list`/`packs`/`doctor`/`catalog` succeed with both env vars unset, while `run`/`orchestrate` refuse (SC-012).
 
 **Checkpoint**: `./auto list` works with no dirs; `./auto run …` refuses without them; existing 46 tests still green.
 
@@ -199,13 +199,13 @@ T001–T036 above are complete and shipped. This block covers only the clarifica
 
 **Independent Test**: Invoke a job with no directory, a nonexistent one, and an existing-but-wrong one; each is refused naming the fault, with nothing read or written.
 
-- [ ] T045 [US5] Add the `data_dir`/`config_dir` columns to `ui_runs` in `framework/tools/auto`: include them in `_ui_runs_schema`'s `CREATE TABLE`, plus a `PRAGMA table_info`-guarded `ALTER TABLE … ADD COLUMN` migration so the rev. 1 rows already in `data/state/runs.sqlite` keep loading (research §17).
-- [ ] T046 [US5] Populate both columns in `create_run` and surface them in `GET /api/runs` and `GET /api/runs/{audit_id}` in `framework/tools/auto` (FR-021, contracts rev. 2).
-- [ ] T047 [P] [US5] Add tests: the migration is idempotent and preserves pre-existing rows (write a row without the columns, migrate, assert it still reads); a new run records both directories (SC-014).
-- [ ] T048 [US5] Make `_exec-run` in `framework/tools/auto` pass the run's recorded directories to the child CLI invocation, so the launched `auto run`/`auto orchestrate` inherits exactly the directories the dashboard validated.
-- [ ] T049 [US5] Make `auto serve` resolve and validate before binding its port in `framework/tools/auto`, exiting non-zero with the CLI's message rather than starting degraded (FR-020, contracts rev. 2 "Startup precondition").
-- [ ] T050 [US5] Update `_auto_cmd()` in `framework/tools/auto` to embed `--data-dir`/`--config-dir` in generated cron/launchd entries, so scheduled jobs remain self-sufficient after this change (research §16 — without this every scheduled job silently starts failing).
-- [ ] T051 [P] [US5] Add a test that `_auto_cmd()`'s output contains both directory options, guarding the scheduler regression specifically.
+- [X] T045 [US5] Add the `data_dir`/`config_dir` columns to `ui_runs` in `framework/tools/auto`: include them in `_ui_runs_schema`'s `CREATE TABLE`, plus a `PRAGMA table_info`-guarded `ALTER TABLE … ADD COLUMN` migration so the rev. 1 rows already in `data/state/runs.sqlite` keep loading (research §17).
+- [X] T046 [US5] Populate both columns in `create_run` and surface them in `GET /api/runs` and `GET /api/runs/{audit_id}` in `framework/tools/auto` (FR-021, contracts rev. 2).
+- [X] T047 [P] [US5] Add tests: the migration is idempotent and preserves pre-existing rows (write a row without the columns, migrate, assert it still reads); a new run records both directories (SC-014).
+- [X] T048 [US5] Make `_exec-run` in `framework/tools/auto` pass the run's recorded directories to the child CLI invocation, so the launched `auto run`/`auto orchestrate` inherits exactly the directories the dashboard validated.
+- [X] T049 [US5] Make `auto serve` resolve and validate before binding its port in `framework/tools/auto`, exiting non-zero with the CLI's message rather than starting degraded (FR-020, contracts rev. 2 "Startup precondition").
+- [X] T050 [US5] Update `_auto_cmd()` in `framework/tools/auto` to embed `--data-dir`/`--config-dir` in generated cron/launchd entries, so scheduled jobs remain self-sufficient after this change (research §16 — without this every scheduled job silently starts failing).
+- [X] T051 [P] [US5] Add a test that `_auto_cmd()`'s output contains both directory options, guarding the scheduler regression specifically.
 
 **Checkpoint**: quickstart scenarios 15–21, 24 pass.
 

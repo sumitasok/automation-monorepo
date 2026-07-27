@@ -56,7 +56,13 @@ def temp_workspace():
     d = Path(tempfile.mkdtemp(prefix="auto-test-ws-"))
     try:
         (d / "packs.yaml").write_text("packs: []\n")
+        # Must mirror a REAL workspace closely enough to pass the directory
+        # validation added in spec 005 rev. 2 — data/ needs both state/ and
+        # config/. Omitting data/config/ here made every dashboard-run test
+        # hang: _exec-run refused, so the run never reached a terminal status
+        # and the waiters spun until timeout.
         (d / "data" / "state").mkdir(parents=True)
+        (d / "data" / "config").mkdir(parents=True)
         (d / "config" / "ai").mkdir(parents=True)
         (d / "orchestrator").mkdir()
         yield d
@@ -655,6 +661,271 @@ class TestStepMarkers(unittest.TestCase):
 
     def test_malformed_marker_never_raises(self):
         self.auto._handle_step_marker("r-x", "##AUTO-STEP## garbage")
+
+
+def make_valid_dirs(ws: Path) -> tuple[Path, Path]:
+    """A data dir and config dir that pass validation (spec 005 rev. 2)."""
+    (ws / "data" / "state").mkdir(parents=True, exist_ok=True)
+    (ws / "data" / "config").mkdir(parents=True, exist_ok=True)
+    (ws / "config" / "ai").mkdir(parents=True, exist_ok=True)
+    return ws / "data", ws / "config"
+
+
+def run_cli(ws: Path, args: list[str], env_extra: dict | None = None):
+    """Invoke the real CLI in a subprocess with a scrubbed environment, so
+    tests can't accidentally pass because the developer's shell has the env
+    vars set."""
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("AUTO_DATA_DIR", "AUTO_CONFIG_DIR", "AUTO_WORKSPACE")}
+    env["AUTO_WORKSPACE"] = str(ws)
+    env.update(env_extra or {})
+    return subprocess.run([sys.executable, str(AUTO_PATH)] + args,
+                          cwd=str(ws), env=env, capture_output=True, text=True)
+
+
+class TestDirValidators(unittest.TestCase):
+    def setUp(self):
+        self._ws = temp_workspace()
+        self.ws = self._ws.__enter__()
+        self.auto = load_auto(self.ws)
+
+    def tearDown(self):
+        self._ws.__exit__(None, None, None)
+
+    def test_data_dir_valid(self):
+        data, _ = make_valid_dirs(self.ws)
+        ok, reason = self.auto.validate_data_dir(data)
+        self.assertTrue(ok, reason)
+
+    def test_data_dir_absent(self):
+        ok, reason = self.auto.validate_data_dir(self.ws / "nope")
+        self.assertFalse(ok)
+        self.assertIn("does not exist", reason)
+        self.assertIn("nope", reason, "reason must name the offending path (SC-011)")
+
+    def test_data_dir_is_a_file(self):
+        f = self.ws / "afile"; f.write_text("x")
+        ok, reason = self.auto.validate_data_dir(f)
+        self.assertFalse(ok)
+        self.assertIn("not a directory", reason)
+
+    def test_data_dir_empty_is_rejected(self):
+        d = self.ws / "empty"; d.mkdir()
+        ok, reason = self.auto.validate_data_dir(d)
+        self.assertFalse(ok)
+        self.assertIn("missing", reason)
+
+    def test_data_dir_nonempty_but_wrong_structure_is_rejected(self):
+        """The realistic misconfiguration: a plausible, non-empty, wrong
+        directory (a home dir, another project). A bare non-empty check would
+        accept this — which is why validation is structural."""
+        d = self.ws / "wrong"; (d / "somethingelse").mkdir(parents=True)
+        (d / "readme.txt").write_text("not a workspace data dir")
+        ok, reason = self.auto.validate_data_dir(d)
+        self.assertFalse(ok)
+        self.assertIn("state", reason)
+        self.assertIn("config", reason)
+
+    def test_data_dir_partial_structure_is_rejected(self):
+        d = self.ws / "partial"; (d / "state").mkdir(parents=True)
+        ok, reason = self.auto.validate_data_dir(d)
+        self.assertFalse(ok)
+        self.assertIn("config", reason)
+
+    def test_config_dir_valid_via_ai(self):
+        _, cfg = make_valid_dirs(self.ws)
+        ok, reason = self.auto.validate_config_dir(cfg)
+        self.assertTrue(ok, reason)
+
+    def test_config_dir_valid_via_pack_dir(self):
+        write_job(self.ws, "testpack", "job-a")
+        auto = load_auto(self.ws)
+        cfg = self.ws / "cfg"; (cfg / "testpack").mkdir(parents=True)
+        ok, reason = auto.validate_config_dir(cfg)
+        self.assertTrue(ok, reason)
+
+    def test_config_dir_wrong_is_rejected(self):
+        cfg = self.ws / "cfgwrong"; (cfg / "unrelated").mkdir(parents=True)
+        ok, reason = self.auto.validate_config_dir(cfg)
+        self.assertFalse(ok)
+        self.assertIn("ai/", reason)
+
+
+class TestExtractOpts(unittest.TestCase):
+    def setUp(self):
+        self._ws = temp_workspace()
+        self.ws = self._ws.__enter__()
+        self.auto = load_auto(self.ws)
+
+    def tearDown(self):
+        self._ws.__exit__(None, None, None)
+
+    def test_space_and_equals_syntax(self):
+        argv, o = self.auto._extract_opts(
+            ["run", "j", "--data-dir", "/a", "--config-dir=/b"], ("data-dir", "config-dir"))
+        self.assertEqual(argv, ["run", "j"])
+        self.assertEqual(o["data-dir"], "/a")
+        self.assertEqual(o["config-dir"], "/b")
+
+    def test_absent_options_are_empty(self):
+        argv, o = self.auto._extract_opts(["list"], ("data-dir", "config-dir"))
+        self.assertEqual(argv, ["list"])
+        self.assertEqual(o["data-dir"], "")
+
+    def test_survives_bare_double_dash(self):
+        """The whole reason this is done before argparse: `run` takes extra
+        args after a bare `--`."""
+        argv, o = self.auto._extract_opts(
+            ["run", "j", "--data-dir", "/a", "--", "--batch-size", "0"],
+            ("data-dir",))
+        self.assertEqual(argv, ["run", "j", "--", "--batch-size", "0"])
+        self.assertEqual(o["data-dir"], "/a")
+
+    def test_ai_flag_wrapper_unchanged(self):
+        """Regression: the pre-existing --ai behaviour must not shift."""
+        for argv_in, want_rest, want_ai in [
+            (["run", "j", "--ai", "deepseek"], ["run", "j"], "deepseek"),
+            (["run", "j", "--ai=claude"], ["run", "j"], "claude"),
+            (["run", "j"], ["run", "j"], ""),
+        ]:
+            rest, ai = self.auto._extract_ai_flag(argv_in)
+            self.assertEqual(rest, want_rest)
+            self.assertEqual(ai, want_ai)
+
+
+class TestDirRequirementByCommand(unittest.TestCase):
+    """FR-018/FR-019: work commands refuse without dirs; inspection ones don't."""
+
+    def setUp(self):
+        self._ws = temp_workspace()
+        self.ws = self._ws.__enter__()
+        write_job(self.ws, "testpack", "job-a")
+        make_valid_dirs(self.ws)
+
+    def tearDown(self):
+        self._ws.__exit__(None, None, None)
+
+    def test_inspection_commands_work_without_dirs(self):
+        for cmd in (["list"], ["packs"], ["doctor"], ["catalog"]):
+            r = run_cli(self.ws, cmd)
+            self.assertEqual(r.returncode, 0,
+                             f"{cmd} must work without dirs (FR-019): {r.stderr}")
+
+    def test_run_refuses_without_dirs(self):
+        r = run_cli(self.ws, ["run", "job-a"])
+        self.assertNotEqual(r.returncode, 0)
+        out = r.stdout + r.stderr
+        self.assertIn("--data-dir", out)
+        self.assertIn("AUTO_DATA_DIR", out)
+
+    def test_orchestrate_refuses_without_dirs(self):
+        (self.ws / "orchestrator" / "pipe.yaml").write_text(
+            "name: pipe\nsteps:\n  - job: job-a\n")
+        r = run_cli(self.ws, ["orchestrate", "pipe"])
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("data", (r.stdout + r.stderr).lower())
+
+    def test_env_var_is_a_complete_substitute(self):
+        r = run_cli(self.ws, ["run", "job-a"], {
+            "AUTO_DATA_DIR": str(self.ws / "data"),
+            "AUTO_CONFIG_DIR": str(self.ws / "config")})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_option_beats_env(self):
+        """FR-016: the explicit option wins when both are supplied."""
+        other = self.ws / "other"
+        (other / "state").mkdir(parents=True); (other / "config").mkdir(parents=True)
+        r = run_cli(self.ws,
+                    ["run", "job-a", "--data-dir", str(other),
+                     "--config-dir", str(self.ws / "config")],
+                    {"AUTO_DATA_DIR": str(self.ws / "data"),
+                     "AUTO_CONFIG_DIR": str(self.ws / "config")})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        # The option's dir is the one that got used: its state/ now holds the DB.
+        self.assertTrue((other / "state" / "runs.sqlite").exists(),
+                        "the --data-dir option's directory should have been written to")
+        self.assertFalse((self.ws / "data" / "state" / "runs.sqlite").exists(),
+                         "the env var's directory must NOT have been used")
+
+    def test_refusal_writes_nothing(self):
+        """SC-010: refused runs perform no reads or writes."""
+        run_cli(self.ws, ["run", "job-a"])
+        self.assertFalse((self.ws / "data" / "state" / "runs.sqlite").exists())
+
+    def test_serve_refuses_to_start_without_dirs(self):
+        """FR-020: the dashboard exits rather than starting degraded."""
+        r = run_cli(self.ws, ["serve", "--port", "4487"])
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("--data-dir", r.stdout + r.stderr)
+
+
+class TestRunDirRecording(unittest.TestCase):
+    """FR-021/SC-014 plus the additive-migration guarantee (research §17)."""
+
+    def setUp(self):
+        self._ws = temp_workspace()
+        self.ws = self._ws.__enter__()
+        self.auto = load_auto(self.ws)
+
+    def tearDown(self):
+        self._ws.__exit__(None, None, None)
+
+    def test_new_run_records_both_directories(self):
+        self.auto.resolve_workspace_dirs(str(self.ws / "data"), str(self.ws / "config"))
+        aid = "r-20260727-000000-dirrec"
+        self.auto.create_run(aid, "job", "job-a", "", "s", f"logs/runs/{aid}.log")
+        r = self.auto.get_run(aid)
+        # Compare against the resolved path: resolution canonicalizes symlinks
+        # (on macOS /var -> /private/var), which is what should be recorded for
+        # audit — an unambiguous absolute path.
+        self.assertEqual(r["data_dir"], str((self.ws / "data").resolve()))
+        self.assertEqual(r["config_dir"], str((self.ws / "config").resolve()))
+
+    def test_migration_is_idempotent_and_preserves_old_rows(self):
+        """A rev. 1 database (no data_dir/config_dir columns) must keep
+        loading, with the new columns reading NULL."""
+        import sqlite3
+        db = self.auto._runs_db()
+        c = sqlite3.connect(db)
+        c.execute("""CREATE TABLE ui_runs(
+            audit_id TEXT PRIMARY KEY, kind TEXT NOT NULL, action_id TEXT NOT NULL,
+            ai_profile TEXT, status TEXT NOT NULL, rc INTEGER, started_at TEXT NOT NULL,
+            ended_at TEXT, host TEXT NOT NULL, tmux_session TEXT NOT NULL,
+            log_path TEXT NOT NULL, note TEXT)""")
+        c.execute("INSERT INTO ui_runs VALUES ('r-old','job','j',NULL,'succeeded',0,"
+                  "'2026-07-26T00:00:00Z','2026-07-26T00:00:01Z','h','s','l',NULL)")
+        c.commit(); c.close()
+
+        for _ in range(2):  # twice: migration must be idempotent
+            conn = self.auto._ui_runs_connect(); conn.close()
+
+        old = self.auto.get_run("r-old")
+        self.assertIsNotNone(old, "pre-existing row must survive the migration")
+        self.assertEqual(old["status"], "succeeded")
+        self.assertIsNone(old["data_dir"])
+        self.assertIsNone(old["config_dir"])
+
+
+class TestSchedulerEntriesCarryDirs(unittest.TestCase):
+    """research §16: the single most likely regression — scheduled jobs run
+    with a bare environment, so generated entries must embed the dirs."""
+
+    def setUp(self):
+        self._ws = temp_workspace()
+        self.ws = self._ws.__enter__()
+        self.auto = load_auto(self.ws)
+
+    def tearDown(self):
+        self._ws.__exit__(None, None, None)
+
+    def test_auto_cmd_embeds_both_directories(self):
+        self.auto.resolve_workspace_dirs(str(self.ws / "data"), str(self.ws / "config"))
+        cmd = self.auto._auto_cmd("some-job")
+        self.assertIn("run some-job", cmd)
+        self.assertIn("--data-dir", cmd)
+        self.assertIn("--config-dir", cmd)
+        self.assertIn(str(self.ws / "data"), cmd)
+        self.assertIn(str(self.ws / "config"), cmd)
 
 
 if __name__ == "__main__":
