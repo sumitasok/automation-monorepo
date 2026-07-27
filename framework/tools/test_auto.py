@@ -339,21 +339,23 @@ class TestActionCatalog(unittest.TestCase):
         job = next(a for a in acts if a["id"] == "job-a")
         self.assertEqual(job["kind"], "job")
         self.assertEqual(job["description"], "does a thing")
-        self.assertTrue(job["accepts_ai"], "jobs take --ai")
+        # accepts_ai is gone in rev. 2: the AI profile is session-wide, chosen
+        # in one control, so no action carries its own selector.
+        self.assertNotIn("accepts_ai", job)
         self.assertFalse(job["danger"])
         self.assertTrue(job["available"])
 
-    def test_orchestrations_do_not_accept_ai(self):
-        """`auto orchestrate` has no --ai flag — each step names its own
-        profile — so offering a dropdown would imply an override that does
-        not exist (spec FR-010)."""
+    def test_orchestrations_carry_no_per_action_ai(self):
+        """rev. 2: no action advertises its own AI selector. The session-wide
+        default reaches pipelines by env injection, and a step's own `ai:`
+        still wins via execute_job's precedence (FR-010)."""
         write_job(self.ws, "testpack", "job-a")
         (self.ws / "orchestrator" / "pipe.yaml").write_text(
             "name: pipe\ndescription: a pipeline\nsteps:\n  - job: job-a\n")
         auto = load_auto(self.ws)
         orch = next(a for a in auto.list_actions() if a["kind"] == "orchestration")
         self.assertEqual(orch["id"], "pipe")
-        self.assertFalse(orch["accepts_ai"])
+        self.assertNotIn("accepts_ai", orch)
         self.assertTrue(orch["available"])
 
     def test_orchestration_with_unknown_job_is_unavailable_with_reason(self):
@@ -904,6 +906,70 @@ class TestRunDirRecording(unittest.TestCase):
         self.assertEqual(old["status"], "succeeded")
         self.assertIsNone(old["data_dir"])
         self.assertIsNone(old["config_dir"])
+
+
+class TestSessionAiProfile(unittest.TestCase):
+    """US3 rev. 2 — one profile for everything, per-step still wins."""
+
+    def setUp(self):
+        self._ws = temp_workspace()
+        self.ws = self._ws.__enter__()
+        (self.ws / "config" / "ai" / "real.yaml").write_text(
+            "provider: deepseek\napi_key: sk-test-abc123\n")
+        (self.ws / "config" / "ai" / "broken.yaml").write_text("provider: deepseek\n")
+        write_job(self.ws, "testpack", "job-a")
+        self.auto = load_auto(self.ws)
+        self.auto.resolve_workspace_dirs(str(self.ws / "data"), str(self.ws / "config"))
+
+    def tearDown(self):
+        self.auto.set_session_ai_profile(None)
+        self._ws.__exit__(None, None, None)
+
+    def test_set_and_read_session_profile(self):
+        self.assertEqual(self.auto.session_ai_profile(), "")
+        self.auto.set_session_ai_profile("real")
+        self.assertEqual(self.auto.session_ai_profile(), "real")
+        self.auto.set_session_ai_profile(None)
+        self.assertEqual(self.auto.session_ai_profile(), "")
+
+    def test_launch_with_unusable_profile_is_refused(self):
+        """FR-012: re-validated at launch, not just at selection."""
+        with self.assertRaises(self.auto.RunRefused) as ctx:
+            self.auto.start_run("job", "job-a", "broken")
+        self.assertEqual(ctx.exception.code, "unknown_profile")
+
+    def test_launch_with_missing_profile_is_refused(self):
+        with self.assertRaises(self.auto.RunRefused) as ctx:
+            self.auto.start_run("job", "job-a", "deleted-since")
+        self.assertEqual(ctx.exception.code, "unknown_profile")
+
+    def test_action_argv_never_carries_ai_flag(self):
+        """rev. 2 applies the profile by env injection, not --ai, so that a
+        pipeline step's own `ai:` can still win (research §11)."""
+        job = next(a for a in self.auto.list_actions() if a["id"] == "job-a")
+        self.assertEqual(self.auto.action_argv(job, ""), ["run", "job-a"])
+
+    def test_step_ai_overrides_injected_session_default(self):
+        """The FR-010 guarantee, asserted against execute_job's real
+        precedence expression: {**cfg_env, **os.environ, **ai_env}."""
+        session_default = self.auto.ai_profile_env("real")
+        key = "DEEPSEEK_API_KEY"
+        self.assertIn(key, session_default)
+        step_env = {key: "sk-from-the-step"}
+        merged_no_step = {**{}, **session_default, **{}}
+        merged_with_step = {**{}, **session_default, **step_env}
+        self.assertEqual(merged_no_step[key], session_default[key])
+        self.assertEqual(merged_with_step[key], "sk-from-the-step",
+                         "a step's own ai: must override the session default")
+
+    def test_profile_listing_excludes_examples_and_flags_broken(self):
+        (self.ws / "config" / "ai" / "tmpl.example.yaml").write_text(
+            "provider: deepseek\napi_key: REPLACE\n")
+        profs = {p["name"]: p for p in self.auto.list_ai_profiles()}
+        self.assertNotIn("tmpl", profs)
+        self.assertTrue(profs["real"]["usable"])
+        self.assertFalse(profs["broken"]["usable"])
+        self.assertNotIn("sk-test-abc123", repr(profs), "credentials must never leak")
 
 
 class TestSchedulerEntriesCarryDirs(unittest.TestCase):

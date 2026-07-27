@@ -217,11 +217,11 @@ T001–T036 above are complete and shipped. This block covers only the clarifica
 
 **Independent Test**: Select a profile, launch a job, confirm the record names it; launch the pipeline whose steps declare their own, confirm those steps use theirs.
 
-- [ ] T052 [US3] Add session state to the `Server` in `framework/tools/auto`: a mutex-guarded selected-profile value (nullable), plus `PUT /api/session/ai-profile` returning `422 unknown_profile` when the name does not resolve to a usable profile (contracts rev. 2, FR-012).
-- [ ] T053 [US3] In `start_run`, stop accepting `ai_profile` from the request body; read the session selection instead, re-validate it at launch (FR-012), and record it on the run. Remove `accepts_ai` from the action catalog and from `GET /api/actions`; add the `session` block (contracts rev. 2).
-- [ ] T054 [US3] In `_exec-run`, apply the recorded profile by injecting `ai_profile_env(name)` into the child process environment rather than passing `--ai` — this is what makes a step's own `ai:` still win via `execute_job`'s existing precedence (research §11). Keep writing the profile name into the run's log header so provenance survives.
-- [ ] T055 [P] [US3] Add tests: setting a valid profile returns 200 and is reflected in `GET /api/actions`; an unknown or unusable name returns 422; a launch with a since-deleted profile is refused; and — the FR-010 guard — that a step-level `ai_env` overrides an injected session default in the precedence expression.
-- [ ] T056 [US3] Replace the per-action `<select>` in `_dashboard_html()` with a single control in the page header (top right), wired to `PUT /api/session/ai-profile`, showing the current selection and the bound data/config directories from the `session` block.
+- [X] T052 [US3] Add session state to the `Server` in `framework/tools/auto`: a mutex-guarded selected-profile value (nullable), plus `PUT /api/session/ai-profile` returning `422 unknown_profile` when the name does not resolve to a usable profile (contracts rev. 2, FR-012).
+- [X] T053 [US3] In `start_run`, stop accepting `ai_profile` from the request body; read the session selection instead, re-validate it at launch (FR-012), and record it on the run. Remove `accepts_ai` from the action catalog and from `GET /api/actions`; add the `session` block (contracts rev. 2).
+- [X] T054 [US3] In `_exec-run`, apply the recorded profile by injecting `ai_profile_env(name)` into the child process environment rather than passing `--ai` — this is what makes a step's own `ai:` still win via `execute_job`'s existing precedence (research §11). Keep writing the profile name into the run's log header so provenance survives.
+- [X] T055 [P] [US3] Add tests: setting a valid profile returns 200 and is reflected in `GET /api/actions`; an unknown or unusable name returns 422; a launch with a since-deleted profile is refused; and — the FR-010 guard — that a step-level `ai_env` overrides an injected session default in the precedence expression.
+- [X] T056 [US3] Replace the per-action `<select>` in `_dashboard_html()` with a single control in the page header (top right), wired to `PUT /api/session/ai-profile`, showing the current selection and the bound data/config directories from the `session` block.
 
 **Checkpoint**: quickstart scenarios 22–23 pass; exactly one `<select>` in the served page.
 

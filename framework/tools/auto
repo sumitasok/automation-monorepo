@@ -23,7 +23,7 @@ Usage:
                                #   plus packs, config status, jobs, command help (needs tmux)
 """
 from __future__ import annotations
-import argparse, html, json, os, platform, re, shlex, socket, subprocess, sys, textwrap, datetime, shutil, time
+import argparse, html, json, os, platform, re, shlex, socket, subprocess, sys, textwrap, threading, datetime, shutil, time
 from pathlib import Path
 
 try:
@@ -785,9 +785,7 @@ def list_actions() -> list[dict]:
             "name": j.get("name") or j.get("id", ""),
             "description": (j.get("description") or "").strip(),
             "pack": j["_pack"],
-            # Only `auto run` accepts --ai (see _extract_ai_flag), so only jobs
-            # can take a profile.
-            "accepts_ai": True, "danger": False,
+            "danger": False,
             "available": available, "unavailable_reason": reason, "note": note,
         })
 
@@ -798,10 +796,7 @@ def list_actions() -> list[dict]:
             "name": o.get("name") or o["_id"],
             "description": (o.get("description") or "").strip(),
             "pack": None,
-            # Orchestrations pick their AI profile per step in their own YAML;
-            # `auto orchestrate` has no --ai flag, so offering a dropdown here
-            # would imply an override that does not exist.
-            "accepts_ai": False, "danger": False,
+            "danger": False,
             "available": not problems,
             "unavailable_reason": ("; ".join(problems) if problems else None),
             "note": None,
@@ -811,7 +806,7 @@ def list_actions() -> list[dict]:
         actions.append({
             "kind": "command", "id": c["id"], "name": c["name"],
             "description": c["description"], "pack": None,
-            "accepts_ai": False, "danger": c["danger"],
+            "danger": c["danger"],
             "available": True, "unavailable_reason": None, "note": None,
         })
     return actions
@@ -822,6 +817,25 @@ def find_action(kind: str, action_id: str) -> dict | None:
         if a["kind"] == kind and a["id"] == action_id:
             return a
     return None
+
+
+# ---------- dashboard session state (spec 005 rev. 2) -----------------------
+# One AI profile applies to everything launched from the dashboard, chosen in a
+# single control (FR-007). Process-lifetime only: not persisted across restarts
+# (spec Assumptions). A plain dict behind a lock — the server is single-operator
+# and already threads requests.
+SESSION = {"ai_profile": None}
+SESSION_LOCK = threading.Lock()
+
+
+def session_ai_profile() -> str:
+    with SESSION_LOCK:
+        return SESSION["ai_profile"] or ""
+
+
+def set_session_ai_profile(name: str | None) -> None:
+    with SESSION_LOCK:
+        SESSION["ai_profile"] = name or None
 
 
 class RunRefused(Exception):
@@ -888,8 +902,15 @@ def start_run(kind: str, action_id: str, ai_profile: str = "", confirm: bool = F
         raise RunRefused("already_running",
                          f"'{action['name']}' is already running as {existing['audit_id']}.",
                          audit_id=existing["audit_id"])
-    if not action["accepts_ai"]:
-        ai_profile = ""
+    # The profile is session-wide (spec 005 rev. 2). Re-validate at launch so a
+    # profile deleted or broken since selection refuses the run rather than
+    # starting it with half-resolved credentials (FR-012).
+    if ai_profile:
+        prof = next((p for p in list_ai_profiles() if p["name"] == ai_profile), None)
+        if not prof or not prof["usable"]:
+            raise RunRefused("unknown_profile",
+                             f"AI profile '{ai_profile}' is not available or has "
+                             f"incomplete credentials; the run was not started.")
 
     audit_id = new_audit_id()
     session = tmux_session_name(audit_id)
@@ -946,10 +967,21 @@ def cmd_exec_run(args):
 
     run_data_dir = r["data_dir"] or str(DATA)
     run_config_dir = r["config_dir"] or str(CONFIG_DIR)
+    # Deliberately NOT passing --ai: the session profile is injected as
+    # credential env vars below, so execute_job's existing precedence
+    # ({**cfg_env, **os.environ, **ai_env}) lets an orchestration step's own
+    # `ai:` still win over the session default (FR-010, research §11).
     argv = ([sys.executable, "-u", str(Path(__file__).resolve())]
-            + action_argv(action, r["ai_profile"] or "")
+            + action_argv(action, "")
             + ["--data-dir", run_data_dir, "--config-dir", run_config_dir])
+    ai_default = {}
+    if r["ai_profile"]:
+        try:
+            ai_default = ai_profile_env(r["ai_profile"])
+        except SystemExit:
+            ai_default = {}   # already re-validated at launch; never fail the run here
     env = {**os.environ,
+           **ai_default,
            "AUTO_WORKSPACE": str(WS),
            "PYTHONUNBUFFERED": "1",
            # Tells execute_job to emit step markers; unset in terminal runs, so
@@ -1453,6 +1485,11 @@ def _dashboard_html():
  .steps li{{margin:.15rem 0}}
  .toast{{position:fixed;right:1rem;bottom:1rem;background:#111;color:#fff;padding:.6rem .9rem;
          border-radius:8px;font-size:.85rem;max-width:26rem}}
+ .sessionbar{{display:flex;justify-content:flex-end;align-items:center;gap:.75rem;
+              flex-wrap:wrap;font-size:.8rem;color:#555;margin-bottom:.25rem}}
+ .sessionbar label{{font-weight:600;color:#333}}
+ .sessionbar .dirs{{font-family:ui-monospace,Menlo,monospace;font-size:.7rem;color:#777;
+                    max-width:100%;overflow-wrap:anywhere}}
  .card{{background:#fff;border:1px solid #ddd;border-radius:8px;padding:1rem;margin:1rem 0}}
  .tag{{display:inline-block;font-size:.7rem;background:#eee;border-radius:4px;padding:.1rem .4rem;margin-left:.4rem;vertical-align:middle}}
  .ok{{color:#0a7a2f}} .bad{{color:#b3261e;font-weight:600}}
@@ -1465,6 +1502,7 @@ def _dashboard_html():
  .meta{{color:#666;font-size:.85rem}}
 </style></head>
 <body>
+<div id="sessionbar" class="sessionbar"></div>
 <h1>automation workspace — {html.escape(WS.name)}</h1>
 <p class="meta">os: {this_os()} &middot; host: {html.escape(socket.gethostname())} &middot;
    machine: {html.escape(mach['id']) if mach else 'unregistered'} &middot; regenerated fresh on every reload</p>
@@ -1524,15 +1562,9 @@ async function loadActions() {{
     html += `<h3 style="grid-column:1/-1;margin:.5rem 0 0;font-size:.9rem;color:#666">${{titles[kind]}}</h3>`;
     for (const a of groups[kind]) {{
       const dis = !a.available || !body.tmux_available;
-      // Only jobs take --ai: orchestrations set it per step in their own YAML.
-      const sel = (a.accepts_ai && profiles.length)
-        ? `<select id="ai-${{a.kind}}-${{a.id}}"><option value="">(no AI profile)</option>` +
-          profiles.map(p => `<option value="${{p.name}}">${{p.name}} — ${{p.provider}}</option>`).join('') +
-          `</select>` : '';
       html += `<div class="action ${{a.danger ? 'danger' : ''}} ${{dis ? 'off' : ''}}">
         <h4>${{esc(a.name)}}${{a.danger ? ' <span class="tag">changes your machine</span>' : ''}}</h4>
         <p>${{esc(a.description || '')}}</p>
-        ${{sel}}
         <button class="run ${{a.danger ? 'danger' : ''}}" ${{dis ? 'disabled' : ''}}
                 onclick="launch('${{a.kind}}','${{a.id}}',${{a.danger}})">Run</button>
         ${{a.unavailable_reason ? `<div class="why">${{esc(a.unavailable_reason)}}</div>` : ''}}
@@ -1541,6 +1573,30 @@ async function loadActions() {{
     }}
   }}
   $('actions').innerHTML = html || '<em>no actions found</em>';
+  renderSessionBar(body, profiles);
+}}
+
+// One AI profile for everything launched here (spec 005 rev. 2). A pipeline
+// step that names its own `ai:` still overrides this default.
+function renderSessionBar(body, profiles) {{
+  const cur = (body.session && body.session.ai_profile) || '';
+  const opts = ['<option value="">(no AI profile)</option>'].concat(
+    profiles.map(p => `<option value="${{p.name}}"${{p.name === cur ? ' selected' : ''}}>` +
+                      `${{p.name}} — ${{p.provider}}</option>`)).join('');
+  $('sessionbar').innerHTML =
+    `<label>AI profile <select id="ai-session" onchange="setProfile(this.value)">${{opts}}</select></label>` +
+    `<span class="dirs" title="directories this dashboard is bound to">` +
+    `data: ${{esc((body.session||{{}}).data_dir||'')}} · config: ${{esc((body.session||{{}}).config_dir||'')}}</span>`;
+}}
+
+async function setProfile(name) {{
+  const {{ ok, body }} = await api('/api/session/ai-profile', {{
+    method: 'PUT', headers: {{ 'Content-Type': 'application/json' }},
+    body: JSON.stringify({{ ai_profile: name || null }})
+  }});
+  toast(ok ? (name ? `AI profile: ${{name}}` : 'AI profile cleared')
+           : (body.message || 'could not set profile'));
+  if (!ok) loadActions();
 }}
 
 function esc(s) {{
@@ -1552,9 +1608,7 @@ async function launch(kind, id, danger) {{
   // Server enforces this too (a confirm-less POST is rejected) — the dialog is
   // the friendly half of the same gate.
   if (danger && !confirm('This changes state outside the workspace (your machine\\'s scheduler or working tree).\\n\\nRun it anyway?')) return;
-  const sel = $(`ai-${{kind}}-${{id}}`);
   const payload = {{ kind, id, confirm: !!danger }};
-  if (sel && sel.value) payload.ai_profile = sel.value;
   const {{ ok, body }} = await api('/api/runs', {{
     method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
     body: JSON.stringify(payload)
@@ -1739,6 +1793,9 @@ def cmd_serve(args):
 
             if path == "/api/actions":
                 self._json(200, {"tmux_available": tmux_available(),
+                                 "session": {"ai_profile": session_ai_profile() or None,
+                                             "data_dir": str(DATA),
+                                             "config_dir": str(CONFIG_DIR)},
                                  "ai_profiles": list_ai_profiles(),
                                  "actions": list_actions()})
                 return
@@ -1784,8 +1841,10 @@ def cmd_serve(args):
             if path == "/api/runs":
                 b = self._body()
                 try:
+                    # The profile comes from the session control, never the
+                    # request body (spec 005 rev. 2, contracts).
                     aid = start_run(str(b.get("kind") or ""), str(b.get("id") or ""),
-                                    str(b.get("ai_profile") or ""), bool(b.get("confirm")))
+                                    session_ai_profile(), bool(b.get("confirm")))
                 except RunRefused as e:
                     self._err(REFUSAL_STATUS.get(e.code, 400), e.code, e.message, **e.extra)
                     return
@@ -1804,6 +1863,24 @@ def cmd_serve(args):
                 return
 
             self._err(404, "not_found", f"no such path: {path}")
+
+        def do_PUT(self):
+            if not self._guard():
+                return
+            if urlparse(self.path).path == "/api/session/ai-profile":
+                b = self._body()
+                name = b.get("ai_profile")
+                if name:
+                    prof = next((p for p in list_ai_profiles() if p["name"] == name), None)
+                    if not prof or not prof["usable"]:
+                        self._err(422, "unknown_profile",
+                                  f"AI profile '{name}' is not available or has "
+                                  f"incomplete credentials.")
+                        return
+                set_session_ai_profile(name)
+                self._json(200, {"ai_profile": session_ai_profile() or None})
+                return
+            self._err(404, "not_found", f"no such path: {self.path}")
 
         def log_message(self, fmt, *a):
             pass  # quiet — localhost-only dashboard, polled continuously; see ADR 0018
