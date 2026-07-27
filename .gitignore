@@ -1,5 +1,6 @@
 !config/ai/*example.yaml
 
+.worktree/**
 
 # Secrets — never commit
 .env
