@@ -96,3 +96,50 @@ Chosen so that IDs sort chronologically as plain strings, read legibly in a log 
 ```
 
 `<ISO-8601 UTC timestamp> <SPACE> <audit_id> <SPACE> <original line>`. Every line carries the ID so that concatenating or grepping several runs' logs together never leaves a line ambiguous (FR-025/SC-004).
+
+---
+
+# Data Model — Revision 2 (2026-07-27)
+
+## Entity: Workspace Directory Pair (new, derived per invocation)
+
+Resolved once per process, before any work. Not persisted as its own record — it is captured onto each Run (below).
+
+| Field | Source (in precedence order) | Validation |
+|---|---|---|
+| `data_dir` | `--data-dir` option → `AUTO_DATA_DIR` env | exists · is a directory · contains `state/` **and** `config/` |
+| `config_dir` | `--config-dir` option → `AUTO_CONFIG_DIR` env | exists · is a directory · contains `ai/` **or** ≥1 mounted pack's subdirectory |
+
+Resolution outcomes:
+
+```
+neither option nor env set        -> refuse: "missing", name the option and the env var
+path absent / not a directory     -> refuse: "unusable", name the path and what it is
+path present, structure wrong     -> refuse: "not a workspace <data|config> directory",
+                                     naming the subdirectory that was expected
+all checks pass                   -> bind DATA / CONFIG_DIR for this process
+```
+
+A refusal happens **before** any read or write (FR-018/SC-010) and always names the offending path plus what was expected (FR-011 → SC-011).
+
+**Which commands resolve them** (research §15): `run`, `orchestrate`, `serve`, `schedule sync` require them. `list`, `packs`, `search`, `doctor`, `catalog`, `config`, `new`, `log`, `share`, `bootstrap` never resolve them and are unaffected (FR-019/SC-012).
+
+## Entity: Run — added fields
+
+```sql
+ALTER TABLE ui_runs ADD COLUMN data_dir   TEXT;   -- nullable; absent on rev. 1 rows
+ALTER TABLE ui_runs ADD COLUMN config_dir TEXT;   -- nullable; absent on rev. 1 rows
+```
+
+Both nullable and added via a `PRAGMA table_info`-guarded migration, so the run rows rev. 1 already wrote to `data/state/runs.sqlite` keep loading (repo convention: additive schema changes only). New runs always populate them (FR-021/SC-014).
+
+## Entity: AI Profile — selection semantics changed
+
+Unchanged in shape (`name`, `provider`, `usable`; credentials never leave the server). What changed is how a selection is applied:
+
+| Rev. | Selection scope | Applied by | Pipeline step with its own `ai:` |
+|---|---|---|---|
+| 1 | one dropdown per job action | `--ai <name>` on `auto run` | unreachable — pipelines had no dropdown |
+| **2** | **one session-wide control** | credential env vars injected into the run's process | **step's own profile wins** (research §11) |
+
+At most one profile is selected at a time. "None selected" is valid and means the run uses whatever the environment already provides (FR-011). The selection is re-validated at launch and the run is refused if it no longer resolves (FR-012).

@@ -47,6 +47,8 @@ Decisions marked **[verified]** were tested against this machine before being wr
 
 ## 7. Action catalog and AI-profile applicability
 
+> **Partially superseded by §11 (rev. 2).** The per-kind "AI profile?" column below described rev. 1's per-action dropdowns. The AI profile is now a single session-wide default injected via the environment, so it reaches every kind of action; a pipeline step's own `ai:` still wins. The `danger` column and the exclusion list remain accurate.
+
 - **Decision**: Actions are derived per-request from `load_jobs()` and `load_orchestrations()`, plus a small hardcoded table of `auto` commands. Each action declares whether it accepts an AI profile and whether it is state-changing.
 
   | Kind | Source | AI profile? | Danger |
@@ -76,3 +78,59 @@ Decisions marked **[verified]** were tested against this machine before being wr
 - **Decision**: Add a structured step marker to `execute_job`'s existing output, emitted **only** when the `AUTO_RUN_AUDIT_ID` environment variable is set (i.e. only under a UI-launched run).
 - **Rationale**: FR-023 needs to show which step of an orchestration is executing. `execute_job` already prints a human line per step (`>> running <id> [<pack>] ...`), but parsing prose is brittle. A guarded machine-readable marker gives reliable step events while leaving ordinary terminal output byte-for-byte unchanged — which is what the "behaves the same as from the terminal" dependency requires.
 - **Alternatives considered**: Parsing the existing `>> running` lines — rejected as fragile. A sidecar events file — rejected as more state to keep consistent when the log already carries the events in order.
+
+---
+
+# Phase 0 Research — Revision 2 (2026-07-27)
+
+Decisions for the clarification-session delta: mandatory validated directories (FR-014–FR-021) and the single session-wide AI control (FR-007–FR-013). As in rev. 1, **[verified]** marks claims tested on this machine rather than assumed.
+
+## 11. How the session-wide AI default reaches a run — and why per-step still wins **[verified]**
+
+- **Decision**: The dashboard does **not** pass `--ai`. It injects the chosen profile's credential environment variables into the environment of the `_exec-run` child process. Nothing else changes.
+- **Rationale**: `execute_job` already builds `env = {**cfg_env, **os.environ, **ai_env, …}`. Injecting the default into `os.environ` therefore gives exactly the semantics FR-009/FR-010 ask for, with **no new override logic at all**:
+
+  | Situation | `ai_env` | Winner | Matches |
+  |---|---|---|---|
+  | Job, no profile of its own | `{}` | the injected session default | FR-009 |
+  | Orchestration step declaring `ai:` | set from that step | the **step's** profile | FR-010 |
+
+  Verified by reproducing the precedence expression directly: with no step `ai:` the session default wins; with one, the step wins. This also sidesteps the fact that `auto orchestrate` has no `--ai` flag — the reason the user's earlier `./auto orchestrate gmail-wallet-sync --ai=deepseek` was rejected — without adding one.
+- **Alternatives considered**: Adding `--ai` to `orchestrate` — rejected; it would have to *override* per-step `ai:` values (contradicting FR-010) or be ignored (confusing). Passing `--ai` for jobs and env for pipelines — rejected as two mechanisms for one concept.
+- **Consequence**: the run's log won't carry `execute_job`'s `(ai) profile 'X' loaded` line for a session-default job, because that line is gated on the `--ai` parameter. The profile is recorded on the run record instead (FR-009), and `_exec-run` writes an explicit header line naming it, so provenance is not lost.
+
+## 12. Where `--data-dir` / `--config-dir` are parsed
+
+- **Decision**: Extract both from `argv` **before** argparse, alongside the existing `_extract_ai_flag`, generalising that helper into one that pulls a set of `--name value` / `--name=value` options.
+- **Rationale**: `run` takes `extra` as `nargs="*"` after a bare `--`. `_extract_ai_flag`'s docstring already records that combining `nargs='*'` with another named option on the same subparser has unreliable `--` handling across Python versions (broken on 3.10, fixed in 3.13) and that this script's shebang can't assume a version. The same hazard applies verbatim to two more options, so the same proven workaround is reused rather than re-litigated.
+- **Alternatives considered**: Adding them to each subparser — rejected for the `--`/`nargs='*'` hazard above. A global `argparse` parent parser — same hazard, since the conflict is with `run`'s positional, not with where the option is declared.
+
+## 13. Making `DATA` and the config directory resolved rather than derived
+
+- **Decision**: Keep module-level names (`DATA`, and a new `CONFIG_DIR`) but assign them from a `resolve_workspace_dirs()` call early in `main()`, instead of deriving them at import. `pack_config_dir()` and `ai_profile_dir()` read `CONFIG_DIR`.
+- **Rationale**: There are only 5 `DATA` reads and 2 config reads, all *inside functions*, so late assignment is safe and the diff stays small. Threading an explicit context object through every call site would be a far larger change with no behavioural gain in a single-file script whose other roots (`WS`, `ORCH_DIR`, `GEN`) are already module-level.
+- **Alternatives considered**: A context object / class — rejected as disproportionate. Leaving `DATA` derived and validating separately — rejected: the derived value would still be silently used by any path that forgot to consult the validated one, which is precisely the bug class this feature exists to remove.
+
+## 14. What "valid" means, precisely
+
+- **Decision**: Both directories must exist and be directories. Additionally the **data** directory must contain `state/` and `config/`; the **config** directory must contain `ai/` **or** at least one mounted pack's subdirectory.
+- **Rationale**: Chosen over a mere non-empty check in clarification, because a non-empty check accepts a home directory or an unrelated project — the realistic misconfiguration. These specific children are what the code actually reads: `DATA/state/*.sqlite` (run history), `DATA/config/expense-rules.yaml` (shared rules, per the gmail pack), `CONFIG_DIR/ai/<name>.yaml` (profiles), `CONFIG_DIR/<pack>/config.yaml` (pack config).
+- **Accepted cost**: a legitimately fresh, uninitialised workspace fails validation until those subdirectories exist. Recorded in the spec's Assumptions as intended — the alternative is silently operating on an unprepared directory.
+
+## 15. Which commands require the directories, and the scheduler consequence
+
+- **Decision**: `run`, `orchestrate`, `serve`, and **`schedule sync`** require them. `list`, `packs`, `search`, `doctor`, `catalog`, `config`, `new`, `log`, `share`, `bootstrap` do not.
+- **Rationale**: The first three do or launch workspace work (FR-014/FR-020). `schedule sync` is the non-obvious one: it *writes scheduler entries that will later run jobs*, so it must know the directories in order to embed them — see §16. The exempt set is exactly the read-only inspection group of FR-019 plus commands that touch neither directory; keeping them working is what lets an operator diagnose a bad configuration (FR-019).
+
+## 16. Not silently breaking the scheduler and the shim **[verified]**
+
+- **Finding**: `_auto_cmd()` currently emits `"<python> <auto> run <job_id>"` — no directories, and cron/launchd run it with a bare environment. The `./auto` shim exports only `AUTO_WORKSPACE`. So the moment the directories become mandatory, **every scheduled job on this machine would start failing**, and so would every bare `./auto run …`.
+- **Decision**:
+  1. `_auto_cmd()` must embed `--data-dir` / `--config-dir` (the validated values from the `schedule sync` invocation) into the generated entries, making them self-sufficient. Re-running `schedule sync` is therefore required after upgrading — called out in the ADR and RUNBOOK.
+  2. The `./auto` shim is **deliberately left alone**. Having it auto-export `AUTO_DATA_DIR=$here/data` would mechanically satisfy the requirement while restoring exactly the implicit behaviour the feature removes — nothing would ever fail, and the requirement would hold only on paper. The operator sets the variables once in their shell profile, or passes the flags.
+- **Rationale**: This is the difference between the change being real and being decorative. It is also the single most likely way to ship a regression, so it is planned explicitly rather than discovered later.
+
+## 17. Recording the directories on each run
+
+- **Decision**: Add nullable `data_dir` / `config_dir` columns to `ui_runs`; `_ui_runs_schema` adds them to new databases, and an idempotent `ALTER TABLE … ADD COLUMN` guarded by a `PRAGMA table_info` check upgrades an existing one.
+- **Rationale**: FR-021/SC-014. Nullable, additive, and guarded means the rows written by rev. 1 (already on disk in `data/state/runs.sqlite`) keep loading — consistent with the repo's additive-schema-only convention.

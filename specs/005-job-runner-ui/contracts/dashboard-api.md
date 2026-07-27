@@ -119,3 +119,71 @@ Stop an in-progress run by killing its tmux session; the run is recorded as `can
 - `200` — `{"audit_id": "…", "status": "cancelled"}`
 - `409 not_running` — the run already reached a terminal status.
 - `404 unknown_run`.
+
+---
+
+# Contract — Revision 2 (2026-07-27)
+
+## Startup precondition (new)
+
+`auto serve` resolves and validates the data and configuration directories **before binding a port** (FR-020). If either is missing or invalid it prints the same message the CLI gives and exits non-zero — there is no degraded mode. Every endpoint below therefore assumes valid directories; there is no `dirs_missing` runtime error.
+
+This differs deliberately from the tmux-missing case, which *does* start and degrade: an operator with no tmux can still usefully read the dashboard, whereas one with no data directory has nothing trustworthy to show.
+
+## `GET /api/actions` — changed
+
+Adds a session block; `accepts_ai` is **removed** from each action (the profile is no longer per-action).
+
+```json
+{
+  "tmux_available": true,
+  "session": {
+    "ai_profile": "deepseek",
+    "data_dir": "/Users/…/automation-monorepo/data",
+    "config_dir": "/Users/…/automation-monorepo/config"
+  },
+  "ai_profiles": [ {"name": "deepseek", "provider": "deepseek", "usable": true} ],
+  "actions": [
+    {
+      "kind": "job", "id": "gmail-extract",
+      "name": "Gmail transaction extract",
+      "description": "Fetch bank alert emails and extract transactions to transactions.csv",
+      "danger": false, "available": true, "unavailable_reason": null, "note": null
+    }
+  ]
+}
+```
+
+`session.ai_profile` is the currently selected profile, or `null`. `data_dir`/`config_dir` are shown so the operator can confirm at a glance which directories the dashboard is bound to.
+
+## `PUT /api/session/ai-profile` — new
+
+Sets the session-wide AI profile (FR-007). A mutation, so `POST`-class rules apply: JSON body, loopback `Host` required.
+
+**Request**: `{ "ai_profile": "deepseek" }` — or `{ "ai_profile": null }` to clear.
+
+**Responses**:
+- `200` — `{"ai_profile": "deepseek"}`
+- `422 unknown_profile` — no such profile, or it exists but fails validation (FR-012). Body names the profile.
+
+The selection lives in server memory for the lifetime of the process; it is not persisted across restarts (spec Assumptions).
+
+## `POST /api/runs` — changed
+
+`ai_profile` is **no longer accepted in the body**. The run uses whatever the session-wide selection is at launch time.
+
+**Request**: `{ "kind": "job", "id": "gmail-categorize", "confirm": false }`
+
+**New response**:
+- `422 unknown_profile` — a profile was selected but no longer resolves to usable credentials; the run is refused rather than started with half-resolved credentials (FR-012).
+
+Unchanged: `201`, `409 already_running`, `412 confirm_required`, `422 unavailable`, `404 unknown_action`, `503 tmux_missing`.
+
+## `GET /api/runs` and `GET /api/runs/{audit_id}` — changed
+
+Each run object gains `data_dir` and `config_dir` (FR-021). Runs recorded before this revision report `null` for both.
+
+```json
+{ "audit_id": "r-…", "ai_profile": "deepseek",
+  "data_dir": "/Users/…/data", "config_dir": "/Users/…/config", "…": "…" }
+```
