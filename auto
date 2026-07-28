@@ -4,4 +4,45 @@
 # framework submodule lives.
 here="$(cd "$(dirname "$0")" && pwd)"
 export AUTO_WORKSPACE="$here"
-exec python3 "$here/framework/tools/auto" "$@"
+
+# The CLI itself needs PyYAML. An activated virtualenv that lacks it (or a bare
+# /usr/bin/python3) would abort every run, so pick the first interpreter that
+# can actually `import yaml`: $AUTO_PYTHON wins, then whatever python3 is on
+# PATH, then the usual Homebrew/system installs. Jobs written in python run on
+# this same interpreter (framework/tools/auto uses sys.executable), so the
+# PATH python3 is always preferred when it is usable.
+pick_python() {
+  local c p
+  for c in "$AUTO_PYTHON" python3 /opt/homebrew/bin/python3 /usr/local/bin/python3 /usr/bin/python3; do
+    [ -n "$c" ] || continue
+    p="$(command -v "$c" 2>/dev/null)" || continue
+    if "$p" -c 'import yaml' >/dev/null 2>&1; then
+      printf '%s\n' "$p"
+      return 0
+    fi
+  done
+  return 1
+}
+
+py="$(pick_python)" || {
+  cur="$(command -v python3 2>/dev/null || echo python3)"
+  cat >&2 <<EOF
+auto: no python3 with PyYAML found (tried \$AUTO_PYTHON, PATH python3, Homebrew, /usr/bin).
+  Install it for the interpreter you want to use:
+    "$cur" -m pip install pyyaml
+  ...or point AUTO_PYTHON at one that already has it:
+    AUTO_PYTHON=/opt/homebrew/bin/python3 ./auto $*
+EOF
+  exit 1
+}
+
+# Tell the user when we had to step around their active interpreter, so a
+# half-provisioned venv does not stay invisible. AUTO_QUIET_PY=1 silences it.
+if [ -z "$AUTO_QUIET_PY" ] && [ -z "$AUTO_PYTHON" ]; then
+  path_py="$(command -v python3 2>/dev/null)"
+  if [ -n "$path_py" ] && [ "$path_py" != "$py" ]; then
+    echo "auto: $path_py has no PyYAML — using $py instead" >&2
+  fi
+fi
+
+exec "$py" "$here/framework/tools/auto" "$@"

@@ -4,6 +4,51 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-07-28 — Fix: `./auto` aborts with "PyYAML is required" under an activated venv
+
+**Prompt summary**: `./auto run gmail-extract --ai=deepseek` failed immediately with
+`PyYAML is required.  pip install pyyaml`. Root cause: the user's shell had a `.venv`
+activated whose `python3` has no PyYAML, and the `auto` shim hardcoded `exec python3`,
+so it always picked up the venv interpreter and `framework/tools/auto` died on its
+`import yaml` guard before doing any work.
+
+**Files affected**:
+- `auto` — shim now resolves a *usable* interpreter instead of blindly taking `python3`.
+  Candidates are tried in order and the first one that can `import yaml` wins:
+  `$AUTO_PYTHON` → PATH `python3` → `/opt/homebrew/bin/python3` →
+  `/usr/local/bin/python3` → `/usr/bin/python3`. If none qualifies, it exits with the
+  exact `pip install pyyaml` command for the current interpreter plus the
+  `AUTO_PYTHON=...` escape hatch. When it has to step around the PATH `python3`, it
+  prints a one-line stderr note so a half-provisioned venv stays visible
+  (silence with `AUTO_QUIET_PY=1`).
+- `RUNBOOK.md` — this entry.
+
+**Steps taken**:
+1. Confirmed `/opt/homebrew/bin/python3` (3.14.3) has PyYAML and `/usr/bin/python3` does not.
+2. Verified no python-language jobs exist in any pack (`grep -l "language: python"` → none,
+   no `requirements.txt`/`pyproject.toml`), so preferring a non-venv interpreter cannot
+   strand job dependencies. PATH `python3` is still preferred whenever it works, because
+   `execute_job` runs python jobs on `sys.executable`.
+3. Simulated a PyYAML-less venv (`PATH=<fake>/bin` with a `python3` → `/usr/bin/python3`):
+   `./auto list` now prints the fallback note and produces the full job table.
+4. Confirmed the normal path stays silent when PATH `python3` already has PyYAML.
+5. Re-ran the original command: `./auto run gmail-extract --ai=deepseek` → exit 0 in 20.6s,
+   **14 new rows** into `transactions.csv` (8 duplicates, 4 failed/declined, 3 unparsed skipped).
+
+**Outcome**: `./auto` works from any shell, venv or not. The original extract run completed.
+
+**Caveats**:
+- `$AUTO_PYTHON` is a *preference*, not a hard override — if it lacks PyYAML the shim falls
+  through to the next candidate rather than failing.
+- The real fix for the user's venv is still `python3 -m pip install pyyaml` inside it; the
+  shim only stops that from being a hard stop.
+- Pre-existing, unrelated: `framework/tools/auto:312` emits a `datetime.utcnow()`
+  DeprecationWarning on every run under Python 3.14.
+- `data/gmail` (submodule) has the new `transactions.csv` rows uncommitted — left for the
+  user to review and commit, since it holds financial data.
+
+---
+
 ## 2026-07-25 — Fix: serve's default CSV path made consistent with siblings (feature 004 follow-up 2)
 
 **Prompt summary**: User rejected the previous fix's `../../data/gmail/transactions.csv` fallback as "not correct at all." Clarified via a follow-up question: the objection was inconsistency with `categorize`/`discover`, which default `--csv` to a plain `transactions.csv` in the current directory — `serve` should match that, not special-case a workspace-relative guess. Separately, the user's own attempt to pass `--data-dir` directly to `make serve` failed because this Makefile only forwards extra flags via `ARGS=`.
