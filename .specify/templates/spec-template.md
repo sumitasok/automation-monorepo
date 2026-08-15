@@ -87,6 +87,27 @@
 
 ### Functional Requirements
 
+<!--
+  CONSTITUTION PROMPTS (.specify/memory/constitution.md v1.0.0) — these are
+  workspace-wide constraints, so state them as requirements here rather than
+  discovering them at plan time. Skip any that genuinely do not apply.
+
+  - If the feature is a pack, or changes one: which values does it need
+    supplied (env, secret files, produced data files), and where does each
+    live — `config/<pack>/` or `data/<pack>/`? A pack declares; the workspace
+    supplies. Nothing personal or produced may sit in `packs/`.
+  - If the feature produces a user interface: it is a static artefact under
+    `data/<pack>/`, declared in the manifest, opening correctly straight from
+    disk. The pack does not serve it and owns no URL. Say so explicitly.
+  - If the feature reads another pack's data: name the owning pack, and
+    require a published versioned schema plus atomic writes on that owner.
+  - If the feature handles instances of a varying thing (a source, format,
+    institution, rule): require that a new instance be addable as data, with
+    one contract covering all variants and no per-instance code path.
+  - If the feature emits anything that could leave the machine: require that
+    it be an explicit configured act, never a default or fallback.
+-->
+
 - **FR-001**: System MUST [specific capability, e.g., "allow users to create accounts"]
 - **FR-002**: System MUST [specific capability, e.g., "validate email addresses"]
 - **FR-003**: Users MUST be able to [key interaction, e.g., "reset their password"]

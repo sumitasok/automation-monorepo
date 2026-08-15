@@ -108,3 +108,10 @@ walkthrough and collaborator onboarding: **[docs/SHARING.md](docs/SHARING.md)**.
 - `docs/` — `PLAN.md`, `SHARING.md`, `adr/`, `worklog/`
 
 Design & decisions: `docs/PLAN.md` and `docs/adr/`.
+
+**The rules those decisions follow: [`.specify/memory/constitution.md`](.specify/memory/constitution.md).**
+Seven principles governing what belongs to the workspace and what belongs to a
+pack — packs declare and the workspace supplies, `packs/` is read-only, the
+workspace serves and packs render, derived artifacts regenerate, configuration
+over code, boundaries are structural, local-first. Read it before adding a pack
+or changing where anything lives; every `/speckit-plan` is gated against it.
