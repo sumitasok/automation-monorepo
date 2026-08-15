@@ -7,8 +7,8 @@
 #   auto config init expenses   # scaffold config/expenses/config.yaml
 #   auto config expenses        # show which are set / missing
 #
-# See docs/adr/0007-pack-config-injection.md and
-# docs/adr/0011-expenses-pack.md.
+# See docs/adr/0007-pack-config-injection.md,
+# docs/adr/0011-expenses-pack.md, and docs/adr/0019-pack-data-files.md.
 
 # env: keys exported into the process environment before the app runs.
 env:
@@ -23,8 +23,18 @@ env:
   # Optional; "deepseek" (default, only one implemented).
   AI_PROVIDER: ""
 
-# files: this pack declares none — the event registry (config/events.json)
-# ships committed inside the pack itself (it's a versioned definitions file,
-# not a secret), and the assignment ledger (state.json) is local produced
-# data written directly into the pack's own workdir.
+# files: this pack declares no secrets.
 files: []
+
+# data_files: produced data this pack reads/writes at the CLI's default
+# relative paths (config/events.json, state.json — see main.go's --events/
+# --state flag defaults). auto run symlinks these from data/expenses/ into
+# the pack's workdir before every run, so the real bytes always live under
+# the workspace's data/ and packs/expenses/ itself stays read-only (ADR
+# 0019 — this pack previously shipped these files committed directly inside
+# itself; that was reverted, see ADR 0011 and ADR 0018 Amendment 2).
+#   data/expenses/events.json — the event registry, versioned (commit it).
+#   data/expenses/state.json  — the assignment ledger, local (git-ignored).
+data_files:
+  - config/events.json
+  - state.json

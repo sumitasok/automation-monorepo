@@ -127,3 +127,17 @@ existing columns are modified) and is only written after successful matching
 be previewed without touching the file.
 
 Invoke via `make expense-eventify` or `go run . update-event --write-csv`.
+
+## Amendment 2 (2026-08-09): registry and ledger moved out of the pack directory
+
+Decision 3 put both `config/events.json` (versioned registry) and
+`state.json` (git-ignored ledger) **inside `packs/expenses/` itself**. ADR
+0019 revises this: `packs/` must stay read-only (no pack writes to its own
+directory, enforced by the ADR 0018 write-sandbox), so both files now live
+at `data/expenses/events.json` and `data/expenses/state.json`, reached from
+the pack's workdir through `auto`-managed symlinks (`data_files:` in
+`config.sample.yaml`). The versioned/local split from decision 3 is
+unchanged — `events.json` is still committed, `state.json` is still
+git-ignored — only *where* they physically live changed. No code change in
+`main.go`: the `--events`/`--state` flag defaults are still
+`config/events.json` / `state.json`; those paths are symlinks now.

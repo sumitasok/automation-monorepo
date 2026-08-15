@@ -7,7 +7,8 @@
 #   auto config init wallet   # scaffold config/wallet/config.yaml
 #   auto config wallet        # show what's set / missing
 #
-# See docs/adr/0007-pack-config-injection.md and docs/adr/0009-wallet-pack.md.
+# See docs/adr/0007-pack-config-injection.md, docs/adr/0009-wallet-pack.md,
+# and docs/adr/0019-pack-data-files.md.
 
 # env: keys exported into the process environment before the app runs.
 env:
@@ -48,3 +49,13 @@ files:
   # A starter is committed as accounts.sample.json — copy it to
   # config/wallet/accounts.json and fill in real UUIDs from `GET /accounts`.
   - accounts.json
+
+# data_files: produced data this pack reads/writes at its CLI's default
+# relative path (state.json — see main.go's --state flag default). auto run
+# symlinks this from data/wallet/ into the pack's workdir before every run,
+# so the real bytes always live under the workspace's data/ and
+# packs/wallet/ itself stays read-only (ADR 0019 — previously committed
+# directly inside the pack; reverted, see ADR 0018 Amendment 2).
+#   data/wallet/state.json — the sync dedupe ledger, local (git-ignored).
+data_files:
+  - state.json

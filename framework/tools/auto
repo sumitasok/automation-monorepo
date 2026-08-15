@@ -10,7 +10,7 @@ Usage:
   auto list [--json] [--visibility private|shared|public]
   auto packs
   auto search <term>
-  auto run <id> [--ai <name>] [-- extra args]
+  auto run <id> [--ai <name>] [--no-sandbox] [-- extra args]
   auto orchestrate [<name>]    # run (or list, if no name) a multi-step pipeline from orchestrator/
   auto new
   auto catalog                 # workspace catalog (all packs)
@@ -20,9 +20,10 @@ Usage:
   auto doctor                  # validate manifests + enforce visibility rules
   auto bootstrap
   auto serve [--port N]        # local dashboard: packs, config status, jobs, command help
+  auto sandbox-check           # verify the write-sandbox (ADR 0018) is actually enforced here
 """
 from __future__ import annotations
-import argparse, html, os, platform, re, socket, subprocess, sys, textwrap, datetime, shutil, time
+import argparse, html, os, platform, re, socket, subprocess, sys, tempfile, textwrap, datetime, shutil, time
 from pathlib import Path
 
 try:
@@ -75,6 +76,25 @@ def pack_default_vis(pack: dict) -> str:
 def pack_config_dir(pack_name: str) -> Path:
     """Workspace-local, git-ignored dir holding a pack's real config + secrets."""
     return WS / "config" / pack_name
+
+def pack_data_dir(pack_name: str) -> Path:
+    """Workspace-local dir holding a pack's own produced data — registries,
+    ledgers, caches. Versioned or git-ignored per THAT dir's own .gitignore
+    (same convention data/gmail/ already uses), not a global split. This is
+    where `data_files:` (ADR 0019) live; packs/<pack>/ itself only ever
+    holds a symlink pointing here — never the real file."""
+    return DATA / pack_name
+
+def load_pack_data_files(pack: dict) -> list[str]:
+    """Declared `data_files:` from config.sample.yaml — files a job persists
+    under data/<pack>/ (ADR 0019). Distinct from `files:` (ADR 0007), which
+    is reserved for secrets living in config/<pack>/: same mechanism, split
+    by what the two workspace dirs mean (config/ = injected secrets/
+    overrides, data/ = the pack's own produced data)."""
+    sample = pack["_path"] / "config.sample.yaml"
+    if not sample.exists():
+        return []
+    return list(load_yaml(sample).get("data_files") or [])
 
 def load_pack_config(pack: dict):
     """Return (env_dict, files_list, config_dir) for a pack.
@@ -248,6 +268,123 @@ def _link_pack_files(files, cfg_dir: Path, workdir: Path):
         except OSError as e:
             print(f"   (config) could not link {name}: {e}")
 
+def _link_pack_data_files(files, data_dir: Path, workdir: Path):
+    """Same contract as _link_pack_files, but for a pack's own produced data
+    (ADR 0019: data_files: -> data/<pack>/) instead of secrets.
+
+    `name` is the path the app expects RELATIVE TO ITS OWN WORKDIR (e.g.
+    'config/events.json', matching expenses' `--events` flag default) — that
+    nesting is the pack's own internal layout convention, not meaningful
+    outside it, so the file lives FLAT under data/<pack>/ by basename only
+    (data/expenses/events.json, not data/expenses/config/events.json). The
+    link side preserves the full relative path (so the app finds it where
+    it's hardcoded to look); the target side is flattened."""
+    for name in files:
+        target = data_dir / Path(name).name
+        link = workdir / name
+        try:
+            link.parent.mkdir(parents=True, exist_ok=True)
+            if link.is_symlink():
+                link.unlink()
+            elif link.exists():
+                print(f"   (data) {name} already a real file in workdir — leaving it"); continue
+            link.symlink_to(target)   # may be dangling on first run
+        except OSError as e:
+            print(f"   (data) could not link {name}: {e}")
+
+# ---------- write-sandbox (ADR 0018) -----------------------------------------
+# Confines what a JOB PROCESS can WRITE to config/ + data/ (plus a few narrow,
+# documented infrastructure carve-outs — ephemeral temp dirs and toolchain
+# build caches — that are not app data but are required for the runtime to
+# work at all). Reads are left unrestricted: job code lives in packs/ and has
+# to be readable to run. This wraps only the child process `auto run` (and
+# the orchestrator, which shares execute_job) execs — auto's OWN writes
+# (CATALOG.md, docs/worklog/, packs/.../jobs/ scaffolding, schedules/) are
+# trusted first-party code and are not sandboxed.
+def _sandbox_backend() -> str | None:
+    osname = this_os()
+    if osname == "macos" and shutil.which("sandbox-exec"):
+        return "macos:sandbox-exec"
+    if osname == "linux" and shutil.which("bwrap"):
+        return "linux:bwrap"
+    return None
+
+def _sandbox_write_roots(j: dict) -> list[Path]:
+    """Paths a job may write to: ONLY the workspace's config/ (ADR 0007
+    symlinked secrets) and data/ (ADR 0007 symlinked data outputs, ADR 0019),
+    plus per-language toolchain caches (e.g. `go run` needs to write its
+    build/module cache somewhere, or every run recompiles from scratch and
+    some Go versions simply fail without a writable GOCACHE) — those are
+    compiler scratch space, not app data, hence carved out narrowly rather
+    than opening up $HOME generally.
+
+    Packs themselves are NOT a write root — packs/ is read-only as far as
+    `auto` is concerned. Anything a job needs to persist (secrets, a
+    versioned registry, a local ledger) must be declared in
+    config.sample.yaml (`files:` for secrets → config/<pack>/, `data_files:`
+    for everything else → data/<pack>/) and reached through the symlink
+    `execute_job` creates into the job's workdir; the write then resolves to
+    the real path under config/ or data/, which IS allowed, even though the
+    pack directory around it is not. See ADR 0018 Amendment 2 (this was
+    briefly widened to include the whole pack directory in Amendment 1,
+    which was too broad — reverted) and ADR 0019 (the data_files
+    mechanism)."""
+    roots = [WS / "config", DATA]
+    lang = j.get("language", "")
+    if lang == "go" and shutil.which("go"):
+        for key in ("GOCACHE", "GOMODCACHE", "GOPATH"):
+            try:
+                out = subprocess.run(["go", "env", key], capture_output=True, text=True, timeout=5).stdout.strip()
+                if out:
+                    roots.append(Path(out))
+            except Exception:
+                pass
+    elif lang == "node":
+        roots.append(Path(os.environ.get("npm_config_cache") or (Path.home() / ".npm")))
+    elif lang == "python":
+        roots.append(Path.home() / ".cache" / "pip")
+    return roots
+
+def _macos_sandbox_profile(write_roots: list[Path]) -> str:
+    allows = "\n  ".join(f'(subpath "{p}")' for p in write_roots)
+    return f"""(version 1)
+(allow default)
+(deny file-write* (subpath "/"))
+(allow file-write*
+  {allows}
+  (subpath "/dev")
+  (subpath "/tmp")
+  (subpath "/private/var/folders")
+)
+"""
+
+def _sandbox_status_and_argv(cmd, shell: bool, j: dict):
+    """Returns ((argv, shell=False), None) if the command will run confined,
+    or (None, reason) if it will run UNCONFINED and why — callers must
+    surface `reason` to the user; silently running unconfined would defeat
+    the whole point of the check."""
+    if os.environ.get("AUTO_SANDBOX", "").lower() == "off":
+        return None, "disabled via --no-sandbox / AUTO_SANDBOX=off"
+    backend = _sandbox_backend()
+    if not backend:
+        return None, f"no sandbox backend available on {this_os()} (need sandbox-exec on macOS or bwrap on Linux)"
+    write_roots = _sandbox_write_roots(j)
+    base = ["/bin/sh", "-c", cmd] if shell else list(cmd)
+    if backend == "macos:sandbox-exec":
+        profile = _macos_sandbox_profile(write_roots)
+        pf = tempfile.NamedTemporaryFile(mode="w", suffix=".sb", delete=False)
+        pf.write(profile); pf.close()
+        return (["sandbox-exec", "-f", pf.name] + base, False), None
+    if backend == "linux:bwrap":
+        argv = ["bwrap", "--die-with-parent", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp"]
+        for root in write_roots:
+            root.mkdir(parents=True, exist_ok=True)
+            argv += ["--bind", str(root), str(root)]
+        argv += ["--"] + base
+        return (argv, False), None
+    return None, "unreachable"  # pragma: no cover
+
+
 def execute_job(job_id: str, extra_args: list[str] | None = None, ai: str = "",
                  timeout_override: int | None = None) -> tuple[int, float]:
     """Run one job to completion and return (returncode, duration_seconds).
@@ -275,6 +412,11 @@ def execute_job(job_id: str, extra_args: list[str] | None = None, ai: str = "",
         workdir = (j["_packpath"] / j["workdir"]).resolve()
     if cfg_files and cfg_dir.exists():
         _link_pack_files(cfg_files, cfg_dir, workdir)
+    data_files = load_pack_data_files(pack)
+    if data_files:
+        data_dir = pack_data_dir(pack["name"])
+        data_dir.mkdir(parents=True, exist_ok=True)
+        _link_pack_data_files(data_files, data_dir, workdir)
     if j.get("exec"):
         # app-backed job: run an explicit shell command in workdir (e.g. "go run . discover")
         cmd = j["exec"] + (" " + " ".join(extra_args) if extra_args else "")
@@ -287,6 +429,11 @@ def execute_job(job_id: str, extra_args: list[str] | None = None, ai: str = "",
         runner = {"python": [sys.executable], "node": ["node"], "bash": ["bash"], "go": ["go", "run"]}.get(j.get("language", "bash"), ["bash"])
         cmd = runner + [str(entry)] + extra_args
         shell = False; show = " ".join(cmd)
+    sandboxed, unconfined_reason = _sandbox_status_and_argv(cmd, shell, j)
+    if sandboxed:
+        cmd, shell = sandboxed
+    else:
+        print(f"   (sandbox) UNCONFINED — {unconfined_reason}. Writes are NOT restricted to config/+data/ for this run — see ADR 0018 / `auto sandbox-check`.")
     start = datetime.datetime.now()
     print(f">> running {j['id']} [{j['_pack']}] in {workdir}: {show}")
     try:
@@ -299,6 +446,9 @@ def execute_job(job_id: str, extra_args: list[str] | None = None, ai: str = "",
 
 def cmd_run(args):
     j = get_job(args.id)
+    if getattr(args, "no_sandbox", False):
+        os.environ["AUTO_SANDBOX"] = "off"
+        print("!! --no-sandbox: this run's writes are NOT confined to config/+data/ — use only for job code you trust.")
     rc, dur = execute_job(args.id, args.extra, getattr(args, "ai", ""))
     _record_run(j["id"], rc, dur)
     sys.exit(rc)
@@ -313,6 +463,53 @@ def _record_run(job_id, rc, dur):
         c.commit(); c.close()
     except Exception as e:
         print(f"(run history not recorded: {e})", file=sys.stderr)
+
+def cmd_sandbox_check(args):
+    """Prove the write-sandbox (ADR 0018) actually holds on THIS machine —
+    the enforcement mechanism (sandbox-exec / bwrap) is platform-specific and
+    can't be verified from anywhere except the machine it runs on. Probes:
+    a write inside data/ (must succeed), a write inside config/ (must
+    succeed), a write at the workspace root and in $HOME (must both be
+    blocked), and a read from packs/ (must succeed, since job code has to be
+    readable to run)."""
+    probe_data = DATA / "state" / ".sandbox-check"
+    probe_config = (WS / "config") / ".sandbox-check"
+    probe_root = WS / ".sandbox-check-should-fail"
+    probe_home = Path.home() / ".sandbox-check-should-fail"
+    read_probe = WS / "packs.yaml"
+    (DATA / "state").mkdir(parents=True, exist_ok=True)
+    (WS / "config").mkdir(parents=True, exist_ok=True)
+
+    script = f'''
+try() {{
+  if (echo x > "$1") 2>/dev/null; then res=allow; else res=deny; fi
+  rm -f "$1" 2>/dev/null
+  if [ "$res" = "$2" ]; then echo "PASS  write $1  (expected $2)"; else echo "FAIL  write $1  (expected $2, got $res)"; fi
+}}
+try "{probe_data}" allow
+try "{probe_config}" allow
+try "{probe_root}" deny
+try "{probe_home}" deny
+if cat "{read_probe}" >/dev/null 2>&1; then echo "PASS  read {read_probe}  (expected allow)"; else echo "FAIL  read {read_probe}  (expected allow)"; fi
+'''
+    result, reason = _sandbox_status_and_argv(script, True, {"language": "bash"})
+    if not result:
+        print(f"UNCONFINED on this host — {reason}")
+        print("Nothing is enforced right now; `auto run` will print the same warning on every job until this is fixed.")
+        sys.exit(1)
+    cmd, shell = result
+    print(f"backend: {_sandbox_backend()}")
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+    except subprocess.TimeoutExpired:
+        sys.exit("sandbox probe timed out")
+    print(out.stdout.strip())
+    if out.stderr.strip():
+        print("stderr:", out.stderr.strip())
+    ok = out.stdout.count("PASS") == 5 and "FAIL" not in out.stdout
+    print("OK — writes confined to config/+data/, packs/ is read-only, reads unrestricted"
+          if ok else "PROBLEM — sandbox is not enforcing as expected, see FAIL lines above")
+    sys.exit(0 if ok else 1)
 
 
 # ---------- orchestrator (multi-step pipelines spanning packs) --------------
@@ -606,6 +803,35 @@ def cmd_doctor(args):
     for pack in packs:
         if not pack["_path"].exists():
             print(f"FAIL pack '{pack['name']}' path missing: {pack['path']}"); ok = False
+            continue
+        # ADR 0007 contract check: declared secret/config `files:` must be symlinks
+        # into config/<pack>/, never real files sitting in the pack dir — a real
+        # file there means auto run's `_link_pack_files` silently left it alone
+        # (won't clobber an existing file), so anything the job writes back
+        # (e.g. a refreshed OAuth token) quietly never reaches config/ at all.
+        # This is the exact bug found in packs/gmail's token.json/credentials.json.
+        _, cfg_files, cfg_dir = load_pack_config(pack)
+        for name in cfg_files:
+            p = pack["_path"] / name
+            if p.exists() and not p.is_symlink():
+                print(f"FAIL {pack['name']}: {name} is a real file in the pack dir, not a symlink into "
+                      f"{cfg_dir.relative_to(WS)}/ — the config contract (ADR 0007) is broken here. "
+                      f"Fix: mv {p.relative_to(WS)} {(cfg_dir / name).relative_to(WS)}  (auto run will relink it next time)")
+                ok = False
+        # ADR 0019 contract check: same thing, for produced data — declared
+        # `data_files:` must be symlinks into data/<pack>/, never real files
+        # sitting in the pack dir. This is the pack-owned-data equivalent of
+        # the ADR 0007 check above (packs/expenses' events.json/state.json
+        # used to ship committed directly inside the pack; that was reverted).
+        data_dir = pack_data_dir(pack["name"])
+        for name in load_pack_data_files(pack):
+            p = pack["_path"] / name
+            if p.exists() and not p.is_symlink():
+                print(f"FAIL {pack['name']}: {name} is a real file in the pack dir, not a symlink into "
+                      f"{data_dir.relative_to(WS)}/ — the data contract (ADR 0019) is broken here; "
+                      f"packs/ must stay read-only. "
+                      f"Fix: mv {p.relative_to(WS)} {(data_dir / Path(name).name).relative_to(WS)}  (auto run will relink it next time)")
+                ok = False
     for j in load_jobs():
         mp = j["_dir"] / "manifest.yaml"
         for field in ("id", "name", "language"):
@@ -884,12 +1110,26 @@ def _extract_ai_flag(argv: list[str]) -> tuple[list[str], str]:
         out.append(tok); i += 1
     return out, ai
 
+def _extract_no_sandbox_flag(argv: list[str]) -> tuple[list[str], bool]:
+    """Pull `--no-sandbox` out of argv before argparse sees it — same
+    nargs='*'-vs-named-option ambiguity _extract_ai_flag works around
+    (ADR 0015), same fix, for the write-sandbox escape hatch (ADR 0018)."""
+    out, flag = [], False
+    for tok in argv:
+        if tok == "--no-sandbox":
+            flag = True
+        else:
+            out.append(tok)
+    return out, flag
+
 # ---------- arg parsing ------------------------------------------------------
 def main():
     argv = sys.argv[1:]
     ai_name = ""
+    no_sandbox = False
     if argv and argv[0] == "run":
         argv, ai_name = _extract_ai_flag(argv)
+        argv, no_sandbox = _extract_no_sandbox_flag(argv)
 
     p = argparse.ArgumentParser(prog="auto", description="automation-framework CLI")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -904,11 +1144,14 @@ def main():
     scp = sub.add_parser("schedule"); scp.add_argument("action"); scp.add_argument("--dry-run", action="store_true")
     cfp = sub.add_parser("config"); cfp.add_argument("action", choices=["status", "init"], nargs="?", default="status"); cfp.add_argument("pack")
     svp = sub.add_parser("serve"); svp.add_argument("--port", type=int, default=4321)
+    sub.add_parser("sandbox-check")
     a = p.parse_args(argv)
-    a.ai = ai_name  # only meaningful for cmd == "run" (ADR 0015)
+    a.ai = ai_name              # only meaningful for cmd == "run" (ADR 0015)
+    a.no_sandbox = no_sandbox   # only meaningful for cmd == "run" (ADR 0018)
     {"list": cmd_list, "packs": cmd_packs, "search": cmd_search, "run": cmd_run, "orchestrate": cmd_orchestrate,
      "new": cmd_new, "catalog": cmd_catalog, "share": cmd_share, "log": cmd_log, "doctor": cmd_doctor,
-     "bootstrap": cmd_bootstrap, "schedule": cmd_schedule, "config": cmd_config, "serve": cmd_serve}[a.cmd](a)
+     "bootstrap": cmd_bootstrap, "schedule": cmd_schedule, "config": cmd_config, "serve": cmd_serve,
+     "sandbox-check": cmd_sandbox_check}[a.cmd](a)
 
 if __name__ == "__main__":
     main()

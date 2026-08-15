@@ -39,7 +39,26 @@ keep others private — enforced by `auto doctor`, guaranteed by per-repo access
 ./auto doctor                # validate + check for visibility leaks
 ./auto serve                 # local dashboard: packs, config status, jobs, command help
 #   or: make serve  (PORT=... to override the default 4321)
+./auto sandbox-check         # verify a job's writes are actually confined to config/+data/ on this machine
 ```
+
+Every job `auto run`/`auto orchestrate` executes runs inside a write-sandbox
+(macOS `sandbox-exec`, Linux `bwrap`): it can read anywhere (its own code
+lives in `packs/`), but can only *write* inside the workspace's
+`config/`+`data/` and a couple of toolchain-cache carve-outs jobs need to
+actually run — **packs/ itself is read-only**, including a pack's own
+directory. `auto`'s own commands (catalog/log/new/schedule) are unaffected —
+only the job process itself is wrapped. `auto run <id> --no-sandbox` is an
+escape hatch for debugging; it prints a warning every time it's used.
+Design in `docs/adr/0018-write-sandbox-for-job-execution.md`.
+
+Anything a job needs to persist — secrets or produced data — is declared in
+its `config.sample.yaml` and symlinked in by `auto run`: `files:` for
+secrets (→ `config/<pack>/`, ADR 0007) and `data_files:` for everything else
+a pack itself would otherwise write internally, like a registry or dedupe
+ledger (→ `data/<pack>/`, ADR 0019). `auto doctor` checks both lists: every
+declared file must be a symlink, never a real file sitting in the pack
+directory.
 
 ### Wallet sync (gmail transactions → BudgetBakers Wallet)
 

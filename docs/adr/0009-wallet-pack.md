@@ -118,3 +118,14 @@ compatibility) API-based `EnsureLabel` fallback fails, `sync` now logs a
 warning and continues **without** a label rather than aborting the run —
 labeling is a nice-to-have provenance/rollback handle, not worth failing an
 otherwise-working sync over. See `packs/wallet/RUNBOOK.md` § Labels.
+
+## Correction — 2026-08-09: state.json moved out of the pack directory
+
+Decision 3 called `state.json` "produced data — git-ignored and local," which
+was right, but it shipped **inside `packs/wallet/`** itself. ADR 0019
+revises this: `packs/` must stay read-only (no pack writes to its own
+directory, enforced by the ADR 0018 write-sandbox), so the ledger now lives
+at `data/wallet/state.json`, reached from the pack's workdir through an
+`auto`-managed symlink (`data_files:` in `config.sample.yaml`). No code
+change in `main.go` — it still opens `state.json` at its usual relative
+path; that path is a symlink now.
