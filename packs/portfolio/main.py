@@ -152,9 +152,16 @@ def cmd_report(args) -> int:
         return 0
 
     doc_target = store.save_json(DOC_OUT, document)
-    html = pagelib.render(TEMPLATE, document)
+    html = pagelib.render(TEMPLATE, document, fetch_url=args.fetch_from)
     page_target = store.save_text(PAGE_OUT, html)
-    print(f"wrote {page_target}  ({len(html):,} bytes, self-contained)")
+    if args.fetch_from:
+        print(f"wrote {page_target}  ({len(html):,} bytes, fetches from "
+              f"{args.fetch_from}, embedded fallback included)")
+        print("  NOTE: this variant is for your own use. It is not what the "
+              "workspace serves, and a browser will refuse to fetch a file:// "
+              "URL — keep the embedded build for opening from disk.")
+    else:
+        print(f"wrote {page_target}  ({len(html):,} bytes, self-contained)")
     print(f"wrote {doc_target}")
     summary = doclib.summarise(document)
     print(f"  {summary['instruments']} instrument(s), {summary['lots']} open "
@@ -384,6 +391,10 @@ def main(argv=None) -> int:
     p.add_argument("--ticker"); p.add_argument("--as-of", dest="as_of")
     p.add_argument("--spot", type=float); p.add_argument("--fx", type=float)
     p.add_argument("--format", choices=["page", "json", "text"], default="page")
+    p.add_argument("--fetch-from", dest="fetch_from", metavar="URL",
+                   help="build the page to fetch its data document from URL at "
+                        "load time, falling back to the embedded copy if it is "
+                        "unreachable. Omit for the self-contained default.")
     p.set_defaults(func=cmd_report)
 
     p = sub.add_parser("import")

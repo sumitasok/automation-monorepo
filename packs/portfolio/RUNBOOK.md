@@ -25,7 +25,14 @@ python3 main.py report                    # write the page + document
 python3 main.py report --ticker AVGO      # one instrument
 python3 main.py report --as-of 2027-01-01 # roll the clock forward
 python3 main.py report --spot 455 --fx 86 # what-if (never written back)
+python3 main.py report --fetch-from URL    # fetch variant, for your own use
 ```
+
+The default page is **self-contained**: it embeds its data and opens from disk.
+`--fetch-from` builds a variant that pulls its document from a URL at load time
+and falls back to the embedded copy (saying so) when that fails. Browsers refuse
+`fetch()` on a `file://` URL, so the fetch variant needs to be served — keep the
+default build for opening from disk.
 
 ## Where things live
 

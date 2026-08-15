@@ -197,7 +197,12 @@ def _create_lot(row, rule, profile, position, broker, src, rate_table,
             "raised_by": "import"})
         lot["confirmed"] = False
 
-    batch["created"].append(lot)
+    # Snapshot, not the live dict: a disposal later in the same file consumes
+    # part of this lot and rewrites its qty in place, so reporting the shared
+    # reference would show what REMAINS rather than what was CREATED — 15 for a
+    # 25-share buy that was partly sold. Reconciling that against a statement
+    # is exactly the confusion the import summary exists to prevent.
+    batch["created"].append(dict(lot))
     position["lots"].append(lot)
 
 
@@ -262,12 +267,25 @@ def format_batch(batch: dict, dry_run: bool) -> str:
         kind = "LTCG" if disposal["long_term"] else "STCG"
         lines.append(f"    - {disposal['from_lot']:<16} {disposal['qty']:>10g} @ "
                      f"{disposal['disp_price']:<10g} {kind}")
-    if batch["unrecognised"]:
-        lines.append("  UNRECOGNISED — extend the profile's actions, these were "
-                     "not imported:")
-        for row in batch["unrecognised"][:10]:
-            lines.append(f"    ? {row.get('action')!r} "
-                         f"(section {row.get('section')!r})")
+    # A row reaching the profile's catch-all is NOT the same as one the profile
+    # deliberately ignores. Both land in `ignored`, so without this split a
+    # genuinely unknown action hides inside the ignored count and FR-022's
+    # guarantee is defeated by the very rule that exists to satisfy SC-007.
+    unmatched = [i for i in batch["ignored"]
+                 if i.get("bucket") in ("unmatched", "unspecified")]
+    for row in batch["unrecognised"]:
+        unmatched.append({"action": row.get("action"), "bucket": "no rule"})
+
+    if unmatched:
+        lines.append(f"  ⚠ {len(unmatched)} row(s) MATCHED NO SPECIFIC RULE and "
+                     f"were not imported. If any of these is a real acquisition "
+                     f"or disposal, add a rule to the profile:")
+        seen = []
+        for row in unmatched:
+            label = str(row.get("action"))
+            if label not in seen:
+                seen.append(label)
+                lines.append(f"    ? {label!r}")
     for warning in batch["warnings"]:
         lines.append(f"  {warning}")
     return "\n".join(lines)
