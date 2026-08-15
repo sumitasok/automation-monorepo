@@ -1,0 +1,4 @@
+# Runtime symlinks created by `auto` before every run (ADR 0019).
+# Not source: `auto run` recreates them, and committing them would put
+# machine-specific paths in a shareable pack.
+data/

@@ -1,0 +1,55 @@
+# packs/portfolio/profiles/schwab.yaml
+# DATA ONLY. Adding a broker is a copy of this file with different columns and
+# actions — never a code change (constitution Principle V, FR-018).
+contract_version: "1.0.0"
+name: schwab
+description: "Schwab brokerage / Equity Award Center transaction export"
+
+reader:
+  kind: tabular
+  # Schwab prepends title lines; the header is the first line with all of these.
+  header_tokens: ["Action", "Symbol", "Quantity"]
+  columns:
+    date:   ["Date", "Trade Date", "TradeDate", "As of Date"]
+    action: ["Action", "Transaction Type", "Type"]
+    symbol: ["Symbol", "Ticker"]
+    desc:   ["Description"]
+    qty:    ["Quantity", "Shares", "Qty"]
+    price:  ["Price", "Purchase Price", "Sale Price", "PurchasePrice"]
+    fees:   ["Fees & Comm", "Fees and Commissions", "Commission"]
+    amount: ["Amount", "Net Amount", "Total"]
+
+money:
+  strip: ["$", ",", " "]
+  parens_negative: true
+
+dates:
+  formats: ["%m/%d/%Y", "%Y-%m-%d", "%m/%d/%y"]
+  split_marker: " as of "
+  # "posted as of effective". The holding period runs from the EFFECTIVE date,
+  # so this flag changes tax outcomes — do not flip it casually.
+  prefer_as_of: true
+
+# First match wins. The last rule must be a catch-all so nothing is dropped.
+actions:
+  - {match: "^Buy$",                      event: buy,  funding: MARKET}
+  - {match: "^Reinvest Shares$",          event: buy,  funding: MARKET,
+     note: "dividend reinvestment"}
+  - {match: "^Sell$",                     event: sell}
+  - {match: "^Sale of Stock",             event: sell}
+  - {match: "^Stock Plan Activity$",      event: vest, funding: RSU,
+     note: "Schwab labels both RSU vests and ESPP deposits this way; qty>0 = shares in"}
+  - {match: "^ESPP",                      event: espp, funding: ESPP}
+  - {match: "Journaled Shares",           event: sell, lapse: true,
+     note: "shares journalled out to cover withholding — matched to that vest, not FIFO"}
+  - {match: "(Split|Reverse Split|Merger|Spin-?off|Stock Dividend)",
+     event: corporate_action,
+     note: "refused: per-share figures would be wrong across it (FR-030)"}
+  - {match: "(Dividend|Qualified Div)",   event: ignore, bucket: dividend}
+  - {match: "(NRA Withholding|Tax With)", event: ignore, bucket: withholding}
+  - {match: "(Wire|MoneyLink|Journal$|Funds Received|Cash Dividend)",
+     event: ignore, bucket: cash}
+  - {match: ".*",                         event: ignore, bucket: unmatched}
+
+lapse_window_days: 5
+lot_id_template: "{YM}-{kind}"

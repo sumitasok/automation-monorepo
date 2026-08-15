@@ -1,0 +1,40 @@
+id: portfolio-import
+name: Portfolio broker export import
+description: >
+  Reconcile a broker export against the lot register: create lots for
+  acquisitions, match disposals to lots by FIFO (with specific identification
+  for same-week vest withholding sales), splitting a lot where a disposal
+  consumes part of it. Idempotent by provenance fingerprint, so re-importing a
+  file — or a wider export overlapping one already imported — changes nothing.
+  All broker knowledge lives in profiles/<broker>.yaml; supporting a new broker
+  is a new profile and no code change. Always run with --dry-run first.
+category: finance
+owner: sumit
+language: python
+exec: "python3 main.py import"
+workdir: "."
+tags: [portfolio, finance, import, broker]
+visibility: private
+
+runs_on:
+  os: [macos, linux]
+  machines: [any]
+
+schedule:
+  cron: ""                       # manual — run when you have a fresh export
+  timezone: Asia/Kolkata
+  enabled: false
+
+runtime:
+  timeout_seconds: 300
+  env: []
+
+data:
+  reads:  [data/fx-rates.yaml, data/rules.yaml]
+  writes: [data/register.yaml]
+  # register.yaml is a PUBLISHED CROSS-PACK CONTRACT: this job is its only
+  # writer. Writes are atomic (temp + replace at the resolved target) so a
+  # concurrent reader never sees a partial register (FR-011).
+
+health:
+  expect_run_every: ""

@@ -1,0 +1,24 @@
+# packs/portfolio/config.sample.yaml
+# DECLARATIONS ONLY — never real values (constitution Principle I).
+#
+# The pack needs no secrets: it talks to no API and holds no credential.
+# Everything it reads or writes is produced data, declared under data_files:
+# and symlinked by `auto` from data/portfolio/ before every run (ADR 0019).
+
+env: {}                    # no environment configuration needed
+
+files: []                  # no secrets
+
+# Each name is the path RELATIVE TO THIS PACK'S WORKDIR that the app opens.
+# `auto` links it to data/portfolio/<basename>.
+#
+# ⚠ Targets are FLATTENED TO BASENAME by _link_pack_data_files, so every name
+# here must have a DISTINCT basename — two entries sharing one would silently
+# point at the same file. See specs/005-portfolio-tax-pack/research.md R-005.
+data_files:
+  - data/register.yaml            # open lots + closed disposals — VERSIONED
+  - data/fx-rates.yaml            # dated FX with provenance    — VERSIONED
+  - data/rules.yaml               # thresholds, rates, ratings   — VERSIONED
+  - data/disclosure.yaml          # disclosure profiles          — VERSIONED
+  - data/explorer.html            # THE declared page artefact   — local
+  - data/explorer-document.json   # the data document            — local

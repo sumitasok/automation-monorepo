@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sumitasok.dev/automation/portfolio/disclosure-profile.schema.json",
+  "title": "Disclosure profiles",
+  "description": "What a shared copy may reveal (spec FR-045). Redaction DELETES the listed fields from the data document itself, not from the display (FR-047) — a page that merely hides a figure still ships it. A profile is rejected before anything is produced if a withheld figure remains derivable from what it retains (FR-049).",
+  "type": "object",
+  "required": ["contract_version", "profiles"],
+  "additionalProperties": false,
+  "properties": {
+    "contract_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "profiles": {
+      "type": "object",
+      "description": "Keyed by profile name. MUST include 'full' and 'figures-hidden' (FR-046).",
+      "minProperties": 2,
+      "additionalProperties": { "$ref": "#/$defs/profile" }
+    },
+    "derivations": {
+      "type": "array",
+      "description": "The reconstruction paths the derivability check knows about (research R-010). Adding a derived figure to the document REQUIRES adding its rule here, otherwise the check silently under-reports.",
+      "items": {
+        "type": "object",
+        "required": ["target", "from"],
+        "additionalProperties": false,
+        "properties": {
+          "target": { "type": "string", "description": "Field path that becomes recoverable." },
+          "from": { "type": "array", "minItems": 1, "items": { "type": "string" }, "description": "Field paths which, if ALL retained, reconstruct the target." },
+          "note": { "type": "string" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "profile": {
+      "type": "object",
+      "required": ["label", "withhold", "note"],
+      "additionalProperties": false,
+      "properties": {
+        "label": { "type": "string", "description": "Audience this profile is for." },
+        "withhold": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Document field paths to delete, e.g. 'positions[].lots[].qty'. Empty for the 'full' profile."
+        },
+        "note": { "type": "string", "description": "Stated on the shared copy so a recipient knows what was withheld (FR-048)." },
+        "requires_confirmation": {
+          "type": "boolean",
+          "default": false,
+          "description": "MUST be true for any profile withholding nothing — producing a full-disclosure copy requires an explicit confirmation naming what is about to leave the machine (FR-050)."
+        }
+      }
+    }
+  }
+}

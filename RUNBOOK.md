@@ -4,6 +4,63 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-08-15 — Implement spec 005: the `portfolio` pack is built and running
+
+**Prompt summary**: `/speckit-tasks` then `/speckit-implement` on spec 005.
+
+**Outcome**: the pack exists, is registered, runs through `auto`, and its figures match the
+vault program exactly. 39 of 42 tasks done, 1 partial, 2 blocked. **55 tests pass.**
+
+**Files affected**: new `packs/portfolio/` (11 modules, 4 schemas, 2 broker profiles, page
+template, 3 job manifests, Makefile, RUNBOOK, samples, 5 test files); new `data/portfolio/`
+(register, fx-rates, rules, disclosure + generated page/document); `packs.yaml`;
+`specs/005-portfolio-tax-pack/tasks.md`; `RUNBOOK.md`.
+
+**Verified working**:
+- `./auto run portfolio-report` exits 0 under the write sandbox; page is 23KB, self-contained,
+  zero external references, renders from `file://`.
+- Migration moved 19 AVGO lots out of the vault; the vault is untouched.
+- All 6 declared data files are still symlinks after repeated writes; no data file inside
+  `packs/portfolio/`; `auto doctor` reports no portfolio problems.
+- Parity: all 19 lots match the vault's break-even, cushion, tax-now and saving exactly.
+
+**Four real bugs found by running it, not by writing it**:
+1. *Dry-run was lying.* Created lots were not applied, so a later sell in the same file had
+   nothing to match and the preview omitted disposals the real run would make — the opposite
+   of what a preview is for. Fixed by simulating against a deep copy.
+2. *Row accounting counted artifacts, not rows.* One sell row legitimately splits across
+   several lots. The SC-007 identity now tracks one outcome per row.
+3. *Shared copies landed inside the pack.* `data/` in the pack is a real directory holding
+   symlinks, so resolving the directory (rather than a declared file) put output in
+   `packs/portfolio/data/shared/`. Constitution Principle II violation, caught by looking at
+   where the file actually went.
+4. *Redaction leaked, twice.* Deleting `positions[].spot` left the price sitting in the
+   rating's `why` prose ("At $427.76 the stock is trading BELOW..."), and migrated cost-basis
+   review notes quote figures outright. Field-path deletion is necessary but not sufficient.
+   Added a byte-level post-check that searches the finished copy for every withheld VALUE and
+   refuses if any survives. The unit test had passed because its fixture had no filled
+   templates — the real document did.
+
+**Also corrected**: my own parity test was wrong twice before the code was — first with inputs
+transcribed from the vault's rounded display (cb 388.36 vs the real 388.355, five wrong
+acq_fx), then reading the vault's fifth column as tax-at-maturity when it is SAVING. The
+giveaway was every lot ratioing to 1.62 when tax_now/tax_lt must be 0.39/0.1495 = 2.609.
+
+**Caveats**:
+- **T037 partial**: corporate actions are refused when the broker *labels* them. Inferring an
+  unlabelled split from a quantity/price discontinuity (research R-009's second detector) is
+  not built.
+- **T041/T042 blocked**: the page is not listed in the workspace index. Needs the UI
+  declaration contract. `jobs/portfolio-report/manifest.yaml` carries a comment saying so.
+- `auto doctor` currently FAILS overall — on the pre-existing `packs/expenses/config/events.json`
+  drift, unrelated to this work and visible in the conversation-start git status.
+- The FX table has no verified rate for several 2026 dates, so lots carry `fx_interpolated`.
+  `validate --strict` fails while any flag remains; that is the pre-filing check.
+- Only Schwab has been exercised against a real export. The IBKR profile is tested against a
+  synthetic sectioned statement, not a genuine IBKR download.
+
+---
+
 ## 2026-08-15 — Plan spec 005 (`/speckit-plan`); implement blocked on tasks.md
 
 **Prompt summary**: `/speckit-plan` and `/speckit-implement` invoked together. Plan ran in full;

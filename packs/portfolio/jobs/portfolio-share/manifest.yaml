@@ -1,0 +1,44 @@
+id: portfolio-share
+name: Portfolio redacted share copy
+description: >
+  Produce a copy of the explorer page for someone else, governed by a named
+  disclosure profile. Redaction DELETES withheld figures from the data document
+  rather than hiding them in the page, and a byte-level check refuses to produce
+  anything if a withheld value survives — including inside prose, which is where
+  it hides (a rating explains itself using that lot's own numbers). A
+  full-disclosure copy requires an explicit interactive confirmation and is
+  refused outright on an unattended run.
+category: finance
+owner: sumit
+language: python
+exec: "python3 main.py share"
+workdir: "."
+tags: [portfolio, finance, sharing, privacy]
+visibility: private
+
+runs_on:
+  os: [macos, linux]
+  machines: [any]
+
+schedule:
+  cron: ""                       # NEVER scheduled — see below
+  timezone: Asia/Kolkata
+  enabled: false
+
+runtime:
+  timeout_seconds: 120
+  env: []
+
+data:
+  reads:  [data/register.yaml, data/rules.yaml, data/disclosure.yaml]
+  writes: [data/explorer.html]
+  # Output goes to data/portfolio/shared/, never over the declared artefact
+  # (FR-071), and is never declared or served (FR-070).
+
+health:
+  expect_run_every: ""
+
+# This job MUST NOT be scheduled. Producing something intended to leave the
+# machine is an explicit act by a person (FR-044, constitution Principle VII);
+# an unattended run would defeat the confirmation that exists to make the
+# decision deliberate.
