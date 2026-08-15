@@ -4,6 +4,58 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-08-15 — Clarify spec 005: UI declaration, serving and disclosure boundaries
+
+**Prompt summary**: `/speckit-clarify 005` — "the UI should be reported back to auto serve so
+that it can also be served on demand, and will be displayed in as a cell in the index.html
+after reading the packs declaration."
+
+**Files affected**:
+- `specs/005-portfolio-tax-pack/spec.md` — new `## Clarifications` section (5 Q/A bullets),
+  new "UI declaration and serving" requirement group FR-061..FR-074, SC-016..SC-018, two new
+  US4 acceptance scenarios, four new edge cases, a `UI declaration` key entity, plus
+  Dependencies and Out of Scope entries. 74 FRs, 18 SCs, 0 open markers.
+- `RUNBOOK.md` — this entry.
+
+**Steps taken**: ran `check-prerequisites.sh --json --paths-only` (FEATURE_DIR resolved from
+`.specify/feature.json`, not the branch name); loaded constitution v1.0.0, now present on this
+branch after merging main; scanned the spec against the clarification taxonomy; asked 5
+questions one at a time, integrating each answer before asking the next.
+
+**Answers recorded**:
+1. *Scope* — pack side only. 005 produces and declares; the `auto serve` reader, on-demand
+   serving and index cells are a separate framework feature (`framework/` is a submodule —
+   a public repo — so a private pack's spec should not carry that change). Sequenced first so
+   `portfolio` is its first consumer.
+2. *"Served on demand"* — Sumit corrected the reading: it means served **when its cell is
+   selected from the index**, not regenerated at request time. Serving reads what is on disk;
+   the pack's job is what refreshes it.
+3. *Cardinality* — one cell per pack that declares a page, so this pack declares exactly one
+   portfolio-wide page. Instrument count never changes the declaration or cell count;
+   narrowing to one instrument is an in-page filter.
+4. *Redacted copies* — not declared, not indexed, not served ("I am the only consumer"), but
+   an explicit preview step opens one exactly as its recipient would see it.
+5. *Data source when served* — embedded. The declared artefact is self-contained and needs no
+   companion file; FR-038/FR-041's fetch mode stays available for the owner's own use but is
+   explicitly not what the workspace serves.
+
+**Outcome**: 5 of 5 questions answered and integrated. Spec quality checklist re-validated —
+17/17 both before and after, no checkbox state changed, so the file was left untouched per the
+clarify rule about noisy diffs. Spec ready for `/speckit-plan`.
+
+**Caveats**:
+- FR-062 and FR-064 cannot be satisfied until the workspace-side UI declaration contract
+  exists. It is recorded as a hard dependency and needs its own `/speckit-specify` plus an ADR
+  (constitution Principle III still has none).
+- Answer 5 deliberately narrows the benefit of the page/document split in the served context:
+  refreshing served figures now means re-running the job. FR-074 states this explicitly so the
+  split's remaining purpose (fetch mode for the owner's own use) is not mistaken for dead
+  weight at plan time.
+- The checklist's own notes still describe iterations 1-2 only; this session is recorded in the
+  spec's Clarifications section and here, not there.
+
+---
+
 ## 2026-08-15 — Constitution v1.0.0: ratify the workspace/pack responsibility split
 
 **Prompt summary**: `/speckit-constitution` — "make sure automation mono repo is responsible

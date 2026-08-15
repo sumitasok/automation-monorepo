@@ -4,7 +4,7 @@
 
 **Created**: 2026-08-15
 
-**Last Updated**: 2026-08-15 (clarifications resolved — two-pack split, sharing model, retirement schedule)
+**Last Updated**: 2026-08-15 (two rounds of clarification — two-pack split, sharing model, retirement schedule; then UI declaration and serving, see Clarifications)
 
 **Status**: Ready for planning
 
@@ -57,6 +57,16 @@ The workspace already has this exact pattern: the `gmail` pack owns
 arithmetic, the tax conventions and the interpretation the existing work
 encodes are the requirement, not a starting point to be re-derived. Any change
 in a published figure is a defect unless it is explicitly a correction.
+
+## Clarifications
+
+### Session 2026-08-15
+
+- Q: Does this spec cover both producing/declaring the UI and the `auto serve` machinery that reads declarations, serves on demand, and renders index.html cells? → A: Pack side only. This spec produces the artefact and declares it; the workspace-side reader, on-demand serving and landing-page cells ship as a separate framework feature, sequenced before this one so `portfolio` is its first consumer.
+- Q: What does "served on demand" mean — regenerated at request time, or served when asked for? → A: Served when its cell is selected from the workspace index. The artefact is not regenerated at request time; the pack's job refreshes it, and serving only reads what is already on disk.
+- Q: How many UI declarations does this pack make, given it is multi-instrument? → A: One. The workspace index carries one cell per pack that reports having a page, so this pack declares a single portfolio-wide page and instrument selection happens inside it, not by declaring more pages.
+- Q: Are redacted shared copies declared and served alongside the local page? → A: No. Only the full-disclosure local page is declared and appears in the index — the owner is its only consumer and is entitled to every figure. Shared copies stay undeclared, but an explicit preview step opens one exactly as its recipient would see it.
+- Q: When the workspace serves the page, does it use its embedded data or fetch a sibling document? → A: Embedded. The declared, served artefact is the self-contained variant and needs no companion file. Fetch mode remains available for the owner's own use, but it is not what the workspace serves, so refreshing served figures means re-running the pack's job.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -166,6 +176,8 @@ rebuilt.
 3. **Given** a page configured to fetch, **When** the location is unreachable or returns something unusable, **Then** the page still renders from its embedded copy and states clearly that it is showing fallback data and how old that data is.
 4. **Given** a page and a document, **When** the document's contract version is one the page does not support, **Then** the page says so plainly instead of rendering wrong or partial figures.
 5. **Given** the analysis has been re-run, **When** only the document is regenerated and republished, **Then** an already-built page pointed at that location shows the new figures with no rebuild.
+6. **Given** the pack is mounted and its page has been generated, **When** the owner opens the workspace index, **Then** the pack contributes exactly one cell, and selecting it renders the page complete — with no companion file fetched and no part of the pack executed.
+7. **Given** the pack is mounted but its job has never run, **When** the owner opens the workspace index, **Then** the cell reports that no page has been generated yet rather than presenting a broken or empty one.
 
 ---
 
@@ -253,6 +265,10 @@ location and the problem.
 - The fetched document is older than the embedded one.
 - A disclosure profile withholds a figure that another figure in the same document can be used to reconstruct.
 - A shared copy is regenerated after the disclosure profile was tightened — the previously shared artefact still exists elsewhere and cannot be recalled.
+- The pack is mounted and declares a page, but its job has never run, so the declared artefact does not exist yet.
+- The declared page exists but was generated from an older register than the one now on disk — it is not wrong, only stale, and must say so rather than look current.
+- A shared copy is written into the same directory as the declared page, where the two could be confused for one another.
+- The pack is unmounted while the workspace index is open.
 
 **Cross-pack boundary**
 
@@ -357,6 +373,23 @@ location and the problem.
 - **FR-059**: During that period the vault program MUST NOT be edited, and any divergence between it and the pack MUST be investigated and resolved before the pack's figure is trusted.
 - **FR-060**: The retirement MUST be time-boxed with a recorded target date rather than left open-ended, and the vault program deleted once the FY2026-27 return has been filed using the pack's figures.
 
+**UI declaration and serving** *(constitution Principle III; see Clarifications 2026-08-15)*
+
+- **FR-061**: The pack MUST write its page as a static artefact under the pack's workspace data directory, through a declared data file, exactly like any other output it produces.
+- **FR-062**: The pack MUST declare its page in its job manifest — at minimum a human-readable title and the artefact's path — so the workspace can enumerate it without executing the pack or parsing its output.
+- **FR-063**: The pack MUST NOT serve its own page, bind a port, register a route, or depend on the address it is served from. The declaration is the only thing it contributes to being served.
+- **FR-064**: The declaration MUST conform to the workspace's UI declaration contract, so the page is discovered by mounting the pack, with no workspace-side edit required to register it.
+- **FR-065**: The artefact MUST be complete and openable at rest. Serving it — when its cell is selected from the workspace index — MUST require no regeneration, no pack execution, and no write of any kind.
+- **FR-066**: Freshness MUST come from the pack's own run, never from being viewed. The artefact MUST carry the date its figures were generated, visibly enough that a reader can tell how current it is without leaving the page.
+- **FR-067**: The artefact MUST render identically whether it is opened directly from disk or served by the workspace; being served MUST NOT be a precondition for it working.
+- **FR-068**: The pack MUST declare exactly one page, covering the whole portfolio. The workspace index carries one cell per pack that declares a page, so the number of instruments held MUST NOT change the number of declarations or cells.
+- **FR-069**: Narrowing to a single instrument MUST be an interaction inside the page, alongside its existing filters — never a separate page, artefact or declaration.
+- **FR-070**: Only the full-disclosure local page MUST be declared. A redacted shared copy MUST NOT be declared, listed in the workspace index, or served by the workspace.
+- **FR-071**: A shared copy MUST be written where it cannot be mistaken for the declared page, so that neither can be sent or served in place of the other.
+- **FR-072**: The pack MUST provide an explicit step that opens a shared copy exactly as its recipient would see it — the same bytes that would be sent, with no owner-only affordance and nothing restored for the preview.
+- **FR-073**: The declared artefact MUST be the self-contained variant, carrying its data document inside it. Serving it MUST require no companion file, and it MUST NOT depend on anything else being reachable at the address it is served from.
+- **FR-074**: Refreshing what the served page shows MUST therefore be a re-run of the pack's job, which regenerates the artefact in place. FR-038 and FR-041 describe a fetch-configured page the owner may build for their own use; that variant is explicitly not what the workspace serves.
+
 ### Key Entities
 
 - **Position**: An instrument held by the owner — its identifier, the currency it trades in, its current market price and the date that price was observed. Owns a set of lots.
@@ -369,6 +402,7 @@ location and the problem.
 - **Rate table**: Dated foreign-exchange rates with their provenance, distinguishing verified rates from estimated ones.
 - **Data document**: The single self-describing artefact the page renders from — versioned, timestamped, containing positions, lots, disposals, ratings and the constants needed to recompute at a different price or date.
 - **Disclosure profile**: A named description of what a shared copy may reveal and what it must withhold.
+- **UI declaration**: The pack's statement, in its job manifest, that it produces a page — a human-readable title and the artefact's path. The only thing the pack contributes towards being served; read by the workspace without executing the pack.
 - **Import batch**: One ingestion of one export — its source, what it created, what it skipped as already seen, and what it could not recognise.
 
 ## Success Criteria *(mandatory)*
@@ -390,6 +424,9 @@ location and the problem.
 - **SC-013**: A consumer written only against the published register schema can read the register correctly, demonstrated without reference to the pack's behaviour — the precondition for specifying the `tax` pack.
 - **SC-014**: A run started with data missing or invalid produces zero figures — it never emits a partial result that could be mistaken for a complete one.
 - **SC-015**: Any figure derived from an unverified input carries its flag through to every output the owner can see, including the page and the published register.
+- **SC-016**: The pack contributes exactly one cell to the workspace index no matter how many instruments it holds, and selecting that cell renders the page completely with zero companion files fetched and zero pack code executed.
+- **SC-017**: A redacted shared copy never appears in the workspace index and is never served, verified by producing one and then inspecting both.
+- **SC-018**: The declared page is discovered by mounting the pack alone — zero workspace-side edits are needed to make it appear in the index, and unmounting the pack removes it.
 
 ## Assumptions
 
@@ -410,6 +447,7 @@ location and the problem.
 - The workspace's pack registration, job manifest and job-running mechanism.
 - The workspace's configuration- and data-file injection convention, which is what makes "no data inside the pack" enforceable rather than aspirational.
 - The workspace's write-sandbox, which is what turns FR-004 from documentation into a guarantee.
+- **The workspace's UI declaration contract and serving mechanism** — the manifest field this pack declares into, the reader that enumerates declarations, on-demand serving of the artefact, and the landing page that lists it. None of this exists yet; it is a separate framework feature that MUST be specified and delivered before FR-062 and FR-064 can be satisfied.
 - The vault-resident program, retained read-only through the FY2026-27 filing cycle as the correctness oracle for SC-001 and FR-058.
 - Real export files from each broker to be supported, for validating each broker profile.
 
@@ -421,4 +459,5 @@ location and the problem.
 - Executing, recommending or placing trades. The pack reports arithmetic on the owner's own data; it holds no view on any company.
 - Handling corporate actions correctly (detection and refusal only — see Assumptions).
 - Hosting a shared page. The pack produces a redacted artefact; where it is served from is the owner's choice.
+- **The workspace-side serving machinery** — defining the manifest UI declaration field, reading declarations across mounted packs, serving artefacts on demand, and rendering the landing page and its cells. This pack declares into that contract and consumes it; building it is a separate framework feature with its own specification and ADR.
 - Migrating the vault's other analyses (expenses, banking, purchases) into packs.
