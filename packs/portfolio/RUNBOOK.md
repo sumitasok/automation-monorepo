@@ -36,12 +36,20 @@ default build for opening from disk.
 
 ## Where things live
 
-| What | Where | Versioned |
-|---|---|---|
-| Code, schemas, broker profiles, page template | `packs/portfolio/` | yes |
-| Register, FX rates, rules, disclosure profiles | `data/portfolio/` | yes |
-| Generated page + document | `data/portfolio/` | no |
-| Redacted copies | `data/portfolio/shared/` | no |
+| What | Where | In git | Back it up |
+|---|---|---|---|
+| Code, schemas, broker profiles, page template | `packs/portfolio/` | yes | — |
+| Register, FX rates, rules, disclosure profiles | `data/portfolio/` | **no** | **yes** |
+| Generated page + document | `data/portfolio/` | no | no — regenerated |
+| Redacted copies | `data/portfolio/shared/` | no | no |
+
+**Nothing under `data/portfolio/` is committed, deliberately.** The workspace
+root `.gitignore` excludes `data/` entirely and this repo has a GitHub remote;
+every file there holds share counts, cost basis and realised gains. Do not add a
+negation rule to commit the register — that would push your holdings to a hosted
+remote. But **do back it up**: `register.yaml` is irreplaceable, and losing it
+means re-importing every export and redoing every manual basis correction. A
+separate private repo is the right home if you want history.
 
 **No data file ever lives inside `packs/portfolio/`.** The `data/` directory in
 the pack holds only symlinks that `auto` creates before each run (ADR 0019).
