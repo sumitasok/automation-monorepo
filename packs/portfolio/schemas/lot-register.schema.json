@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sumitasok.dev/automation/portfolio/lot-register.schema.json",
+  "title": "Lot register",
+  "description": "The portfolio pack's register of open lots and closed disposals. THIS IS A PUBLISHED CROSS-PACK CONTRACT (spec FR-009): the portfolio pack is its only writer, and any number of packs may read it. Serialized as YAML; this schema validates the parsed structure.",
+  "type": "object",
+  "required": ["contract_version", "generated_at", "reporting_currency", "funding", "positions"],
+  "additionalProperties": false,
+  "properties": {
+    "contract_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "Semver. A reader MUST refuse a major it does not support rather than reinterpret (FR-055)."
+    },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "reporting_currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+    "funding": {
+      "type": "object",
+      "description": "Funding taxonomy. Keys are referenced by Lot.funding.",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/$defs/fundingClass" }
+    },
+    "positions": {
+      "type": "object",
+      "description": "Keyed by ticker.",
+      "additionalProperties": { "$ref": "#/$defs/position" }
+    }
+  },
+  "$defs": {
+    "date": { "type": "string", "format": "date" },
+    "ticker": { "type": "string", "pattern": "^[A-Z0-9.\\-]{1,12}$" },
+
+    "fundingClass": {
+      "type": "object",
+      "required": ["label", "own_money", "desc"],
+      "additionalProperties": false,
+      "properties": {
+        "label": { "type": "string" },
+        "own_money": { "enum": ["none", "partial", "full"] },
+        "desc": { "type": "string" }
+      }
+    },
+
+    "flag": {
+      "type": "object",
+      "description": "A durable marker that a value could not be verified. Propagates to every output (FR-029, SC-015) and is cleared only by hand.",
+      "required": ["code", "note", "raised_by"],
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "enum": [
+            "cost_basis_unverified",
+            "fx_interpolated",
+            "no_basis_on_transfer",
+            "corporate_action_suspected"
+          ]
+        },
+        "note": { "type": "string", "minLength": 1 },
+        "raised_by": { "enum": ["import", "migration", "manual"] }
+      }
+    },
+
+    "marketQuote": {
+      "type": "object",
+      "required": ["spot", "as_of"],
+      "additionalProperties": false,
+      "properties": {
+        "spot": { "type": "number", "exclusiveMinimum": 0 },
+        "as_of": { "$ref": "#/$defs/date" },
+        "ath": { "type": "number" },
+        "low_52w": { "type": "number" },
+        "high_52w": { "type": "number" },
+        "avg_52w": { "type": "number" }
+      }
+    },
+
+    "lot": {
+      "type": "object",
+      "description": "One acquisition. matures_on and mature are DERIVED from acq_date plus the rule set and MUST NOT be stored here.",
+      "required": [
+        "id", "broker", "acq_date", "qty", "cb_per_share",
+        "price_paid_per_share", "acq_fx", "funding", "src", "confirmed"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "broker": { "type": "string", "minLength": 1 },
+        "acq_date": { "$ref": "#/$defs/date" },
+        "qty": { "type": "number", "exclusiveMinimum": 0 },
+        "cb_per_share": { "type": "number", "minimum": 0 },
+        "price_paid_per_share": { "type": "number", "minimum": 0 },
+        "acq_fx": { "type": "number", "exclusiveMinimum": 0 },
+        "funding": { "type": "string", "minLength": 1 },
+        "src": { "type": "string", "minLength": 1 },
+        "confirmed": { "type": "boolean" },
+        "flags": { "type": "array", "items": { "$ref": "#/$defs/flag" } },
+        "origin": { "type": "string" },
+        "fifo_from": {
+          "$ref": "#/$defs/date",
+          "description": "Hide this lot from FIFO for disposals before this date — used when the broker's specific-lot identification kept it untouched in an earlier period."
+        }
+      }
+    },
+
+    "disposal": {
+      "type": "object",
+      "description": "Self-contained by design: acquisition facts are COPIED here so a consumer (the tax pack) never has to resolve from_lot back to a lot that may have been fully consumed.",
+      "required": [
+        "from_lot", "qty", "acq_date", "cb_per_share", "acq_fx", "funding",
+        "disp_date", "disp_price", "disp_fx", "holding_days", "long_term", "src"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "from_lot": { "type": "string", "minLength": 1 },
+        "qty": { "type": "number", "exclusiveMinimum": 0 },
+        "acq_date": { "$ref": "#/$defs/date" },
+        "cb_per_share": { "type": "number", "minimum": 0 },
+        "acq_fx": { "type": "number", "exclusiveMinimum": 0 },
+        "funding": { "type": "string", "minLength": 1 },
+        "disp_date": { "$ref": "#/$defs/date" },
+        "disp_price": { "type": "number", "minimum": 0 },
+        "disp_fx": { "type": "number", "exclusiveMinimum": 0 },
+        "fees": { "type": "number", "minimum": 0, "default": 0 },
+        "holding_days": { "type": "integer", "minimum": 0 },
+        "long_term": { "type": "boolean" },
+        "lapse": { "type": "boolean", "default": false },
+        "flags": { "type": "array", "items": { "$ref": "#/$defs/flag" } },
+        "src": { "type": "string", "minLength": 1 }
+      }
+    },
+
+    "position": {
+      "type": "object",
+      "required": ["broker", "currency", "lots", "closed"],
+      "additionalProperties": false,
+      "properties": {
+        "broker": { "type": "string", "minLength": 1 },
+        "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+        "market": {
+          "$ref": "#/$defs/marketQuote",
+          "description": "Absent means UNPRICED. A consumer MUST exclude it from value-dependent totals, never treat it as zero (FR-016)."
+        },
+        "lots": { "type": "array", "items": { "$ref": "#/$defs/lot" } },
+        "closed": { "type": "array", "items": { "$ref": "#/$defs/disposal" } }
+      }
+    }
+  }
+}

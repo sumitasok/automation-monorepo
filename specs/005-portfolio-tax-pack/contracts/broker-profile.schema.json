@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sumitasok.dev/automation/portfolio/broker-profile.schema.json",
+  "title": "Broker profile",
+  "description": "The ONLY place broker-specific knowledge exists (spec FR-017). Adding a broker is a new file validating against this schema and zero code changes (FR-018). One contract covers both flat transaction lists and sectioned statements (FR-019) via the `reader` discriminator — see research.md R-003.",
+  "type": "object",
+  "required": ["contract_version", "name", "reader", "money", "dates", "actions"],
+  "additionalProperties": false,
+  "properties": {
+    "contract_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "name": { "type": "string", "minLength": 1, "description": "Broker identity stamped onto every lot and disposal this profile creates (FR-023)." },
+    "description": { "type": "string" },
+
+    "reader": {
+      "description": "How to get from a file to a stream of field-mapped rows. Everything downstream is shared.",
+      "oneOf": [
+        { "$ref": "#/$defs/tabularReader" },
+        { "$ref": "#/$defs/sectionedReader" }
+      ]
+    },
+
+    "money": {
+      "type": "object",
+      "required": ["strip"],
+      "additionalProperties": false,
+      "properties": {
+        "strip": { "type": "array", "items": { "type": "string" }, "description": "Characters removed before parsing, e.g. [\"$\", \",\", \" \"]." },
+        "parens_negative": { "type": "boolean", "default": false, "description": "Treat (1,234.56) as negative." }
+      }
+    },
+
+    "dates": {
+      "type": "object",
+      "required": ["formats"],
+      "additionalProperties": false,
+      "properties": {
+        "formats": { "type": "array", "minItems": 1, "items": { "type": "string" }, "description": "strptime patterns, tried in order." },
+        "split_marker": { "type": "string", "description": "Separator for composite values such as 'MM/DD/YYYY as of MM/DD/YYYY'." },
+        "prefer_as_of": { "type": "boolean", "default": false, "description": "When split, take the effective date. Holding period runs from it, so this changes tax outcomes." }
+      }
+    },
+
+    "actions": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Routing rules, FIRST MATCH WINS. A row matching none is reported as unrecognised and never silently dropped (FR-022).",
+      "items": { "$ref": "#/$defs/actionRule" }
+    },
+
+    "lapse_window_days": { "type": "integer", "minimum": 0, "default": 5 },
+    "lot_id_template": { "type": "string", "default": "{YM}-{kind}", "description": "Tokens: {ym} {YM} {kind} {n}." }
+  },
+
+  "$defs": {
+    "tabularReader": {
+      "type": "object",
+      "description": "One flat table, possibly preceded by title lines (Schwab shape).",
+      "required": ["kind", "header_tokens", "columns"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "tabular" },
+        "header_tokens": {
+          "type": "array", "minItems": 1, "items": { "type": "string" },
+          "description": "The header row is the first line containing ALL of these."
+        },
+        "columns": {
+          "type": "object",
+          "description": "Canonical field -> candidate column names in priority order. Unlisted canonical fields are absent for this broker.",
+          "additionalProperties": { "type": "array", "minItems": 1, "items": { "type": "string" } }
+        }
+      }
+    },
+
+    "sectionedReader": {
+      "type": "object",
+      "description": "Many sections, each with its own header (IBKR activity-statement shape).",
+      "required": ["kind", "sections"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "sectioned" },
+        "row_type_column": { "type": "integer", "default": 1, "description": "Zero-based index of the Header/Data/Total discriminator column." },
+        "data_row_value": { "type": "string", "default": "Data" },
+        "sections": {
+          "type": "array", "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["name", "section_name", "field_map"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string", "description": "Label attached to each row as `section`, matchable by an action rule." },
+              "section_name": { "type": "string", "description": "Value in the file's first column." },
+              "filter_col": { "type": "string" },
+              "filter_values": { "type": "array", "items": { "type": "string" } },
+              "field_map": {
+                "type": "object",
+                "description": "Canonical field -> the single column name in this section.",
+                "additionalProperties": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "actionRule": {
+      "type": "object",
+      "description": "All present predicates must hold (ANDed). At least one predicate is required, except for the catch-all whose `match` is '.*'.",
+      "required": ["event"],
+      "additionalProperties": false,
+      "properties": {
+        "match": { "type": "string", "description": "Regex against the row's action field." },
+        "section": { "type": "string", "description": "Match rows from this reader section — how a sectioned broker routes without an action column." },
+        "qty_sign": {
+          "enum": ["positive", "negative"],
+          "description": "REQUIRED for brokers that encode buy/sell in the sign of quantity rather than in an action string (IBKR). Without it every trade routes to one event — see research.md R-003."
+        },
+        "event": { "enum": ["buy", "sell", "vest", "espp", "transfer_in", "corporate_action", "ignore"] },
+        "funding": { "type": "string", "description": "Funding key for lots this rule creates. Required when event creates a lot." },
+        "lapse": { "type": "boolean", "default": false, "description": "Match this disposal to the vest lot it came from by specific identification rather than FIFO." },
+        "bucket": { "type": "string", "description": "For event: ignore — why it was ignored, so it is accounted for rather than dropped (SC-007)." },
+        "note": { "type": "string" }
+      }
+    }
+  }
+}

@@ -1,0 +1,66 @@
+# packs/portfolio/profiles/ibkr.yaml
+# DATA ONLY — this file is what replaced ibkr_engine.py, ibkr_loader.py and
+# ibkr_report_md.py (~940 lines duplicating the tax arithmetic). If you ever
+# need Python to support a broker, the contract is wrong; extend it instead.
+contract_version: "1.0.0"
+name: ibkr
+description: "Interactive Brokers activity statement (sectioned CSV)"
+
+reader:
+  kind: sectioned
+  # IBKR rows are: SectionName,{Header|Data|SubTotal|Total},field...
+  row_type_column: 1
+  data_row_value: "Data"
+  sections:
+    - name: trades
+      section_name: "Trades"
+      filter_col: "DataDiscriminator"
+      filter_values: ["Order"]
+      field_map:
+        symbol: "Symbol"
+        date:   "Date/Time"
+        qty:    "Quantity"          # NEGATIVE = sell. See actions below.
+        price:  "T. Price"
+        fees:   "Comm/Fee"
+        amount: "Proceeds"
+        action: "Code"
+    - name: transfers
+      section_name: "Transfers"
+      field_map:
+        symbol: "Symbol"
+        date:   "Date"
+        qty:    "Qty"
+        price:  "Xfer Price"        # "--" when basis is unknown
+        action: "Type"
+    - name: corporate_actions
+      section_name: "Corporate Actions"
+      field_map:
+        symbol: "Symbol"
+        date:   "Date/Time"
+        qty:    "Quantity"
+        action: "Description"
+
+money:
+  strip: [",", " "]
+  parens_negative: true
+
+dates:
+  formats: ["%Y-%m-%d", "%Y-%m-%d, %H:%M:%S"]
+
+# ⚠ THE TRAP THIS PROFILE EXISTS TO HANDLE (research.md R-003):
+# IBKR has no Buy/Sell action string. Direction is the SIGN OF THE QUANTITY.
+# Without qty_sign, every trade routes to whichever rule comes first and the
+# register silently fills with wrong-direction rows.
+actions:
+  - {section: trades,   qty_sign: positive, event: buy,  funding: MARKET,
+     note: "positive quantity in Trades = shares in"}
+  - {section: trades,   qty_sign: negative, event: sell,
+     note: "negative quantity in Trades = shares out"}
+  - {section: transfers, qty_sign: positive, event: transfer_in, funding: MARKET,
+     note: "ACATS in — basis often absent, flagged as no_basis_on_transfer"}
+  - {section: corporate_actions, event: corporate_action,
+     note: "refused rather than adjusted (FR-030)"}
+  - {match: ".*",       event: ignore, bucket: unmatched}
+
+lapse_window_days: 5
+lot_id_template: "{YM}-{kind}"

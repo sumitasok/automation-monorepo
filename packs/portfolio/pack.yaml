@@ -1,0 +1,18 @@
+name: portfolio
+description: >
+  Portfolio automation (Python app): maintains a broker- and instrument-agnostic
+  register of share lots, reconciles broker exports against it (FIFO, with
+  specific identification for lapse sales), rates every open lot on whether
+  selling it now is cheap or expensive, and generates a self-contained
+  interactive page from a JSON data document. All broker knowledge lives in
+  profiles/<broker>.yaml and all tax knowledge in the workspace rules file —
+  adding a broker or an instrument is a data edit, never a code change.
+  The lot register is a PUBLISHED CROSS-PACK CONTRACT (schemas/): this pack is
+  its only writer; a future `tax` pack reads it to compute the fiscal-year
+  return. Three jobs (see jobs/).
+default_visibility: private     # personal holdings, cost basis and tax figures
+maintainers: [sumit]
+# Mounted into a workspace as a pack. Design + rationale:
+# specs/005-portfolio-tax-pack/. Ports the forward-looking half of the
+# sa.finances vault's _db/tax/ analysis (ADR 0002 parent/pack split,
+# 0006 apps-as-packs, 0007 config injection, 0019 data_files).

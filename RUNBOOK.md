@@ -4,6 +4,174 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-08-15 — Implement spec 005: the `portfolio` pack is built and running
+
+**Prompt summary**: `/speckit-tasks` then `/speckit-implement` on spec 005.
+
+**Outcome**: the pack exists, is registered, runs through `auto`, and its figures match the
+vault program exactly. 39 of 42 tasks done, 1 partial, 2 blocked. **55 tests pass.**
+
+**Files affected**: new `packs/portfolio/` (11 modules, 4 schemas, 2 broker profiles, page
+template, 3 job manifests, Makefile, RUNBOOK, samples, 5 test files); new `data/portfolio/`
+(register, fx-rates, rules, disclosure + generated page/document); `packs.yaml`;
+`specs/005-portfolio-tax-pack/tasks.md`; `RUNBOOK.md`.
+
+**Verified working**:
+- `./auto run portfolio-report` exits 0 under the write sandbox; page is 23KB, self-contained,
+  zero external references, renders from `file://`.
+- Migration moved 19 AVGO lots out of the vault; the vault is untouched.
+- All 6 declared data files are still symlinks after repeated writes; no data file inside
+  `packs/portfolio/`; `auto doctor` reports no portfolio problems.
+- Parity: all 19 lots match the vault's break-even, cushion, tax-now and saving exactly.
+
+**Four real bugs found by running it, not by writing it**:
+1. *Dry-run was lying.* Created lots were not applied, so a later sell in the same file had
+   nothing to match and the preview omitted disposals the real run would make — the opposite
+   of what a preview is for. Fixed by simulating against a deep copy.
+2. *Row accounting counted artifacts, not rows.* One sell row legitimately splits across
+   several lots. The SC-007 identity now tracks one outcome per row.
+3. *Shared copies landed inside the pack.* `data/` in the pack is a real directory holding
+   symlinks, so resolving the directory (rather than a declared file) put output in
+   `packs/portfolio/data/shared/`. Constitution Principle II violation, caught by looking at
+   where the file actually went.
+4. *Redaction leaked, twice.* Deleting `positions[].spot` left the price sitting in the
+   rating's `why` prose ("At $427.76 the stock is trading BELOW..."), and migrated cost-basis
+   review notes quote figures outright. Field-path deletion is necessary but not sufficient.
+   Added a byte-level post-check that searches the finished copy for every withheld VALUE and
+   refuses if any survives. The unit test had passed because its fixture had no filled
+   templates — the real document did.
+
+**Also corrected**: my own parity test was wrong twice before the code was — first with inputs
+transcribed from the vault's rounded display (cb 388.36 vs the real 388.355, five wrong
+acq_fx), then reading the vault's fifth column as tax-at-maturity when it is SAVING. The
+giveaway was every lot ratioing to 1.62 when tax_now/tax_lt must be 0.39/0.1495 = 2.609.
+
+**Caveats**:
+- **T037 partial**: corporate actions are refused when the broker *labels* them. Inferring an
+  unlabelled split from a quantity/price discontinuity (research R-009's second detector) is
+  not built.
+- **T041/T042 blocked**: the page is not listed in the workspace index. Needs the UI
+  declaration contract. `jobs/portfolio-report/manifest.yaml` carries a comment saying so.
+- `auto doctor` currently FAILS overall — on the pre-existing `packs/expenses/config/events.json`
+  drift, unrelated to this work and visible in the conversation-start git status.
+- The FX table has no verified rate for several 2026 dates, so lots carry `fx_interpolated`.
+  `validate --strict` fails while any flag remains; that is the pre-filing check.
+- Only Schwab has been exercised against a real export. The IBKR profile is tested against a
+  synthetic sectioned statement, not a genuine IBKR download.
+
+---
+
+## 2026-08-15 — Plan spec 005 (`/speckit-plan`); implement blocked on tasks.md
+
+**Prompt summary**: `/speckit-plan` and `/speckit-implement` invoked together. Plan ran in full;
+implement halted at its prerequisite check because `tasks.md` does not exist yet.
+
+**Files affected**: `specs/005-portfolio-tax-pack/` — `plan.md`, `research.md`, `data-model.md`,
+`quickstart.md`, `contracts/` (README, cli.md, and four JSON Schemas: lot-register,
+broker-profile, explorer-document, disclosure-profile). `RUNBOOK.md` — this entry.
+
+**Key decisions**:
+- **Python, port not rewrite.** SC-001 (exact figure parity) is the top criterion and the vault's
+  ~4,650 lines are already verified against a manual review; a Go rewrite would re-derive correct
+  tax maths for consistency alone. `language: python` is first-class in the runner — `execute_job`
+  maps it to `sys.executable`, which provably has PyYAML because `auto` itself requires it.
+- **PyYAML only; `ruamel.yaml` dropped.** It exists solely to preserve YAML comments, and the
+  register is now a published cross-pack contract — fidelity cannot depend on comment
+  preservation. The load-bearing annotations in `holdings.yaml` are already fields
+  (`cb_review`, `fx_review`, `origin`, `confirmed`), not comments.
+- **One broker-profile contract via a `reader` discriminator** (`tabular` | `sectioned`). The
+  difference between Schwab and IBKR is entirely in getting from a file to field-mapped rows;
+  everything after that is shared.
+- **Schema validation without a dependency** — a subset validator that REJECTS unknown keywords
+  rather than ignoring them, plus a test asserting the shipped schemas stay within the subset.
+
+**Traps found during research** (each would have produced a silent wrong result):
+1. *Atomic write vs symlink.* `os.replace(tmp, "register.yaml")` replaces the SYMLINK with a real
+   file — recreating ADR 0018's credentials-drift bug as data, tripping `auto doctor` and the
+   sandbox. Must resolve the link and temp-and-replace at the target inside `data/portfolio/`.
+2. *`data_files:` basenames are flattened.* `_link_pack_data_files` targets
+   `data/<pack>/<basename>`, so two declared files sharing a basename silently point at one
+   target. The vault layout has exactly this shape today, so a one-for-one relocation would
+   collide. `data/portfolio/` is therefore flat with distinct names.
+3. *IBKR encodes buy/sell in the sign of quantity*, not an action string. Without a `qty_sign`
+   predicate in the action contract, every IBKR trade routes to the same event.
+4. *`fetch()` is blocked for `file://` URLs.* Independent confirmation that clarification 5 (the
+   declared artefact is the embedded variant) was right — the alternative ships a page that
+   breaks in the exact scenario FR-067 requires.
+
+**Constitution Check**: gates I, II, IV, V, VI, VII pass. **Gate III is PARTIAL** and recorded in
+Complexity Tracking — FR-062/FR-064 cannot be satisfied because the workspace UI declaration
+contract does not exist. Inventing a `ui:` manifest block was rejected as inverting Principle I
+(the pack would dictate a workspace contract rather than declare into one). Re-run after Phase 1
+design: unchanged, no new violation.
+
+**Outcome**: plan complete, all Phase 0/1 artifacts generated, four schemas verified well-formed
+and within the validator subset. `/speckit-implement` halted correctly — `tasks.md` missing.
+
+**Caveats**:
+- Next step is `/speckit-tasks`, then `/speckit-implement`.
+- The migration (quickstart scenario 0) must report every YAML comment it finds and either
+  promote it to a field or record it as documentation, since dropping ruamel.yaml means comments
+  stop round-tripping.
+- Quickstart scenarios 1 (parity) and 7 (redaction) are marked as gates: a parity failure means a
+  tax convention was lost in the port, and redaction is the only irreversible mistake available
+  here, so it is verified by searching delivered bytes rather than the rendered page.
+- Spec checklist is 16 checkboxes, all complete — an earlier report of "17/17" miscounted.
+
+---
+
+## 2026-08-15 — Clarify spec 005: UI declaration, serving and disclosure boundaries
+
+**Prompt summary**: `/speckit-clarify 005` — "the UI should be reported back to auto serve so
+that it can also be served on demand, and will be displayed in as a cell in the index.html
+after reading the packs declaration."
+
+**Files affected**:
+- `specs/005-portfolio-tax-pack/spec.md` — new `## Clarifications` section (5 Q/A bullets),
+  new "UI declaration and serving" requirement group FR-061..FR-074, SC-016..SC-018, two new
+  US4 acceptance scenarios, four new edge cases, a `UI declaration` key entity, plus
+  Dependencies and Out of Scope entries. 74 FRs, 18 SCs, 0 open markers.
+- `RUNBOOK.md` — this entry.
+
+**Steps taken**: ran `check-prerequisites.sh --json --paths-only` (FEATURE_DIR resolved from
+`.specify/feature.json`, not the branch name); loaded constitution v1.0.0, now present on this
+branch after merging main; scanned the spec against the clarification taxonomy; asked 5
+questions one at a time, integrating each answer before asking the next.
+
+**Answers recorded**:
+1. *Scope* — pack side only. 005 produces and declares; the `auto serve` reader, on-demand
+   serving and index cells are a separate framework feature (`framework/` is a submodule —
+   a public repo — so a private pack's spec should not carry that change). Sequenced first so
+   `portfolio` is its first consumer.
+2. *"Served on demand"* — Sumit corrected the reading: it means served **when its cell is
+   selected from the index**, not regenerated at request time. Serving reads what is on disk;
+   the pack's job is what refreshes it.
+3. *Cardinality* — one cell per pack that declares a page, so this pack declares exactly one
+   portfolio-wide page. Instrument count never changes the declaration or cell count;
+   narrowing to one instrument is an in-page filter.
+4. *Redacted copies* — not declared, not indexed, not served ("I am the only consumer"), but
+   an explicit preview step opens one exactly as its recipient would see it.
+5. *Data source when served* — embedded. The declared artefact is self-contained and needs no
+   companion file; FR-038/FR-041's fetch mode stays available for the owner's own use but is
+   explicitly not what the workspace serves.
+
+**Outcome**: 5 of 5 questions answered and integrated. Spec quality checklist re-validated —
+17/17 both before and after, no checkbox state changed, so the file was left untouched per the
+clarify rule about noisy diffs. Spec ready for `/speckit-plan`.
+
+**Caveats**:
+- FR-062 and FR-064 cannot be satisfied until the workspace-side UI declaration contract
+  exists. It is recorded as a hard dependency and needs its own `/speckit-specify` plus an ADR
+  (constitution Principle III still has none).
+- Answer 5 deliberately narrows the benefit of the page/document split in the served context:
+  refreshing served figures now means re-running the job. FR-074 states this explicitly so the
+  split's remaining purpose (fetch mode for the owner's own use) is not mistaken for dead
+  weight at plan time.
+- The checklist's own notes still describe iterations 1-2 only; this session is recorded in the
+  spec's Clarifications section and here, not there.
+
+---
+
 ## 2026-08-15 — Constitution v1.0.0: ratify the workspace/pack responsibility split
 
 **Prompt summary**: `/speckit-constitution` — "make sure automation mono repo is responsible
@@ -60,6 +228,126 @@ V Configuration Over Code · VI Boundaries Are Structural · VII Local-First, Le
   Principle III mandates. Its Constitution Check will surface this at plan time.
 - Ratification date recorded as 2026-08-15 — the file had never been filled, so there is no
   earlier adoption date to preserve.
+## 2026-08-15 — Spec clarifications: split into two packs (`portfolio` + `tax`)
+
+**Prompt summary**: Answers to the three blocking questions on spec 005.
+Q1 — *"Schwab tax planning and the tax calculator are two different packs — tax planner is
+planning for tax before sale, tax calculator is for evaluating tax against actual sales.
+Option C, but two different packs."* Q2 — C (local by default, hosted opt-in with
+redaction). Q3 — C (vault program read-only for one filing cycle, then delete).
+
+**Files affected**:
+- `specs/005-portfolio-tax-pack/spec.md` — rescoped to the `portfolio` pack alone and
+  restructured. Now 6 user stories, 60 functional requirements, 15 success criteria,
+  0 open markers.
+- `specs/005-portfolio-tax-pack/checklists/requirements.md` — iteration 2 notes; all 17
+  checklist items now pass.
+- `RUNBOOK.md` — this entry.
+
+**Steps taken**:
+1. Q1 was a correction to the framing, not a menu choice — planning and calculation are
+   different tools, not two halves of one program. Rescoped this feature to the
+   forward-looking `portfolio` pack (broker import, lot register, disposal reconciliation,
+   sell planner, explorer page) and moved the fiscal-year tax-return computation out of
+   scope as a named successor pack (`tax`), to be specced separately.
+2. Promoted the lot register from an internal structure to the **published contract between
+   the two packs**: FR-008 single writer, FR-009 versioned schema readable without this
+   pack's behaviour, FR-010 must carry everything `tax` needs so it never re-derives from
+   broker exports, FR-011 atomic writes. SC-013 is the gate that unblocks speccing `tax`.
+3. Rewrote the parity requirement — the old FR-030/SC-001 measured against fiscal-year ITR
+   reference figures, which now belong to the other pack. Parity is now register-and-page
+   figures against the vault program from identical inputs.
+4. Q2 -> User Story 5 plus FR-043..FR-050. Two non-obvious calls: redaction strips figures
+   from the data document rather than hiding them in the display (a page that hides still
+   ships), and a disclosure profile is rejected if a withheld figure is reconstructible
+   from the retained ones.
+5. Q3 -> FR-058..FR-060. Bounded concretely to the FY2026-27 return rather than "one cycle",
+   and the vault copy is frozen (no edits) during the period so it stays a fixed oracle
+   instead of becoming a second maintained implementation.
+
+**Outcome**: Spec complete — 0 clarification markers, 17/17 checklist items pass, ready for
+`/speckit-plan`. Draft PR #15 updated.
+
+**Caveats**:
+- The `tax` pack needs its own `/speckit-specify` run. It is not blocked by anything here
+  except the published register schema (FR-009, SC-013).
+- Compensation slips and per-FY facts (challans, TDS, peak balances) stay in the vault for
+  now and travel with the `tax` pack — only that pack consumes them. The exception is any
+  slip figure governing a lot's cost basis, which the register already carries.
+- Pack names `portfolio` and `tax` are proposals; neither is in `packs.yaml` yet.
+- Implementation language still undecided — would be the first non-Go pack here.
+- The cross-pack read has direct precedent (gmail owns `transactions.csv`; wallet and
+  expenses read it), so FR-008..FR-011 should follow that convention, not invent one.
+
+---
+
+## 2026-08-15 — Spec: `portfolio` pack — generalise the sa.finances tax/lot analysis into a pack
+
+**Prompt summary**: `/speckit-specify` — survey `~/Claude/Projects/sa.finances` and spec
+how its `_db/tax/` analysis becomes a pack under `packs/`. Requirements given: treat it as
+a general-purpose tool (Schwab today, IBKR and others tomorrow); generic data format
+(promote the current one); extendable to any ticker (AVGO today); render the HTML from a
+JSON document that is either embedded or fetched from a location; the pack holds only code
+and JSON schemas, with all data under `data/<pack-name>/`. Planning/specing only — no code.
+
+**Files affected**:
+- `specs/005-portfolio-tax-pack/spec.md` — new feature spec: 5 prioritised user stories,
+  47 functional requirements, 12 success criteria, key entities, assumptions, dependencies,
+  out-of-scope. 3 open `[NEEDS CLARIFICATION]` markers (FR-031, FR-032, FR-047).
+- `specs/005-portfolio-tax-pack/checklists/requirements.md` — spec quality checklist plus
+  the validation findings that changed the spec during iteration 1.
+- `.specify/feature.json` — points downstream speckit commands at the new feature dir.
+- `RUNBOOK.md` — this entry.
+
+**Steps taken**:
+1. Session startup checks per SPEC_BASED_WORKFLOW: read `.claude/spec-map.json`, listed
+   worktrees, checked remotes. Surfaced the pending-review alert for `job-runner-ui`
+   (implemented, 36/36 tasks, never pushed or merged, worktree still live).
+2. No `.specify/extensions.yml` present, so no before/after-specify hooks ran.
+3. Surveyed `sa.finances/_db/tax/` — `engine.py`, `planner.py`, `refresh_explorer.py`,
+   `lots.py`, `loaders.py`, `report_md.py`, `rules.yaml`, `parsers/*.yaml`,
+   `templates/explorer.html`, `data/`.
+4. Surveyed the pack contract on this side — `packs.yaml`, `packs/expenses` and
+   `packs/wallet` (`pack.yaml`, `jobs/*/manifest.yaml`, `config.sample.yaml`), ADR 0019
+   (`data_files:` symlinking), ADR 0018 (write sandbox), ADR 0005/0007, `data/README.md`.
+5. Created worktree `.worktrees/portfolio-tax-pack` on branch `feature/portfolio-tax-pack`.
+6. Wrote the spec, ran it against the quality checklist, applied five fixes, re-ran.
+
+**Findings that shaped the spec**:
+- The broker seam is not real. `parsers/schwab_csv.yaml` (columns + action regexes) and
+  `parsers/ibkr_format.yaml` (sections + field maps) are *different shapes*, and IBKR is
+  served by `ibkr_engine.py` / `ibkr_loader.py` / `ibkr_report_md.py` — ~940 lines
+  duplicating `engine.py`'s tax arithmetic, with an account number hardcoded in it.
+  Two copies of the same tax logic that can drift. FR-014/015/016 target exactly this.
+- The ticker seam is nearly real already: `planner.py` and `refresh_explorer.py` take
+  `--ticker` and hardcode nothing; only defaults say AVGO. `engine.py` has three genuine
+  AVGO references. Cheap to finish.
+- The HTML seam is nearly real already: `explorer.html` reads
+  `<script id="explorer-data" type="application/json">` and `refresh_explorer.py` fills it
+  by string replacement. Adding a fetch path plus embedded fallback is a small change to a
+  page that is already data-driven.
+- The data/code boundary does not exist yet: lots, FX rates, RSU slips and per-FY facts all
+  live in `_db/tax/data/`, and `loaders.py` / `ibkr_engine.py` reach into vault directories
+  (`Trades/US/IBKR/raw`, `Tax/FY25-26/`). ADR 0019 forbids all of this inside a pack.
+- Corporate actions are unhandled anywhere, and AVGO has had a split. Specced as
+  detect-and-refuse (FR-025), explicitly out of scope as a capability.
+
+**Outcome**: Spec written and validated. 16 of 17 checklist items pass; the one failure is
+the 3 remaining clarification markers, which are open scope/security decisions for Sumit
+rather than gaps that could be defaulted.
+
+**Caveats**:
+- Three decisions block `/speckit-plan`: whether the full fiscal-year ITR computation comes
+  across or only the forward-looking half (roughly doubles the work); whether the fetched
+  JSON is ever read by anyone but the owner (decides whether redaction/access control are
+  requirements at all); and whether the vault-resident program is deleted after migration
+  or kept alongside.
+- Proposed pack name is `portfolio` (data at `data/portfolio/`), matching the single-word
+  convention of gmail/wallet/expenses. Not yet registered in `packs.yaml`.
+- The pack would be the first non-Go pack here; the manifest `language:` field already
+  accommodates that, but no implementation language has been chosen — that is a
+  `/speckit-plan` decision.
+- Nothing under `sa.finances` was modified.
 
 ---
 

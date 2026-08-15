@@ -1,0 +1,45 @@
+id: portfolio-report
+name: Portfolio sell-plan report and explorer page
+description: >
+  Recompute every open lot's break-even, cushion and rating from the register,
+  and regenerate the self-contained explorer page plus its data document. Reads
+  only; the register is untouched. The page is written under data/portfolio/ and
+  renders completely when opened straight from disk — no server, no companion
+  file, no external asset (FR-065, FR-067, FR-073).
+category: finance
+owner: sumit
+language: python
+exec: "python3 main.py report"   # app-backed job: a command, not a file (ADR 0006)
+workdir: "."                     # run in the pack root
+tags: [portfolio, finance, tax, equity]
+visibility: private
+
+runs_on:
+  os: [macos, linux]
+  machines: [any]
+
+schedule:
+  cron: ""                       # manual — figures move only when data changes
+  timezone: Asia/Kolkata
+  enabled: false
+
+runtime:
+  timeout_seconds: 120
+  env: []                        # no secrets, no API, nothing to configure
+
+data:
+  reads:  [data/register.yaml, data/fx-rates.yaml, data/rules.yaml]
+  writes: [data/explorer.html, data/explorer-document.json]
+  # Every path above is a data_files: symlink into data/portfolio/ (ADR 0019).
+  # Writes go through portfolio/store.py, which resolves the link before the
+  # atomic replace so the symlink is never swapped for a real file.
+
+health:
+  expect_run_every: ""
+
+# NOT YET DECLARED: the page this job produces (data/explorer.html) should
+# appear as a cell in the workspace index, per constitution Principle III and
+# spec FR-062/FR-064. The workspace UI declaration contract does not exist yet,
+# and inventing a `ui:` key here would invert Principle I — the pack would be
+# dictating a workspace contract rather than declaring into one. Add the
+# declaration when that framework feature lands; the artefact path is stable.

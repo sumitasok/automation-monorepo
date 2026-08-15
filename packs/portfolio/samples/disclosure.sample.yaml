@@ -1,0 +1,67 @@
+# data/portfolio/disclosure.yaml — what a shared copy may reveal.
+#
+# Redaction DELETES these fields from the data document (FR-047). A page that
+# merely hides a figure still ships it in its payload, so "hide" is not an
+# option this pack offers.
+#
+# A profile is REFUSED before anything is produced if what it withholds can be
+# reconstructed from what it keeps (FR-049) — see `derivations` below.
+#
+# Field paths are quoted: `[]` is YAML flow-sequence syntax and an unquoted
+# path silently fails to parse.
+contract_version: "1.0.0"
+
+profiles:
+  full:
+    label: "Everything — for an accountant"
+    withhold: []
+    note: "Complete figures. Nothing withheld."
+    # Producing this requires an interactive confirmation naming what is about
+    # to leave the machine, and is refused outright on a non-interactive run.
+    requires_confirmation: true
+
+  figures-hidden:
+    label: "Shape of the decision, none of the amounts"
+    # Quantities and per-share basis go together with the absolute amounts:
+    # keeping either would reconstruct the other via `derivations`, and the
+    # check below would refuse the profile.
+    withhold:
+      - "positions[].lots[].qty"
+      - "positions[].lots[].cb"
+      - "positions[].lots[].afx"
+      - "positions[].lots[].breakeven"
+      - "positions[].lots[].buyback_st"
+      - "positions[].lots[].buyback_lt"
+      # `why` is prose, but it is prose STATING THIS LOT'S OWN NUMBERS — that is
+      # the whole point of FR-033. "At $427.76 the stock is trading BELOW the
+      # $249.68 this batch cost you" defeats every deletion above. Withholding
+      # the numeric fields while keeping the sentence withholds nothing.
+      - "positions[].lots[].why"
+      # Flag NOTES quote figures in prose too — a migrated cost-basis review
+      # note reads "...that would be ~$167.21, the same FMV as the Sep-2024
+      # vest". The flag `code` is kept, so a reader still sees THAT something is
+      # unverified without seeing the number it concerns.
+      - "positions[].lots[].flags[].note"
+      - "positions[].spot"
+      - "positions[].fx"
+      - "positions[].closed[].qty"
+      - "positions[].closed[].cb"
+      - "positions[].closed[].price"
+    note: >
+      Absolute amounts, share counts and cost bases were withheld. What remains
+      is the shape of the decision: each batch's rating, how far the price can
+      fall before waiting stops paying, and when it matures.
+
+# Known reconstruction paths. ADDING A DERIVED FIGURE TO THE DOCUMENT REQUIRES
+# ADDING ITS RULE HERE — otherwise the derivability check silently under-reports
+# and a profile that leaks would be accepted.
+derivations:
+  - target: "positions[].lots[].cb"
+    from: ["positions[].lots[].qty", "positions[].lots[].breakeven"]
+    note: "quantity and any per-share price recover the basis"
+  - target: "positions[].spot"
+    from: ["positions[].lots[].breakeven", "positions[].lots[].cushion"]
+    note: "breakeven / (1 + cushion) is the spot price"
+  - target: "positions[].lots[].qty"
+    from: ["positions[].lots[].cb", "positions[].closed[].qty"]
+    note: "a retained absolute alongside a per-share figure recovers quantity"

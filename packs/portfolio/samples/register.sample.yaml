@@ -1,0 +1,39 @@
+# Example register for a fresh install. Copy to data/portfolio/register.yaml
+# and replace with your own positions, or run `main.py migrate`.
+contract_version: 1.0.0
+generated_at: '2026-01-01T00:00:00+00:00'
+reporting_currency: INR
+funding:
+  RSU:
+    label: RSU vest
+    own_money: none
+    desc: Granted by Broadcom. Zero cash from you. Full market value was taxed as salary at vest, and
+      ~40% of each vest was auto-sold to cover that TDS.
+  ESPP:
+    label: ESPP purchase
+    own_money: partial
+    desc: Bought through payroll deduction at a discount. Your cash, but the discount itself was taxed
+      as salary.
+  MARKET:
+    label: Own money
+    own_money: full
+    desc: Bought on the open market with your own cash. No salary-tax component — pure investment.
+positions:
+  EXMPL:
+    broker: example
+    currency: USD
+    market:
+      spot: 100.0
+      as_of: '2026-01-01'
+    lots:
+    - id: JAN25-MARKET
+      broker: example
+      acq_date: '2025-01-15'
+      qty: 10.0
+      cb_per_share: 80.0
+      price_paid_per_share: 80.0
+      acq_fx: 85.0
+      funding: MARKET
+      src: example:2025-01-15:buy:10@80#1
+      confirmed: true
+    closed: []

@@ -1,0 +1,94 @@
+# data/portfolio/rules.yaml — tax constants and lot-rating definitions.
+#
+# DATA ONLY. The pack contains no rate, threshold or rating in Python
+# (constitution Principle V). Adding a rating, moving a threshold or supporting
+# another asset class is an edit here.
+#
+# lot_ratings are evaluated TOP-DOWN, FIRST MATCH WINS. Predicate keys are
+# <metric>_<comparator> where metric is one of mature, cushion, price_vs_basis,
+# gain_frac, wait_days and comparator is lt/lte/gt/gte/eq. An unknown metric or
+# comparator is an error, never a silent skip.
+#
+# `why` is a per-lot TEMPLATE and must contain at least one {token}; `cond` and
+# `plain` are shown un-filled in the legend and must contain none.
+contract_version: 1.0.0
+capital_gains:
+  foreign_equity:
+    ltcg_after_months: 24
+    stcg_rate: 0.39
+    ltcg_rate: 0.125
+    ltcg_surcharge_cap: 0.15
+  lot_matching:
+    method: fifo
+    same_date_tiebreak:
+    - RSU
+    - ESPP
+    - MARKET
+    - DIV_REINVEST
+    lapse_sale_window_days: 5
+cess: 0.04
+lot_ratings:
+- code: STRONG_BUY
+  label: Strong buy
+  icon: ▲
+  tone: buy
+  when:
+    price_vs_basis_lt: 1.0
+  cond: Spot is below what the batch cost you
+  plain: You are underwater on it, so there is no gain to tax and nothing to protect by waiting.
+  why: 'At {spot} the stock is trading BELOW the {cb} this batch cost you — you are underwater on it. Buying here lowers your
+    average cost, and new shares start their own 24-month clock from a low base, which builds tax cushion quickly. Nothing
+    to sell into: there is no gain to tax.'
+- code: STRONG_SELL
+  label: Strong sell
+  icon: ▼
+  tone: go
+  when:
+    mature_eq: true
+    price_vs_basis_gte: 2.5
+  cond: Past 24 months AND up 2.5× or more
+  plain: The low rate already applies to a very large gain — the cheapest profit available anywhere in the position.
+  why: Past 24 months AND up {pvb} on a {cb} cost. Tax here is {ltcg_rate} — {tax_now} on {qty} shares — instead of the {tax_if_early}
+    the same sale would have cost a day before maturity. This is the cheapest profit you will ever take out of this position,
+    so it is the first place to trim if you want to reduce how much of your net worth sits in one company.
+- code: SELL_OK
+  label: Sell first
+  icon: ✓
+  tone: ok
+  when:
+    mature_eq: true
+  cond: Past 24 months
+  plain: The low rate applies. Waiting no longer saves tax, and FIFO takes these shares first anyway.
+  why: Past 24 months, so the low {ltcg_rate} rate already applies and waiting saves nothing further on tax. FIFO takes these
+    shares first anyway — this is where cash should come from.
+- code: STRONG_HOLD
+  label: Strong hold
+  icon: ★
+  tone: stop
+  when:
+    cushion_lte: -0.1
+  cond: The price can fall 10% or more before waiting stops paying
+  plain: A wide margin of safety. Selling early here gives up a lot of tax for no compensating reason.
+  why: The stock would have to fall {fall_pct} — from {spot} all the way down to {breakeven}, a drop of {fall_usd} a share
+    — before selling today at {stcg_rate} would have beaten waiting until {mature_date}. That is a wide margin of safety.
+    Selling now hands over {saving} of tax you would simply not have paid {wait_human} later.
+- code: HOLD
+  label: Hold
+  icon: ◆
+  tone: caution
+  when:
+    cushion_lte: -0.05
+  cond: The price can fall 5–10% before waiting stops paying
+  plain: A usable margin, though a normal market swing could eat it.
+  why: The stock can fall {fall_pct}, to {breakeven}, before waiting until {mature_date} stops paying. Holding {wait_human}
+    longer saves {saving} in tax — a usable margin, though not a wide one.
+- code: NEUTRAL
+  label: Tax-neutral
+  icon: ○
+  tone: neutral
+  when: {}
+  cond: Less than 5% of room
+  plain: Too little embedded profit for the tax rate to decide anything. Judge on whether you want to own the stock.
+  why: 'Only {fall_pct} of room: a slip to {breakeven} erases the entire benefit of waiting until {mature_date}, and the most
+    you save by waiting is {saving}. Too little profit here for the tax rate to decide anything — judge this batch on whether
+    you want to own the stock.'
