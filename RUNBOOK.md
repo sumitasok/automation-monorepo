@@ -4,6 +4,65 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-08-15 — Plan spec 005 (`/speckit-plan`); implement blocked on tasks.md
+
+**Prompt summary**: `/speckit-plan` and `/speckit-implement` invoked together. Plan ran in full;
+implement halted at its prerequisite check because `tasks.md` does not exist yet.
+
+**Files affected**: `specs/005-portfolio-tax-pack/` — `plan.md`, `research.md`, `data-model.md`,
+`quickstart.md`, `contracts/` (README, cli.md, and four JSON Schemas: lot-register,
+broker-profile, explorer-document, disclosure-profile). `RUNBOOK.md` — this entry.
+
+**Key decisions**:
+- **Python, port not rewrite.** SC-001 (exact figure parity) is the top criterion and the vault's
+  ~4,650 lines are already verified against a manual review; a Go rewrite would re-derive correct
+  tax maths for consistency alone. `language: python` is first-class in the runner — `execute_job`
+  maps it to `sys.executable`, which provably has PyYAML because `auto` itself requires it.
+- **PyYAML only; `ruamel.yaml` dropped.** It exists solely to preserve YAML comments, and the
+  register is now a published cross-pack contract — fidelity cannot depend on comment
+  preservation. The load-bearing annotations in `holdings.yaml` are already fields
+  (`cb_review`, `fx_review`, `origin`, `confirmed`), not comments.
+- **One broker-profile contract via a `reader` discriminator** (`tabular` | `sectioned`). The
+  difference between Schwab and IBKR is entirely in getting from a file to field-mapped rows;
+  everything after that is shared.
+- **Schema validation without a dependency** — a subset validator that REJECTS unknown keywords
+  rather than ignoring them, plus a test asserting the shipped schemas stay within the subset.
+
+**Traps found during research** (each would have produced a silent wrong result):
+1. *Atomic write vs symlink.* `os.replace(tmp, "register.yaml")` replaces the SYMLINK with a real
+   file — recreating ADR 0018's credentials-drift bug as data, tripping `auto doctor` and the
+   sandbox. Must resolve the link and temp-and-replace at the target inside `data/portfolio/`.
+2. *`data_files:` basenames are flattened.* `_link_pack_data_files` targets
+   `data/<pack>/<basename>`, so two declared files sharing a basename silently point at one
+   target. The vault layout has exactly this shape today, so a one-for-one relocation would
+   collide. `data/portfolio/` is therefore flat with distinct names.
+3. *IBKR encodes buy/sell in the sign of quantity*, not an action string. Without a `qty_sign`
+   predicate in the action contract, every IBKR trade routes to the same event.
+4. *`fetch()` is blocked for `file://` URLs.* Independent confirmation that clarification 5 (the
+   declared artefact is the embedded variant) was right — the alternative ships a page that
+   breaks in the exact scenario FR-067 requires.
+
+**Constitution Check**: gates I, II, IV, V, VI, VII pass. **Gate III is PARTIAL** and recorded in
+Complexity Tracking — FR-062/FR-064 cannot be satisfied because the workspace UI declaration
+contract does not exist. Inventing a `ui:` manifest block was rejected as inverting Principle I
+(the pack would dictate a workspace contract rather than declare into one). Re-run after Phase 1
+design: unchanged, no new violation.
+
+**Outcome**: plan complete, all Phase 0/1 artifacts generated, four schemas verified well-formed
+and within the validator subset. `/speckit-implement` halted correctly — `tasks.md` missing.
+
+**Caveats**:
+- Next step is `/speckit-tasks`, then `/speckit-implement`.
+- The migration (quickstart scenario 0) must report every YAML comment it finds and either
+  promote it to a field or record it as documentation, since dropping ruamel.yaml means comments
+  stop round-tripping.
+- Quickstart scenarios 1 (parity) and 7 (redaction) are marked as gates: a parity failure means a
+  tax convention was lost in the port, and redaction is the only irreversible mistake available
+  here, so it is verified by searching delivered bytes rather than the rendered page.
+- Spec checklist is 16 checkboxes, all complete — an earlier report of "17/17" miscounted.
+
+---
+
 ## 2026-08-15 — Clarify spec 005: UI declaration, serving and disclosure boundaries
 
 **Prompt summary**: `/speckit-clarify 005` — "the UI should be reported back to auto serve so

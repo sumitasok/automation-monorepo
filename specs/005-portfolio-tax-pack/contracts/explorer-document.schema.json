@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sumitasok.dev/automation/portfolio/explorer-document.schema.json",
+  "title": "Explorer data document",
+  "description": "The page's sole input (spec FR-036). A regenerated projection of the register, never a second source of truth. Embedded into the declared page artefact; also emitted standalone for fetch-mode use. Redaction DELETES withheld fields rather than nulling them (FR-047), so many properties here are optional by design.",
+  "type": "object",
+  "required": ["contract_version", "generated_at", "valuation_date", "reporting_currency", "disclosure", "withheld", "rules", "funding", "ratings", "positions"],
+  "additionalProperties": false,
+  "properties": {
+    "contract_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "The page MUST refuse to render figures from a major it does not support, saying so plainly (FR-040)."
+    },
+    "generated_at": { "type": "string", "format": "date-time", "description": "Drives the staleness display. Freshness comes from the pack's run, never from being viewed (FR-066)." },
+    "valuation_date": { "type": "string", "format": "date" },
+    "reporting_currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+
+    "disclosure": { "type": "string", "description": "Disclosure profile name. Always 'full' for the declared, served artefact (FR-070)." },
+    "withheld": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Categories withheld from this copy. Empty for the declared artefact. The page states these (FR-048)."
+    },
+
+    "rules": {
+      "type": "object",
+      "required": ["stcg", "ltcg", "ltcg_months"],
+      "additionalProperties": false,
+      "properties": {
+        "stcg": { "type": "number" },
+        "ltcg": { "type": "number" },
+        "ltcg_months": { "type": "integer" }
+      },
+      "description": "Enough for the page to recompute at a user-chosen price and date without embedding tax logic."
+    },
+
+    "funding": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["label", "own_money", "desc"],
+        "additionalProperties": false,
+        "properties": {
+          "label": { "type": "string" },
+          "own_money": { "enum": ["none", "partial", "full"] },
+          "desc": { "type": "string" }
+        }
+      }
+    },
+
+    "ratings": {
+      "type": "array",
+      "description": "Definitions for the legend. `tone` drives pill, card border and gauge together so all three always agree (FR-034).",
+      "items": {
+        "type": "object",
+        "required": ["code", "label", "icon", "tone", "cond", "plain"],
+        "additionalProperties": false,
+        "properties": {
+          "code": { "type": "string" },
+          "label": { "type": "string" },
+          "icon": { "type": "string" },
+          "tone": { "enum": ["go", "ok", "caution", "stop", "neutral", "buy"] },
+          "cond": { "type": "string" },
+          "plain": { "type": "string" }
+        }
+      }
+    },
+
+    "flags_present": { "type": "boolean" },
+
+    "positions": {
+      "type": "array",
+      "minItems": 0,
+      "items": {
+        "type": "object",
+        "required": ["ticker", "currency", "priced", "lots", "closed"],
+        "additionalProperties": false,
+        "properties": {
+          "ticker": { "type": "string" },
+          "currency": { "type": "string" },
+          "priced": { "type": "boolean", "description": "False means no market quote. The page shows it as unpriced and excludes it from value totals (FR-016)." },
+          "spot": { "type": "number" },
+          "fx": { "type": "number" },
+          "lots": { "type": "array", "items": { "$ref": "#/$defs/docLot" } },
+          "closed": { "type": "array", "items": { "$ref": "#/$defs/docDisposal" } }
+        }
+      }
+    }
+  },
+
+  "$defs": {
+    "docFlag": {
+      "type": "object",
+      "required": ["code", "note"],
+      "additionalProperties": false,
+      "properties": {
+        "code": { "type": "string" },
+        "note": { "type": "string" }
+      }
+    },
+
+    "docLot": {
+      "type": "object",
+      "description": "Carries computed figures so the page renders without re-deriving tax logic, AND the raw inputs (qty, cb, afx) so it can recompute at a user-chosen price and date. Money-valued properties are optional because a disclosure profile may delete them.",
+      "required": ["id", "acq", "mat", "funding", "rating"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "broker": { "type": "string" },
+        "acq": { "type": "string", "format": "date" },
+        "mat": { "type": "string", "format": "date", "description": "Maturity date. Derived from acq plus rules.ltcg_months." },
+        "funding": { "type": "string" },
+        "rating": { "type": "string", "description": "A rating code present in `ratings`." },
+        "why": { "type": "string", "description": "The rating's template already filled with THIS lot's numbers (FR-033)." },
+        "qty": { "type": "number" },
+        "cb": { "type": "number", "description": "Cost basis per share, position currency." },
+        "afx": { "type": "number", "description": "Acquisition FX." },
+        "breakeven": { "type": "number" },
+        "cushion": { "type": "number", "description": "(breakeven / spot) - 1. Negative means room to fall." },
+        "buyback_st": { "type": "number" },
+        "buyback_lt": { "type": "number" },
+        "flags": { "type": "array", "items": { "$ref": "#/$defs/docFlag" } }
+      }
+    },
+
+    "docDisposal": {
+      "type": "object",
+      "required": ["from_lot", "acq", "disp", "long_term"],
+      "additionalProperties": false,
+      "properties": {
+        "from_lot": { "type": "string" },
+        "acq": { "type": "string", "format": "date" },
+        "disp": { "type": "string", "format": "date" },
+        "long_term": { "type": "boolean" },
+        "holding_days": { "type": "integer" },
+        "qty": { "type": "number" },
+        "cb": { "type": "number" },
+        "price": { "type": "number" },
+        "gain": { "type": "number" },
+        "tax": { "type": "number" },
+        "lapse": { "type": "boolean" }
+      }
+    }
+  }
+}
