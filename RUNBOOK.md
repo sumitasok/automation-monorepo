@@ -4,6 +4,59 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-08-15 — Spec clarifications: split into two packs (`portfolio` + `tax`)
+
+**Prompt summary**: Answers to the three blocking questions on spec 005.
+Q1 — *"Schwab tax planning and the tax calculator are two different packs — tax planner is
+planning for tax before sale, tax calculator is for evaluating tax against actual sales.
+Option C, but two different packs."* Q2 — C (local by default, hosted opt-in with
+redaction). Q3 — C (vault program read-only for one filing cycle, then delete).
+
+**Files affected**:
+- `specs/005-portfolio-tax-pack/spec.md` — rescoped to the `portfolio` pack alone and
+  restructured. Now 6 user stories, 60 functional requirements, 15 success criteria,
+  0 open markers.
+- `specs/005-portfolio-tax-pack/checklists/requirements.md` — iteration 2 notes; all 17
+  checklist items now pass.
+- `RUNBOOK.md` — this entry.
+
+**Steps taken**:
+1. Q1 was a correction to the framing, not a menu choice — planning and calculation are
+   different tools, not two halves of one program. Rescoped this feature to the
+   forward-looking `portfolio` pack (broker import, lot register, disposal reconciliation,
+   sell planner, explorer page) and moved the fiscal-year tax-return computation out of
+   scope as a named successor pack (`tax`), to be specced separately.
+2. Promoted the lot register from an internal structure to the **published contract between
+   the two packs**: FR-008 single writer, FR-009 versioned schema readable without this
+   pack's behaviour, FR-010 must carry everything `tax` needs so it never re-derives from
+   broker exports, FR-011 atomic writes. SC-013 is the gate that unblocks speccing `tax`.
+3. Rewrote the parity requirement — the old FR-030/SC-001 measured against fiscal-year ITR
+   reference figures, which now belong to the other pack. Parity is now register-and-page
+   figures against the vault program from identical inputs.
+4. Q2 -> User Story 5 plus FR-043..FR-050. Two non-obvious calls: redaction strips figures
+   from the data document rather than hiding them in the display (a page that hides still
+   ships), and a disclosure profile is rejected if a withheld figure is reconstructible
+   from the retained ones.
+5. Q3 -> FR-058..FR-060. Bounded concretely to the FY2026-27 return rather than "one cycle",
+   and the vault copy is frozen (no edits) during the period so it stays a fixed oracle
+   instead of becoming a second maintained implementation.
+
+**Outcome**: Spec complete — 0 clarification markers, 17/17 checklist items pass, ready for
+`/speckit-plan`. Draft PR #15 updated.
+
+**Caveats**:
+- The `tax` pack needs its own `/speckit-specify` run. It is not blocked by anything here
+  except the published register schema (FR-009, SC-013).
+- Compensation slips and per-FY facts (challans, TDS, peak balances) stay in the vault for
+  now and travel with the `tax` pack — only that pack consumes them. The exception is any
+  slip figure governing a lot's cost basis, which the register already carries.
+- Pack names `portfolio` and `tax` are proposals; neither is in `packs.yaml` yet.
+- Implementation language still undecided — would be the first non-Go pack here.
+- The cross-pack read has direct precedent (gmail owns `transactions.csv`; wallet and
+  expenses read it), so FR-008..FR-011 should follow that convention, not invent one.
+
+---
+
 ## 2026-08-15 — Spec: `portfolio` pack — generalise the sa.finances tax/lot analysis into a pack
 
 **Prompt summary**: `/speckit-specify` — survey `~/Claude/Projects/sa.finances` and spec
