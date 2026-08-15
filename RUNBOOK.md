@@ -4,6 +4,76 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-08-15 — Spec: `portfolio` pack — generalise the sa.finances tax/lot analysis into a pack
+
+**Prompt summary**: `/speckit-specify` — survey `~/Claude/Projects/sa.finances` and spec
+how its `_db/tax/` analysis becomes a pack under `packs/`. Requirements given: treat it as
+a general-purpose tool (Schwab today, IBKR and others tomorrow); generic data format
+(promote the current one); extendable to any ticker (AVGO today); render the HTML from a
+JSON document that is either embedded or fetched from a location; the pack holds only code
+and JSON schemas, with all data under `data/<pack-name>/`. Planning/specing only — no code.
+
+**Files affected**:
+- `specs/005-portfolio-tax-pack/spec.md` — new feature spec: 5 prioritised user stories,
+  47 functional requirements, 12 success criteria, key entities, assumptions, dependencies,
+  out-of-scope. 3 open `[NEEDS CLARIFICATION]` markers (FR-031, FR-032, FR-047).
+- `specs/005-portfolio-tax-pack/checklists/requirements.md` — spec quality checklist plus
+  the validation findings that changed the spec during iteration 1.
+- `.specify/feature.json` — points downstream speckit commands at the new feature dir.
+- `RUNBOOK.md` — this entry.
+
+**Steps taken**:
+1. Session startup checks per SPEC_BASED_WORKFLOW: read `.claude/spec-map.json`, listed
+   worktrees, checked remotes. Surfaced the pending-review alert for `job-runner-ui`
+   (implemented, 36/36 tasks, never pushed or merged, worktree still live).
+2. No `.specify/extensions.yml` present, so no before/after-specify hooks ran.
+3. Surveyed `sa.finances/_db/tax/` — `engine.py`, `planner.py`, `refresh_explorer.py`,
+   `lots.py`, `loaders.py`, `report_md.py`, `rules.yaml`, `parsers/*.yaml`,
+   `templates/explorer.html`, `data/`.
+4. Surveyed the pack contract on this side — `packs.yaml`, `packs/expenses` and
+   `packs/wallet` (`pack.yaml`, `jobs/*/manifest.yaml`, `config.sample.yaml`), ADR 0019
+   (`data_files:` symlinking), ADR 0018 (write sandbox), ADR 0005/0007, `data/README.md`.
+5. Created worktree `.worktrees/portfolio-tax-pack` on branch `feature/portfolio-tax-pack`.
+6. Wrote the spec, ran it against the quality checklist, applied five fixes, re-ran.
+
+**Findings that shaped the spec**:
+- The broker seam is not real. `parsers/schwab_csv.yaml` (columns + action regexes) and
+  `parsers/ibkr_format.yaml` (sections + field maps) are *different shapes*, and IBKR is
+  served by `ibkr_engine.py` / `ibkr_loader.py` / `ibkr_report_md.py` — ~940 lines
+  duplicating `engine.py`'s tax arithmetic, with an account number hardcoded in it.
+  Two copies of the same tax logic that can drift. FR-014/015/016 target exactly this.
+- The ticker seam is nearly real already: `planner.py` and `refresh_explorer.py` take
+  `--ticker` and hardcode nothing; only defaults say AVGO. `engine.py` has three genuine
+  AVGO references. Cheap to finish.
+- The HTML seam is nearly real already: `explorer.html` reads
+  `<script id="explorer-data" type="application/json">` and `refresh_explorer.py` fills it
+  by string replacement. Adding a fetch path plus embedded fallback is a small change to a
+  page that is already data-driven.
+- The data/code boundary does not exist yet: lots, FX rates, RSU slips and per-FY facts all
+  live in `_db/tax/data/`, and `loaders.py` / `ibkr_engine.py` reach into vault directories
+  (`Trades/US/IBKR/raw`, `Tax/FY25-26/`). ADR 0019 forbids all of this inside a pack.
+- Corporate actions are unhandled anywhere, and AVGO has had a split. Specced as
+  detect-and-refuse (FR-025), explicitly out of scope as a capability.
+
+**Outcome**: Spec written and validated. 16 of 17 checklist items pass; the one failure is
+the 3 remaining clarification markers, which are open scope/security decisions for Sumit
+rather than gaps that could be defaulted.
+
+**Caveats**:
+- Three decisions block `/speckit-plan`: whether the full fiscal-year ITR computation comes
+  across or only the forward-looking half (roughly doubles the work); whether the fetched
+  JSON is ever read by anyone but the owner (decides whether redaction/access control are
+  requirements at all); and whether the vault-resident program is deleted after migration
+  or kept alongside.
+- Proposed pack name is `portfolio` (data at `data/portfolio/`), matching the single-word
+  convention of gmail/wallet/expenses. Not yet registered in `packs.yaml`.
+- The pack would be the first non-Go pack here; the manifest `language:` field already
+  accommodates that, but no implementation language has been chosen — that is a
+  `/speckit-plan` decision.
+- Nothing under `sa.finances` was modified.
+
+---
+
 ## 2026-07-28 — Fix: `./auto` aborts with "PyYAML is required" under an activated venv
 
 **Prompt summary**: `./auto run gmail-extract --ai=deepseek` failed immediately with
