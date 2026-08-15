@@ -68,6 +68,24 @@ Examples of foundational tasks (adjust based on your project):
 - [ ] T006 [P] Setup API routing and middleware structure
 - [ ] T007 Create base models/entities that all stories depend on
 - [ ] T008 Configure error handling and logging infrastructure
+
+**Constitution-driven task types** (.specify/memory/constitution.md v1.0.0).
+When the feature involves a pack, these belong in this phase — every user story
+depends on the wiring being right, and retrofitting it later means moving files
+that already hold real data:
+
+- Declare `env:` / `files:` / `data_files:` in the pack's `config.sample.yaml`,
+  and create `data/<pack>/` with its own `.gitignore` recording which files are
+  versioned and which are machine-local (Principles I, II).
+- Write the job manifest, including `data.reads` / `data.writes` and — if the
+  feature has a UI — its declared UI artefacts (Principles I, III).
+- Publish the schema for any file another pack reads, before that pack is
+  written against it (Principle IV, Interface Contract).
+- Verification tasks, not assumptions: `auto doctor` passes (declared files are
+  symlinks, no visibility leak) and `auto sandbox-check` passes on the target
+  machine (Principles II, VI).
+- An ADR in `docs/adr/` for any change to the workspace–pack contract, a
+  directory's meaning, or a cross-pack dependency (Development Workflow).
 - [ ] T009 Setup environment configuration management
 
 **Checkpoint**: Foundation ready - user story implementation can now begin in parallel

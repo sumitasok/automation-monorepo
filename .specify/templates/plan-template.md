@@ -40,7 +40,22 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+Answer each gate for THIS feature. `N/A` is a valid answer where a principle
+does not apply — but state why in one line, do not leave it blank. Any `NO`
+must appear in Complexity Tracking with the simpler alternative that was
+rejected and why. See `.specify/memory/constitution.md` v1.0.0.
+
+| # | Gate | Verdict |
+|---|---|---|
+| I | Does every value the pack needs (env, secrets, produced data) arrive via a `config.sample.yaml` declaration the workspace supplies — with no absolute path, workspace-relative path, or environment inspection in the pack? | |
+| II | Does the pack write **nothing** into `packs/` — every secret to `config/<pack>/`, every produced file to `data/<pack>/`, each reached through a declared symlink? | |
+| III | If this feature has a UI: is it a static artefact under `data/<pack>/`, declared in the manifest, opening correctly from disk, with no port bound and no route owned by the pack? | |
+| IV | Is every derived artefact regenerated from manifests/config on demand rather than stored, with one loader per fact and no registration step? | |
+| V | Can a new instance of anything this feature handles (source, format, rule, category) be added as data, with one implementation of each shared computation and one contract covering all variants? | |
+| VI | Is every boundary this feature relies on enforced by the sandbox, `auto doctor`, or repo access — not by documentation or convention? | |
+| VII | Does this feature bind only to localhost, render no secret values, and make any data leaving the machine an explicit configured act? | |
+
+**Post-design re-check**: [re-run after Phase 1; note any gate whose verdict changed and why]
 
 ## Project Structure
 
