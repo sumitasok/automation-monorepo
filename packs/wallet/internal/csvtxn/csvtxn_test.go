@@ -48,14 +48,31 @@ func TestRead_NormalisesAmountAndDate(t *testing.T) {
 	}
 }
 
-func TestResolveDate_DateOnlyUsesLocation(t *testing.T) {
+func TestResolveDate_PrefersEmailDateWithTime(t *testing.T) {
 	loc, _ := time.LoadLocation("Asia/Kolkata")
-	tm, only, err := resolveDate("2026-07-01", "Mon, 01 Jul 2026 01:02:03 +0000", loc)
+	// EmailDate with time should be preferred over date-only TxnDate
+	tm, only, err := resolveDate("2026-07-01", "Mon, 01 Jul 2026 10:30:45 +0530", loc)
+	if err != nil {
+		t.Fatalf("resolveDate: %v", err)
+	}
+	if only {
+		t.Fatalf("expected full timestamp from EmailDate, got date-only")
+	}
+	// Should preserve EmailDate time (10:30:45 IST)
+	if tm.Hour() != 10 || tm.Minute() != 30 || tm.Second() != 45 {
+		t.Fatalf("expected 10:30:45 from EmailDate, got %s", tm.Format(time.RFC3339))
+	}
+}
+
+func TestResolveDate_FallsBackToTxnDateWhenEmailDateMissing(t *testing.T) {
+	loc, _ := time.LoadLocation("Asia/Kolkata")
+	// When EmailDate is missing, fall back to TxnDate
+	tm, only, err := resolveDate("2026-07-01", "", loc)
 	if err != nil {
 		t.Fatalf("resolveDate: %v", err)
 	}
 	if !only {
-		t.Fatalf("expected date-only")
+		t.Fatalf("expected date-only from TxnDate")
 	}
 	// ParseInLocation should yield midnight in that location.
 	if tm.Hour() != 0 || tm.Minute() != 0 {

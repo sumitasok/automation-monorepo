@@ -162,12 +162,15 @@ var emailLayouts = []string{
 }
 
 func resolveDate(txnDate, emailDate string, loc *time.Location) (time.Time, bool, error) {
+	// Prefer EmailDate if it's available and has time info, since it carries the actual
+	// transaction time from the bank's email alert. Only fall back to TxnDate if EmailDate
+	// is missing or unparseable. This ensures wallet records preserve the actual time of
+	// purchase/transaction, not just a calendar date.
+	if t, ok := parseEmailDate(emailDate); ok {
+		return t.In(loc), false, nil
+	}
 	if t, only, ok := parseTxnDate(txnDate, loc); ok {
 		return t, only, nil
-	}
-	if t, ok := parseEmailDate(emailDate); ok {
-		// EmailDate carries a real timestamp; keep it, not date-only.
-		return t.In(loc), false, nil
 	}
 	return time.Time{}, false, fmt.Errorf("unparseable date (TxnDate=%q EmailDate=%q)", txnDate, emailDate)
 }

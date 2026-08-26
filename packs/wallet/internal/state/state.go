@@ -12,9 +12,10 @@ import (
 
 // Entry records one successfully-pushed transaction.
 type Entry struct {
-	RecordID string `json:"recordId,omitempty"`
-	Date     string `json:"date"`
-	PushedAt string `json:"pushedAt"`
+	RecordID string  `json:"recordId,omitempty"`
+	Date     string  `json:"date"`
+	PushedAt string  `json:"pushedAt"`
+	Amount   float64 `json:"amount"`
 }
 
 // State is the on-disk dedupe ledger.
@@ -46,18 +47,30 @@ func Load(path string) (*State, error) {
 	return s, nil
 }
 
-// Has reports whether a MessageID has already been pushed.
-func (s *State) Has(messageID string) bool {
+// Has reports whether a MessageID with the given amount has already been pushed.
+// Returns true only if both MessageID AND amount match to prevent duplicates.
+func (s *State) Has(messageID string, amount float64) bool {
+	entry, ok := s.Pushed[messageID]
+	if !ok {
+		return false
+	}
+	// Check if amount matches to catch duplicates with same MessageID but different amounts
+	return entry.Amount == amount
+}
+
+// HasMessageID reports whether a MessageID exists in state (regardless of amount).
+func (s *State) HasMessageID(messageID string) bool {
 	_, ok := s.Pushed[messageID]
 	return ok
 }
 
-// Mark records a MessageID as pushed.
-func (s *State) Mark(messageID, recordID, date string) {
+// Mark records a MessageID with amount as pushed.
+func (s *State) Mark(messageID, recordID, date string, amount float64) {
 	s.Pushed[messageID] = Entry{
 		RecordID: recordID,
 		Date:     date,
 		PushedAt: time.Now().UTC().Format(time.RFC3339),
+		Amount:   amount,
 	}
 }
 

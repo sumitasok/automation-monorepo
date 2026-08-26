@@ -3,8 +3,9 @@
 //
 // Subcommands:
 //
-//	sync   read transactions.csv and create one Wallet record per transaction,
-//	       processed day by day, deduped by MessageID, tagged with a label.
+//	sync                 read transactions.csv and create one Wallet record per transaction,
+//	                     processed day by day, deduped by MessageID+Amount, tagged with a label.
+//	detect-duplicates    find potential duplicate wallet records.
 //
 // Run `wallet sync --help` for flags. See RUNBOOK.md for setup.
 package main
@@ -30,6 +31,10 @@ func main() {
 	switch os.Args[1] {
 	case "sync":
 		if err := runSync(os.Args[2:]); err != nil {
+			log.Fatalf("error: %v", err)
+		}
+	case "detect-duplicates":
+		if err := runDetectDuplicates(os.Args[2:]); err != nil {
 			log.Fatalf("error: %v", err)
 		}
 	case "-h", "--help", "help":

@@ -121,9 +121,16 @@ func (r *Runner) Run(o Options) (Result, error) {
 	var days []string
 
 	for _, t := range txns {
-		if st.Has(t.MessageID) {
+		signedAmount := t.SignedAmount()
+		if st.Has(t.MessageID, round2(signedAmount)) {
 			res.Skipped++
 			continue
+		}
+		// Detect if this MessageID exists with a different amount (data corruption or duplicate email)
+		if st.HasMessageID(t.MessageID) {
+			oldEntry := st.Pushed[t.MessageID]
+			r.Out("WARN: duplicate MessageID %s with different amount (old: %.2f, new: %.2f) — treating as new transaction",
+				short(t.MessageID), oldEntry.Amount, round2(signedAmount))
 		}
 		if !o.Since.IsZero() && t.Date.Before(o.Since) {
 			res.OutOfRange++
@@ -192,7 +199,7 @@ func (r *Runner) Run(o Options) (Result, error) {
 			if err != nil && len(results) == 0 {
 				return res, fmt.Errorf("create records for %s: %w", day, err)
 			}
-			applyResults(chunk, results, st, &res, r.Out, day)
+			applyResults(chunk, results, st, &res, r.Out)
 			if err := st.Save(); err != nil {
 				return res, fmt.Errorf("save state: %w", err)
 			}
@@ -211,10 +218,12 @@ func (r *Runner) Run(o Options) (Result, error) {
 // applyResults marks successes in state and counts failures. When the API
 // returns no per-item results (plain 200), all items in the chunk are treated
 // as created.
-func applyResults(chunk []item, results []wallet.RecordResult, st *state.State, res *Result, out func(string, ...any), day string) {
+func applyResults(chunk []item, results []wallet.RecordResult, st *state.State, res *Result, out func(string, ...any)) {
 	if len(results) == 0 {
 		for _, it := range chunk {
-			st.Mark(it.txn.MessageID, "", day)
+			amount := round2(it.txn.SignedAmount())
+			day := it.txn.Date.Format("2006-01-02")
+			st.Mark(it.txn.MessageID, "", day, amount)
 			res.Created++
 		}
 		return
@@ -225,11 +234,13 @@ func applyResults(chunk []item, results []wallet.RecordResult, st *state.State, 
 		}
 		it := chunk[rr.InputIndex]
 		if rr.Success {
-			st.Mark(it.txn.MessageID, rr.ID, day)
+			amount := round2(it.txn.SignedAmount())
+			day := it.txn.Date.Format("2006-01-02")
+			st.Mark(it.txn.MessageID, rr.ID, day, amount)
 			res.Created++
 		} else {
 			res.Failed++
-			out("fail %s %s: %s (%s)", day, short(it.txn.MessageID), rr.Error, rr.ErrorType)
+			out("fail %s %s: %s (%s)", it.txn.Date.Format("2006-01-02"), short(it.txn.MessageID), rr.Error, rr.ErrorType)
 		}
 	}
 }
