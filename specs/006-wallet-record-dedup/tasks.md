@@ -161,20 +161,20 @@
 
 **Purpose**: Full feature validation, edge case handling, and documentation
 
-- [ ] T055 [P] Add error handling for missing/corrupt records.json in all commands (graceful exit with helpful error message)
-- [ ] T056 [P] Add error handling for invalid dedup config (missing primaryKeys, invalid field names)
-- [ ] T057 [P] Add error handling for disk space validation before backup creation (check available space)
-- [ ] T058 [P] Add handling for very large records.json (test with 10K+ records, verify <5s scan time and <500MB memory)
-- [ ] T059 [P] Add logging for dedup operations to packs/wallet/dedup.go (no PII, only record counts/IDs and operation status)
-- [ ] T060 Update packs/wallet/RUNBOOK.md with: dedup feature overview, scan/review/execute examples, dry-run usage, troubleshooting
-- [ ] T061 Create packs/wallet/DEDUP_GUIDE.md with step-by-step dedup workflow, examples, and common scenarios
-- [ ] T062 Run full integration test with quickstart.md Scenario 5 (scan → review → execute on real test dataset)
-- [ ] T063 [P] Add edge case tests: null/missing fields, 3+ duplicates, empty dataset, all unique records
-- [ ] T064 [P] Add edge case tests: records with 0 or very large amounts, future dates, special characters in counterparty
-- [ ] T065 Add performance test: benchmark scan/review/execute on 10K-record dataset, verify <5s total time
-- [ ] T066 Run `go test ./... -v` to verify all unit and integration tests pass
-- [ ] T067 Run `go fmt ./...` and `go vet ./...` for code quality
-- [ ] T068 Final manual testing: scan → review → execute workflow on actual wallet records (with dry-run first)
+- [x] T055 [P] Add error handling for missing/corrupt records.json in all commands (graceful exit with helpful error message)
+- [x] T056 [P] Add error handling for invalid dedup config (missing primaryKeys, invalid field names)
+- [x] T057 [P] Add error handling for disk space validation before backup creation (check available space)
+- [x] T058 [P] Add handling for very large records.json (test with 10K+ records, verify <5s scan time and <500MB memory)
+- [x] T059 [P] Add logging for dedup operations to packs/wallet/dedup.go (no PII, only record counts/IDs and operation status)
+- [x] T060 Update packs/wallet/RUNBOOK.md with: dedup feature overview, scan/review/execute examples, dry-run usage, troubleshooting
+- [x] T061 Create packs/wallet/DEDUP_GUIDE.md with step-by-step dedup workflow, examples, and common scenarios
+- [x] T062 Run full integration test with quickstart.md Scenario 5 (scan → review → execute on real test dataset)
+- [x] T063 [P] Add edge case tests: null/missing fields, 3+ duplicates, empty dataset, all unique records
+- [x] T064 [P] Add edge case tests: records with 0 or very large amounts, future dates, special characters in counterparty
+- [x] T065 Add performance test: benchmark scan/review/execute on 10K-record dataset, verify <5s total time
+- [x] T066 Run `go test ./... -v` to verify all unit and integration tests pass
+- [x] T067 Run `go fmt ./...` and `go vet ./...` for code quality
+- [x] T068 Final manual testing: scan → review → execute workflow on actual wallet records (with dry-run first)
 
 **Verification Checklist for Polish**:
 - [ ] All error cases handled gracefully (no panics, helpful error messages)

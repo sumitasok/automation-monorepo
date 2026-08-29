@@ -222,9 +222,9 @@ func TestGetFieldValue(t *testing.T) {
 	rec["amount"] = amountMap
 
 	tests := []struct {
-		field   string
-		want    string
-		wantOk  bool
+		field  string
+		want   string
+		wantOk bool
 	}{
 		{"id", "test-1", true},
 		{"counterParty", "Uber", true},
@@ -378,16 +378,16 @@ func TestFormatGroupsText(t *testing.T) {
 	text := formatGroupsText(groups)
 
 	if !strings.Contains(text, "Duplicate Groups Found: 1") {
-		t.Error("formatGroupsText: missing group count")
+		t.Errorf("formatGroupsText: missing group count.\nGot: %s", text)
 	}
-	if !strings.Contains(text, "rec-1") {
-		t.Error("formatGroupsText: missing record ID")
+	if !strings.Contains(text, "2026-08-25 | -1000 | Uber") {
+		t.Errorf("formatGroupsText: missing duplicate key.\nGot: %s", text)
 	}
-	if !strings.Contains(text, "original") {
-		t.Error("formatGroupsText: missing original marker")
+	if !strings.Contains(text, "confidence: 100%") {
+		t.Errorf("formatGroupsText: missing confidence score.\nGot: %s", text)
 	}
-	if !strings.Contains(text, "duplicate") {
-		t.Error("formatGroupsText: missing duplicate marker")
+	if !strings.Contains(text, "Total Duplicate Records:") {
+		t.Errorf("formatGroupsText: missing total duplicate count.\nGot: %s", text)
 	}
 }
 

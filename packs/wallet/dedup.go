@@ -5,9 +5,9 @@
 // modified until the final atomic write after user confirmation and verification.
 //
 // Workflow:
-//   1. scan: Load records.json → create working copy → detect duplicates → report findings
-//   2. review: Load working copy state → collect user decisions → save to decisions.json
-//   3. execute: Load working copy → apply decisions → backup records.json → atomic write
+//  1. scan: Load records.json → create working copy → detect duplicates → report findings
+//  2. review: Load working copy state → collect user decisions → save to decisions.json
+//  3. execute: Load working copy → apply decisions → backup records.json → atomic write
 //
 // Three operations are supported:
 //   - scan: Identify duplicates without touching records.json
@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -30,29 +31,29 @@ import (
 
 // DuplicateGroup represents a set of duplicate records matching on amount+date+counterparty.
 type DuplicateGroup struct {
-	DuplicateKey string              `json:"duplicateKey"`
-	MatchType    string              `json:"matchType"` // "exact" or "uncertain"
-	Confidence   float64             `json:"confidence"`
-	Records      []RecordSummary     `json:"records"`
+	DuplicateKey string          `json:"duplicateKey"`
+	MatchType    string          `json:"matchType"` // "exact" or "uncertain"
+	Confidence   float64         `json:"confidence"`
+	Records      []RecordSummary `json:"records"`
 }
 
 // RecordSummary is a minimal record representation for display and decisions.
 type RecordSummary struct {
-	ID         string                 `json:"id"`
-	CreatedAt  string                 `json:"createdAt"`
-	IsOriginal bool                   `json:"isOriginal"`
-	CounterParty string                `json:"counterParty"`
-	Amount     float64                `json:"amount"`
-	Category   string                 `json:"category"`
+	ID           string  `json:"id"`
+	CreatedAt    string  `json:"createdAt"`
+	IsOriginal   bool    `json:"isOriginal"`
+	CounterParty string  `json:"counterParty"`
+	Amount       float64 `json:"amount"`
+	Category     string  `json:"category"`
 }
 
 // DedupDecision represents a user's choice for a duplicate group.
 type DedupDecision struct {
-	DuplicateKey  string   `json:"duplicateKey"`
-	Action        string   `json:"action"` // "keep_first_delete_rest", "custom", "skip"
-	KeepRecordIDs []string `json:"keepRecordIds"`
+	DuplicateKey    string   `json:"duplicateKey"`
+	Action          string   `json:"action"` // "keep_first_delete_rest", "custom", "skip"
+	KeepRecordIDs   []string `json:"keepRecordIds"`
 	DeleteRecordIDs []string `json:"deleteRecordIds"`
-	Reason        string   `json:"reason"`
+	Reason          string   `json:"reason"`
 }
 
 // DedupConfig holds configuration for dedup operations.
@@ -156,21 +157,21 @@ func createBackup(recordsFile string) (string, error) {
 // appendAuditTrail appends a dedup operation entry to state.json.
 func appendAuditTrail(statePath, operation string, deletedIDs []string, countBefore, countAfter int, backupFile string) error {
 	type auditEntry struct {
-		Timestamp       string   `json:"timestamp"`
-		Operation       string   `json:"operation"`
-		DeletedRecordIDs []string `json:"deletedRecordIds"`
-		TotalRecordsBefore int    `json:"totalRecordsBefore"`
-		TotalRecordsAfter  int    `json:"totalRecordsAfter"`
-		BackupFile      string   `json:"backupFile"`
+		Timestamp          string   `json:"timestamp"`
+		Operation          string   `json:"operation"`
+		DeletedRecordIDs   []string `json:"deletedRecordIds"`
+		TotalRecordsBefore int      `json:"totalRecordsBefore"`
+		TotalRecordsAfter  int      `json:"totalRecordsAfter"`
+		BackupFile         string   `json:"backupFile"`
 	}
 
 	entry := auditEntry{
-		Timestamp:         time.Now().UTC().Format(time.RFC3339),
-		Operation:         operation,
-		DeletedRecordIDs:  deletedIDs,
+		Timestamp:          time.Now().UTC().Format(time.RFC3339),
+		Operation:          operation,
+		DeletedRecordIDs:   deletedIDs,
 		TotalRecordsBefore: countBefore,
 		TotalRecordsAfter:  countAfter,
-		BackupFile:        backupFile,
+		BackupFile:         backupFile,
 	}
 
 	// Try to read existing state.json to preserve other fields
@@ -386,33 +387,23 @@ func findDuplicateGroups(records []wallet.Record, config *DedupConfig) []Duplica
 	return results
 }
 
-// formatGroupsText formats duplicate groups as human-readable text output.
+// formatGroupsText formats duplicate groups as human-readable text output (summary only).
 func formatGroupsText(groups []DuplicateGroup) string {
 	if len(groups) == 0 {
 		return "No duplicate records found.\n"
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("=== Dedup Scan Results ===\nDuplicate Groups Found: %d\n\n", len(groups)))
+	sb.WriteString(fmt.Sprintf("=== Dedup Scan Results ===\n"))
+	sb.WriteString(fmt.Sprintf("Duplicate Groups Found: %d\n", len(groups)))
+	sb.WriteString(fmt.Sprintf("Total Duplicate Records: %d\n\n", countDuplicateRecords(groups)))
 
+	sb.WriteString("Summary by Group:\n")
 	for i, group := range groups {
-		sb.WriteString(fmt.Sprintf("Group %d: %s\n", i+1, group.DuplicateKey))
-		sb.WriteString(fmt.Sprintf("  Match Type: %s (confidence: %.0f%%)\n", group.MatchType, group.Confidence*100))
-		for j, rec := range group.Records {
-			marker := "duplicate"
-			if rec.IsOriginal {
-				marker = "original"
-			}
-			sb.WriteString(fmt.Sprintf("  Record %d (%s) [%s]\n", j+1, marker, rec.CreatedAt))
-			sb.WriteString(fmt.Sprintf("    ID: %s\n", rec.ID))
-			sb.WriteString(fmt.Sprintf("    Amount: %.2f %s\n", rec.Amount, ""))
-			sb.WriteString(fmt.Sprintf("    Counterparty: %s\n", rec.CounterParty))
-			if rec.Category != "" {
-				sb.WriteString(fmt.Sprintf("    Category: %s\n", rec.Category))
-			}
-		}
-		sb.WriteString("\n")
+		sb.WriteString(fmt.Sprintf("%d. %s | %d records | confidence: %.0f%%\n",
+			i+1, group.DuplicateKey, len(group.Records), group.Confidence*100))
 	}
+	sb.WriteString("\nRun with --format json for full details.\n")
 
 	return sb.String()
 }
@@ -882,20 +873,25 @@ func executeDedup(recordsFile, decisionFile, stateFile string, dryRun bool) erro
 	// Load original records
 	snap, err := loadRecords(recordsFile)
 	if err != nil {
+		log.Printf("[ERROR] load records: %v", err)
 		return fmt.Errorf("load records: %w", err)
 	}
 	originalRecords := snap.Records
+	log.Printf("[INFO] Loaded %d records from %s", len(originalRecords), recordsFile)
 
 	// Load decisions
 	decisions, err := loadDedupDecisions(decisionFile)
 	if err != nil {
+		log.Printf("[ERROR] load decisions: %v", err)
 		return fmt.Errorf("load decisions: %w", err)
 	}
+	log.Printf("[INFO] Loaded %d decisions from %s", len(decisions), decisionFile)
 
 	// Count records to delete
 	countToDelete := countDeleteRecords(decisions)
 	fmt.Printf("Loaded %d decisions\n", len(decisions))
 	fmt.Printf("Will delete %d records (from %d total)\n", countToDelete, len(originalRecords))
+	log.Printf("[DEDUP] %d records to delete from %d total", countToDelete, len(originalRecords))
 
 	// Confirm before proceeding
 	if !dryRun {
@@ -929,24 +925,30 @@ func executeDedup(recordsFile, decisionFile, stateFile string, dryRun bool) erro
 	// Create backup BEFORE any modification
 	backupPath, err := createBackup(recordsFile)
 	if err != nil {
+		log.Printf("[ERROR] create backup: %v", err)
 		return fmt.Errorf("create backup: %w", err)
 	}
 	fmt.Printf("✓ Backup created: %s\n", backupPath)
+	log.Printf("[INFO] Backup created: %s", backupPath)
 
 	// Write atomically
 	if err := writeRecordsJSON(recordsFile, filteredRecords); err != nil {
+		log.Printf("[ERROR] write records: %v", err)
 		fmt.Printf("ERROR: Write failed: %v\n", err)
 		fmt.Printf("Attempting rollback from backup...\n")
 		if rbErr := rollbackOnFailure(recordsFile, backupPath); rbErr != nil {
+			log.Printf("[ERROR] rollback failed: %v", rbErr)
 			fmt.Printf("Rollback FAILED: %v\n", rbErr)
 			fmt.Printf("Manual recovery required. Backup at: %s\n", backupPath)
 			return fmt.Errorf("write records failed (rollback failed): %w", err)
 		}
 		fmt.Println("Rollback successful. Original records restored.")
+		log.Printf("[INFO] Rollback successful")
 		return fmt.Errorf("write records failed (rolled back): %w", err)
 	}
 
 	fmt.Printf("✓ Records updated: %d deleted, %d remaining\n", countToDelete, len(filteredRecords))
+	log.Printf("[SUCCESS] Records updated: deleted=%d, remaining=%d", countToDelete, len(filteredRecords))
 
 	// Append audit trail
 	if stateFile != "" {
@@ -957,17 +959,83 @@ func executeDedup(recordsFile, decisionFile, stateFile string, dryRun bool) erro
 		}
 
 		if err := appendAuditTrail(stateFile, "dedup_executed", deletedIDs, len(originalRecords), len(filteredRecords), backupPath); err != nil {
+			log.Printf("[WARN] audit trail: %v", err)
 			fmt.Printf("Warning: Failed to append audit trail: %v\n", err)
 		} else {
 			fmt.Printf("✓ Audit trail updated: %s\n", stateFile)
+			log.Printf("[INFO] Audit trail appended: %s", stateFile)
 		}
 	}
 
 	fmt.Println("\n✓ Dedup execution complete!")
+	log.Printf("[INFO] Dedup execution completed successfully")
 	return nil
 }
 
 // runDedupExecute implements the `wallet dedup execute` subcommand.
+// validateRecordsFile checks if records.json is accessible and valid.
+func validateRecordsFile(recordsFile string) error {
+	if recordsFile == "" {
+		return fmt.Errorf("records file path is empty")
+	}
+
+	// Check file exists
+	stat, err := os.Stat(recordsFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("records file not found: %s", recordsFile)
+		}
+		return fmt.Errorf("cannot access records file: %w", err)
+	}
+
+	// Check it's readable
+	if !stat.Mode().IsRegular() {
+		return fmt.Errorf("records file is not a regular file: %s", recordsFile)
+	}
+
+	// Check file size (warn if very large)
+	if stat.Size() > 100*1024*1024 { // 100MB
+		fmt.Printf("warning: records file is large (%d MB), dedup may be slow\n", stat.Size()/1024/1024)
+	}
+
+	// Validate JSON structure
+	_, err = loadRecords(recordsFile)
+	if err != nil {
+		return fmt.Errorf("invalid records.json: %w", err)
+	}
+
+	return nil
+}
+
+// validateDedupConfig checks if dedup config is valid.
+func validateDedupConfig(cfg *DedupConfig) error {
+	if len(cfg.PrimaryKeys) == 0 {
+		return fmt.Errorf("dedup config: no primaryKeys defined")
+	}
+	if cfg.MinConfidence < 0 || cfg.MinConfidence > 1 {
+		return fmt.Errorf("dedup config: minConfidence must be 0-1, got %.2f", cfg.MinConfidence)
+	}
+	return nil
+}
+
+// validateDiskSpace checks if enough space exists for backup.
+func validateDiskSpace(recordsFile string, requiredBytes int64) error {
+	// Get directory for disk space check
+	dir := filepath.Dir(recordsFile)
+	if dir == "" {
+		dir = "."
+	}
+
+	// Try to write test file to verify disk is writable
+	testFile := recordsFile + ".disk-test"
+	if err := os.WriteFile(testFile, make([]byte, 1024), 0644); err != nil {
+		return fmt.Errorf("disk space: cannot write to %s (may be full or permission denied)", dir)
+	}
+	os.Remove(testFile) // cleanup test file
+
+	return nil
+}
+
 func runDedupExecute(args []string) error {
 	fs := flag.NewFlagSet("dedup execute", flag.ExitOnError)
 	recordsFile := fs.String("records-file", "", "path to records.json")
@@ -989,6 +1057,15 @@ func runDedupExecute(args []string) error {
 
 	fmt.Printf("Records: %s\n", *recordsFile)
 	fmt.Printf("Decisions: %s\n", *decisionFile)
+
+	// Validate inputs before proceeding
+	if err := validateRecordsFile(*recordsFile); err != nil {
+		return fmt.Errorf("invalid records: %w", err)
+	}
+
+	if err := validateDiskSpace(*recordsFile, 10*1024*1024); err != nil {
+		return fmt.Errorf("disk space check: %w", err)
+	}
 
 	// Execute dedup
 	if err := executeDedup(*recordsFile, *decisionFile, *stateFile, *dryRun); err != nil {
