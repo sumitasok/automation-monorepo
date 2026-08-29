@@ -213,10 +213,11 @@ def main():
     matched_count = 0
     unmatched_count = 0
     skipped_count = 0
+    skip_reasons = defaultdict(int)
 
     for wallet_idx, wallet in enumerate(wallet_unknown, 1):
         if wallet['id'] in seen_wallet_ids:
-            logger.debug(f"[{wallet_idx}/{len(wallet_unknown)}] Duplicate wallet ID, skipping")
+            skip_reasons['duplicate_id'] += 1
             skipped_count += 1
             continue
         seen_wallet_ids.add(wallet['id'])
@@ -225,9 +226,18 @@ def main():
         wallet_date_str = wallet.get('recordDate', '')
         wallet_amount = wallet.get('amount', {}).get('value', 0)
         wallet_cat_current = wallet.get('category', {}).get('name', '')
+        wallet_account_id = wallet.get('accountId', '')
+
+        # If no merchant, try to use account name as fallback
+        if not wallet_merchant and wallet_account_id:
+            account = find_account_by_id(wallet_account_id, all_accounts)
+            if account:
+                wallet_merchant = account.get('name', '').lower().strip()
+                if wallet_merchant:
+                    logger.debug(f"[{wallet_idx}/{len(wallet_unknown)}] Using account name as merchant: {account.get('name')}")
 
         if not wallet_merchant:
-            logger.debug(f"[{wallet_idx}/{len(wallet_unknown)}] No merchant, skipping")
+            skip_reasons['no_merchant'] += 1
             skipped_count += 1
             continue
 
@@ -236,6 +246,12 @@ def main():
         logger.debug(f"  Date: {wallet_date_str[:10]}")
         logger.debug(f"  Amount: {wallet_amount}")
         logger.debug(f"  Current Category: {wallet_cat_current}")
+
+        # Log account info if available
+        if wallet_account_id:
+            account = find_account_by_id(wallet_account_id, all_accounts)
+            if account:
+                logger.debug(f"  Account: {account.get('name')} ({wallet_account_id[-4:]})")
 
         if wallet_merchant in gmail_by_merchant:
             logger.debug(f"  ✓ Found {len(gmail_by_merchant[wallet_merchant])} matching Gmail transaction(s)")
@@ -328,6 +344,9 @@ def main():
     logger.info(f"Matched: {matched_count}")
     logger.info(f"Unmatched: {unmatched_count}")
     logger.info(f"Skipped: {skipped_count}")
+    if skip_reasons:
+        for reason, count in sorted(skip_reasons.items(), key=lambda x: -x[1]):
+            logger.info(f"  - {reason}: {count}")
     logger.info(f"Total updates found: {len(updates)}")
 
     # Group by category
