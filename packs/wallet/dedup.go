@@ -17,6 +17,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -385,8 +386,102 @@ func findDuplicateGroups(records []wallet.Record, config *DedupConfig) []Duplica
 	return results
 }
 
+// formatGroupsText formats duplicate groups as human-readable text output.
+func formatGroupsText(groups []DuplicateGroup) string {
+	if len(groups) == 0 {
+		return "No duplicate records found.\n"
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("=== Dedup Scan Results ===\nDuplicate Groups Found: %d\n\n", len(groups)))
+
+	for i, group := range groups {
+		sb.WriteString(fmt.Sprintf("Group %d: %s\n", i+1, group.DuplicateKey))
+		sb.WriteString(fmt.Sprintf("  Match Type: %s (confidence: %.0f%%)\n", group.MatchType, group.Confidence*100))
+		for j, rec := range group.Records {
+			marker := "duplicate"
+			if rec.IsOriginal {
+				marker = "original"
+			}
+			sb.WriteString(fmt.Sprintf("  Record %d (%s) [%s]\n", j+1, marker, rec.CreatedAt))
+			sb.WriteString(fmt.Sprintf("    ID: %s\n", rec.ID))
+			sb.WriteString(fmt.Sprintf("    Amount: %.2f %s\n", rec.Amount, ""))
+			sb.WriteString(fmt.Sprintf("    Counterparty: %s\n", rec.CounterParty))
+			if rec.Category != "" {
+				sb.WriteString(fmt.Sprintf("    Category: %s\n", rec.Category))
+			}
+		}
+		sb.WriteString("\n")
+	}
+
+	return sb.String()
+}
+
+// formatGroupsJSON formats duplicate groups as JSON array.
+func formatGroupsJSON(groups []DuplicateGroup) ([]byte, error) {
+	output := map[string]interface{}{
+		"timestamp":             time.Now().UTC().Format(time.RFC3339),
+		"duplicateGroupsFound":  len(groups),
+		"groups":                groups,
+		"totalDuplicateRecords": countDuplicateRecords(groups),
+	}
+
+	return json.MarshalIndent(output, "", "  ")
+}
+
+// countDuplicateRecords returns the total number of duplicate records (excluding originals).
+func countDuplicateRecords(groups []DuplicateGroup) int {
+	count := 0
+	for _, group := range groups {
+		for _, rec := range group.Records {
+			if !rec.IsOriginal {
+				count++
+			}
+		}
+	}
+	return count
+}
+
+// runDedupScan implements the `wallet dedup scan` subcommand.
+func runDedupScan(args []string) error {
+	fs := flag.NewFlagSet("dedup scan", flag.ExitOnError)
+	recordsFile := fs.String("records-file", "", "path to records.json (default: $AUTO_DATA_DIR/wallet/records.json or ./records.json)")
+	dedupConfig := fs.String("dedup-config", "", "path to dedup config (default: config.yaml)")
+	format := fs.String("format", "text", "output format: text or json")
+	minConfidence := fs.Float64("min-confidence", 0.5, "minimum confidence threshold (0.0-1.0)")
+	fs.Parse(args)
+
+	// Resolve paths
+	if *recordsFile == "" {
+		*recordsFile = resolveDataPath("wallet/records.json", "records.json")
+	}
+
+	// Detect duplicates
+	groups, err := detectRecordDuplicates(*recordsFile, *dedupConfig, *minConfidence)
+	if err != nil {
+		return err
+	}
+
+	// Output results
+	switch *format {
+	case "json":
+		data, err := formatGroupsJSON(groups)
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(data))
+	case "text":
+		fmt.Print(formatGroupsText(groups))
+	default:
+		return fmt.Errorf("unknown format: %s (text or json)", *format)
+	}
+
+	return nil
+}
+
 // reviewDuplicates collects user decisions on duplicate groups (from working copy).
 // No modifications to records.json. Decisions are saved separately.
+// NOTE: Implemented in Phase 4 (review operation)
 func reviewDuplicates(groups []DuplicateGroup, interactive bool) ([]DedupDecision, error) {
 	// 1. Present duplicate groups from working copy to user
 	// 2. Collect which records to keep/delete
@@ -398,6 +493,7 @@ func reviewDuplicates(groups []DuplicateGroup, interactive bool) ([]DedupDecisio
 // executeDuplicates applies user decisions to records.json atomically.
 // SAFETY: Backup created BEFORE any modification. records.json only updated after
 // verification that new file is valid. Original file + backup both exist on failure.
+// NOTE: Implemented in Phase 5 (execute operation)
 func executeDuplicates(recordsFile string, decisions []DedupDecision, dryRun bool) error {
 	// 1. Load records.json into working copy
 	// 2. Apply decisions (filter out deleted records)
@@ -411,7 +507,15 @@ func executeDuplicates(recordsFile string, decisions []DedupDecision, dryRun boo
 
 func runDedup(args []string) error {
 	if len(args) == 0 {
-		usage()
+		fmt.Fprintf(os.Stderr, `wallet dedup — identify and remove duplicate transaction records
+
+Usage:
+  wallet dedup scan [flags]      identify duplicates (read-only)
+  wallet dedup review [flags]    collect user decisions on which to delete
+  wallet dedup execute [flags]   apply decisions atomically with backup
+
+Run 'wallet dedup scan --help' for scan flags.
+`)
 		os.Exit(2)
 	}
 
@@ -422,25 +526,27 @@ func runDedup(args []string) error {
 		return runDedupReview(args[1:])
 	case "execute":
 		return runDedupExecute(args[1:])
+	case "-h", "--help", "help":
+		fmt.Fprintf(os.Stderr, `wallet dedup — identify and remove duplicate transaction records
+
+Usage:
+  wallet dedup scan [flags]      identify duplicates (read-only)
+  wallet dedup review [flags]    collect user decisions on which to delete
+  wallet dedup execute [flags]   apply decisions atomically with backup
+`)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown dedup command %q\n", args[0])
-		usage()
 		os.Exit(2)
 	}
 	return nil
 }
 
-func runDedupScan(args []string) error {
-	// TODO: Implement scan subcommand
-	return fmt.Errorf("scan command not yet implemented")
-}
-
 func runDedupReview(args []string) error {
-	// TODO: Implement review subcommand
+	// TODO: Implement review subcommand (Phase 4)
 	return fmt.Errorf("review command not yet implemented")
 }
 
 func runDedupExecute(args []string) error {
-	// TODO: Implement execute subcommand
+	// TODO: Implement execute subcommand (Phase 5)
 	return fmt.Errorf("execute command not yet implemented")
 }

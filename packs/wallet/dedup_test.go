@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/sumitasok/sa.automation.wallet/internal/wallet"
@@ -345,10 +346,172 @@ func TestFindDuplicateGroups(t *testing.T) {
 	}
 }
 
+// TestFormatGroupsText verifies text output formatting.
+func TestFormatGroupsText(t *testing.T) {
+	groups := []DuplicateGroup{
+		{
+			DuplicateKey: "2026-08-25 | -1000 | Uber",
+			MatchType:    "exact",
+			Confidence:   1.0,
+			Records: []RecordSummary{
+				{
+					ID:           "rec-1",
+					CreatedAt:    "2026-08-25T08:00:00Z",
+					IsOriginal:   true,
+					CounterParty: "Uber",
+					Amount:       -1000,
+					Category:     "Transport",
+				},
+				{
+					ID:           "rec-2",
+					CreatedAt:    "2026-08-25T09:00:00Z",
+					IsOriginal:   false,
+					CounterParty: "Uber",
+					Amount:       -1000,
+					Category:     "Transport",
+				},
+			},
+		},
+	}
+
+	text := formatGroupsText(groups)
+
+	if !strings.Contains(text, "Duplicate Groups Found: 1") {
+		t.Error("formatGroupsText: missing group count")
+	}
+	if !strings.Contains(text, "rec-1") {
+		t.Error("formatGroupsText: missing record ID")
+	}
+	if !strings.Contains(text, "original") {
+		t.Error("formatGroupsText: missing original marker")
+	}
+	if !strings.Contains(text, "duplicate") {
+		t.Error("formatGroupsText: missing duplicate marker")
+	}
+}
+
+// TestFormatGroupsTextEmpty verifies formatting for empty groups.
+func TestFormatGroupsTextEmpty(t *testing.T) {
+	groups := []DuplicateGroup{}
+	text := formatGroupsText(groups)
+
+	if !strings.Contains(text, "No duplicate records found") {
+		t.Error("formatGroupsText: missing empty message")
+	}
+}
+
+// TestFormatGroupsJSON verifies JSON output formatting.
+func TestFormatGroupsJSON(t *testing.T) {
+	groups := []DuplicateGroup{
+		{
+			DuplicateKey: "2026-08-25 | -1000 | Uber",
+			MatchType:    "exact",
+			Confidence:   1.0,
+			Records: []RecordSummary{
+				{
+					ID:           "rec-1",
+					CreatedAt:    "2026-08-25T08:00:00Z",
+					IsOriginal:   true,
+					CounterParty: "Uber",
+					Amount:       -1000,
+				},
+			},
+		},
+	}
+
+	data, err := formatGroupsJSON(groups)
+	if err != nil {
+		t.Fatalf("Failed to format JSON: %v", err)
+	}
+
+	var output map[string]interface{}
+	if err := json.Unmarshal(data, &output); err != nil {
+		t.Fatalf("Invalid JSON output: %v", err)
+	}
+
+	if groupCount, ok := output["duplicateGroupsFound"].(float64); !ok || groupCount != 1 {
+		t.Error("formatGroupsJSON: incorrect group count in output")
+	}
+}
+
+// TestCountDuplicateRecords verifies counting of duplicate records.
+func TestCountDuplicateRecords(t *testing.T) {
+	groups := []DuplicateGroup{
+		{
+			Records: []RecordSummary{
+				{IsOriginal: true},
+				{IsOriginal: false},
+				{IsOriginal: false},
+			},
+		},
+		{
+			Records: []RecordSummary{
+				{IsOriginal: true},
+				{IsOriginal: false},
+			},
+		},
+	}
+
+	count := countDuplicateRecords(groups)
+	if count != 3 {
+		t.Errorf("Expected 3 duplicate records, got %d", count)
+	}
+}
+
+// TestDetectRecordDuplicatesIntegration tests full detection on sample data.
+func TestDetectRecordDuplicatesIntegration(t *testing.T) {
+	snap := RecordsSnapshot{
+		FetchedAt: "2026-08-29T10:00:00Z",
+		Mode:      "full",
+		Count:     3,
+		Records: []wallet.Record{
+			createMapRecord("rec-1", "-1000", "2026-08-25", "Uber", "2026-08-25T08:00:00Z"),
+			createMapRecord("rec-2", "-1000", "2026-08-25", "Uber", "2026-08-25T09:00:00Z"),
+			createMapRecord("rec-3", "-500", "2026-08-26", "Starbucks", "2026-08-26T07:00:00Z"),
+		},
+	}
+
+	tmpfile := createTestFile(t, marshalJSON(t, snap))
+	defer cleanupTestFile(t, tmpfile)
+
+	groups, err := detectRecordDuplicates(tmpfile, "", 0.5)
+	if err != nil {
+		t.Fatalf("Failed to detect duplicates: %v", err)
+	}
+
+	if len(groups) != 1 {
+		t.Errorf("Expected 1 duplicate group, got %d", len(groups))
+	}
+}
+
 // BenchmarkDetectDuplicates benchmarks the duplicate detection on large datasets.
 func BenchmarkDetectDuplicates(b *testing.B) {
 	// TODO: Implement benchmark
 	// This will be populated in Phase 6 once detection logic is implemented
+}
+
+// Helper to create a wallet.Record as a map
+func createMapRecord(id, amount, date, party, createdAt string) wallet.Record {
+	rec := wallet.Record{}
+	rec["id"] = id
+	amountMap := make(map[string]interface{})
+	amountVal, _ := strconv.ParseFloat(amount, 64)
+	amountMap["value"] = amountVal
+	rec["amount"] = amountMap
+	rec["recordDate"] = date
+	rec["counterParty"] = party
+	rec["createdAt"] = createdAt
+	return rec
+}
+
+// Helper to marshal struct to JSON bytes
+func marshalJSON(t *testing.T, v interface{}) []byte {
+	t.Helper()
+	data, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("Failed to marshal JSON: %v", err)
+	}
+	return data
 }
 
 // Helper to create a test file with arbitrary content

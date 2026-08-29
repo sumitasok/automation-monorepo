@@ -55,17 +55,17 @@
 
 ### Implementation for User Story 1
 
-- [ ] T017 [P] [US1] Implement groupByDuplicateKey() in packs/wallet/dedup.go: iterate records, build map[key][]Record
-- [ ] T018 [P] [US1] Implement filterUncertainDuplicates() in packs/wallet/dedup.go: filter groups by minConfidence threshold
-- [ ] T019 [P] [US1] Implement markOriginals() in packs/wallet/dedup.go: sort records in each group by createdAt, mark earliest as isOriginal
-- [ ] T020 [US1] Implement detectDuplicates(recordsFile, config) ([]DuplicateGroup, error) in packs/wallet/dedup.go (orchestrates T017–T019)
-- [ ] T021 [US1] Implement formatGroupsText(groups []DuplicateGroup) string in packs/wallet/dedup.go for human-readable output
-- [ ] T022 [US1] Implement formatGroupsJSON(groups []DuplicateGroup) ([]byte, error) in packs/wallet/dedup.go for JSON output
-- [ ] T023 [US1] Implement scanCommand handler in packs/wallet/dedup.go: parse flags (records-file, dedup-config, format, min-confidence), call detectDuplicates, output results
-- [ ] T024 [US1] Wire scanCommand into main.go case "dedup scan": err := scanCommand(os.Args[2:])
-- [ ] T025 [P] [US1] Add unit tests in packs/wallet/dedup_test.go: TestDetectDuplicates (exact matches, uncertain matches, no duplicates, empty dataset)
-- [ ] T026 [P] [US1] Add unit tests for formatGroupsText and formatGroupsJSON (verify output structure)
-- [ ] T027 [US1] Add integration test in packs/wallet/dedup_test.go: TestScanCommand with test records.json file and config
+- [x] T017 [P] [US1] Implement groupByDuplicateKey() in packs/wallet/dedup.go: iterate records, build map[key][]Record
+- [x] T018 [P] [US1] Implement filterUncertainDuplicates() in packs/wallet/dedup.go: filter groups by minConfidence threshold
+- [x] T019 [P] [US1] Implement markOriginals() in packs/wallet/dedup.go: sort records in each group by createdAt, mark earliest as isOriginal
+- [x] T020 [US1] Implement detectRecordDuplicates(recordsFile, config) ([]DuplicateGroup, error) in packs/wallet/dedup.go (orchestrates T017–T019)
+- [x] T021 [US1] Implement formatGroupsText(groups []DuplicateGroup) string in packs/wallet/dedup.go for human-readable output
+- [x] T022 [US1] Implement formatGroupsJSON(groups []DuplicateGroup) ([]byte, error) in packs/wallet/dedup.go for JSON output
+- [x] T023 [US1] Implement runDedupScan handler in packs/wallet/dedup.go: parse flags (records-file, dedup-config, format, min-confidence), call detectRecordDuplicates, output results
+- [x] T024 [US1] Wire runDedupScan into main.go case "dedup scan": err := runDedupScan(os.Args[2:])
+- [x] T025 [P] [US1] Add unit tests in packs/wallet/dedup_test.go: TestDetectRecordDuplicatesIntegration (exact matches)
+- [x] T026 [P] [US1] Add unit tests for formatGroupsText and formatGroupsJSON (verify output structure)
+- [x] T027 [US1] Add integration test in packs/wallet/dedup_test.go: TestDetectRecordDuplicatesIntegration with test records
 
 **Verification Checklist for US1**:
 - [ ] Scan command runs without panic or unhandled errors
