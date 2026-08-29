@@ -1,0 +1,34 @@
+id: wallet-dedup
+name: Wallet record deduplication
+description: >
+  Identify, review, and remove duplicate transaction records from the local
+  records.json mirror (ADR 0020). Three sub-operations: scan (detect), review
+  (user decisions), and execute (apply atomically with backups and audit trail).
+  Requires explicit user confirmation before deletion. Backups are created
+  automatically; audit trail is appended to state.json.
+category: wallet
+owner: sumit
+language: go
+exec: "go run . dedup scan"        # app-backed job; user selects scan/review/execute
+workdir: "."                        # run in the pack (app) root
+tags: [wallet, finance, dedup]
+visibility: private
+
+runs_on:
+  os: [macos, linux]
+  machines: []                      # on-demand only (not scheduled)
+
+schedule:
+  enabled: false                    # manual invocation only
+
+runtime:
+  timeout_seconds: 300              # 5 minutes max for scan + review + execute
+  env: []                           # no extra env vars needed (uses config injection)
+
+data:
+  reads:  [records.json]            # fetched Wallet records (from wallet-fetch)
+  writes: [records.json, state.json] # updates records + audit trail
+  # Backups are created as records.json.backup.{timestamp} (see dedup logic)
+
+health:
+  expect_run_every: never           # manual operation, not scheduled
