@@ -13,35 +13,37 @@ See design & rationale in `docs/adr/0009-wallet-pack.md`.
 
 ## TL;DR
 
-### Via auto CLI (recommended; workspace-integrated)
+### Sync Wallet Records
 
 ```bash
-# 1. Preview without creating records (no token needed):
-./auto run wallet-sync -- --dry-run
-
-# 2. Sync for real:
+# Via auto CLI (recommended):
 ./auto run wallet-sync
 
-# 3. Check for duplicate issues:
-./auto run wallet-detect-duplicates
-
-# Full pipeline (extract → categorize → sync → check):
-./auto run gmail-wallet-sync
+# Or directly:
+cd packs/wallet && go run . sync
 ```
 
-### Direct commands (for development/debugging)
+### Dedup Wallet Records (4-Phase Workflow)
 
 ```bash
 cd packs/wallet
 
-# Dry run (no token, no API calls):
-make dry-run                       # or: go run . sync --dry-run
+# Phase 1: Scan for duplicates (read-only)
+go run . dedup scan
+# Output: DUPLICATE: X groups | Y records to delete | Z to keep
 
-# Sync for real:
-make sync                          # or: go run . sync
+# Phase 2: Review and collect decisions (interactive)
+go run . dedup review --decisions-file decisions.jsonl
 
-# Detect duplicates:
-go run . detect-duplicates
+# Phase 3: Execute - saves deletion plan (read-only on records)
+go run . dedup execute --decisions-file decisions.jsonl
+# Output: dedup-results.jsonl with deletion IDs
+
+# Phase 4: Delete from Wallet API, then finalize
+# (manually delete from Wallet API using IDs in dedup-results.jsonl)
+go run . dedup finalize --dedup-results records-dedup-results.jsonl
+# Prompts: Confirm Wallet API deletions? (yes/no)
+# Updates records.jsonl only after confirmation
 ```
 
 ---
@@ -279,6 +281,89 @@ also remove the previously-created records in Wallet — filter them by the
 Everything is tagged. In the Wallet app, filter records by the
 `source:automation-monorepo` label to see (or bulk-delete) only machine-imported
 records.
+
+---
+
+## Deduplication Workflow
+
+Identify and remove duplicate wallet records using a 4-phase workflow that's safe and reversible.
+
+### Overview
+
+```
+Phase 1: Scan      → Detect duplicates (records.jsonl, read-only)
+Phase 2: Review    → Collect user decisions (decisions.jsonl, interactive)
+Phase 3: Execute   → Save deletion plan (dedup-results.jsonl, read-only)
+Phase 4: Finalize  → Delete from Wallet API → update records.jsonl
+```
+
+### File Formats (JSONL - one JSON object per line)
+
+- `records.jsonl` — wallet transaction records (streaming-friendly)
+- `decisions.jsonl` — dedup review decisions with metadata
+- `dedup-results.jsonl` — deletion plan from execute phase
+
+### Complete Example
+
+```bash
+cd packs/wallet
+
+# Step 1: Scan for duplicates (shows summary)
+go run . dedup scan
+# Output: DUPLICATE: 1 groups | 6328 records to delete | 1 to keep
+
+# Step 2: Review and collect decisions (interactive)
+go run . dedup review --decisions-file decisions.jsonl
+# For each group: choose keep-first, custom, or skip
+
+# Step 3: Execute - generates deletion plan (read-only)
+go run . dedup execute --decisions-file decisions.jsonl
+# Output: DEDUPLICATED: 6328 to delete | 1 to keep
+#         Results saved: records-dedup-results.jsonl
+
+# Step 3b: Delete from Wallet API
+# (Manual step: delete these 6328 records from Wallet using the IDs in dedup-results.jsonl)
+# You can use: wallet sync --dedup-results records-dedup-results.jsonl
+
+# Step 4: Finalize (only after Wallet API confirms deletions)
+go run . dedup finalize --dedup-results records-dedup-results.jsonl
+# Prompt: Confirm: Have you deleted these records from Wallet API? (yes/no)
+# Updates records.jsonl ONLY AFTER confirmation
+# Creates backup: records.jsonl.backup.{timestamp}
+```
+
+### Flags
+
+#### Scan Phase
+- `--format json|text` — output format (default: text, summary only)
+- `--min-confidence 0-1` — only show matches above threshold (default: 0.5)
+
+#### Review Phase
+- `--decisions-file PATH` — where to save decisions (default: .dedup-decisions-{timestamp}.jsonl)
+- `--dry-run` — show decisions without saving
+
+#### Execute Phase
+- `--decisions-file PATH` — file from review phase
+- `--dry-run` — preview deletions without generating results
+
+#### Finalize Phase
+- `--dedup-results PATH` — file from execute phase
+- `--state-file PATH` — audit trail location
+
+### Safety Features
+
+✅ **Phase 3 never touches records.jsonl** — only saves dedup-results.jsonl  
+✅ **Phase 4 confirms Wallet API deletions** — waits for user confirmation  
+✅ **Automatic backup** — records.jsonl.backup.{timestamp} created before write  
+✅ **Audit trail** — all operations logged to state.json  
+✅ **Atomic writes** — temp file + rename prevents corruption  
+
+### If Something Goes Wrong
+
+- **After Phase 3, before Phase 4**: Restart from Phase 1 (decisions.jsonl is scratch)
+- **After Phase 4 fails**: Both records.jsonl and records.jsonl.backup.{timestamp} exist
+  - Manually restore: `cp records.jsonl.backup.{timestamp} records.jsonl`
+  - Re-run from Phase 1 with fresh decisions
 
 ---
 
