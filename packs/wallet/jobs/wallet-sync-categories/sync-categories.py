@@ -332,27 +332,23 @@ def main():
         logger.info(f"Token loaded from config")
         logger.info(f"Mode: {'Apply HIGH-CONFIDENCE only' if apply_high else 'Apply ALL'}")
 
-        # Fetch categories from Wallet API to build name->ID map
-        logger.info(f"Fetching categories from Wallet API...")
+        # Build category name->ID map from existing wallet records
+        logger.info(f"Building category name->ID map from existing wallet records...")
         category_name_to_id = {}
-        try:
-            resp = requests.get(
-                "https://api.budgetbakers.com/v1/categories",
-                headers={"Authorization": f"Bearer {token}"},
-                timeout=10,
-            )
-            if resp.status_code == 200:
-                categories = resp.json().get('categories', [])
-                for cat in categories:
-                    cat_name = cat.get('name', '')
-                    cat_id = cat.get('id', '')
-                    if cat_name and cat_id:
-                        category_name_to_id[cat_name] = cat_id
-                logger.info(f"✓ Loaded {len(category_name_to_id)} categories")
-            else:
-                logger.warning(f"Failed to fetch categories: HTTP {resp.status_code}")
-        except Exception as e:
-            logger.warning(f"Error fetching categories: {e}")
+        with open(wallet_jsonl, 'r') as f:
+            for line in f:
+                if line.strip():
+                    try:
+                        record = json.loads(line)
+                        cat = record.get('category', {})
+                        cat_name = cat.get('name', '')
+                        cat_id = cat.get('id', '')
+                        if cat_name and cat_id:
+                            category_name_to_id[cat_name] = cat_id
+                    except json.JSONDecodeError:
+                        pass
+
+        logger.info(f"✓ Indexed {len(category_name_to_id)} unique categories from wallet records")
 
         # Filter updates by confidence if needed
         updates_to_apply = []
