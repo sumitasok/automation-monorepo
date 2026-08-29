@@ -8,15 +8,29 @@ set -e
 echo "================================================================================"
 echo "WALLET SYNC WORKFLOW - Starting"
 echo "================================================================================"
-echo "Pipeline: gmail-extract → gmail-categorize → wallet-sync-categories →"
-echo "          wallet-fetch-accounts → wallet-dedup → wallet-sync"
+echo "Pipeline: wallet-fetch → gmail-extract → gmail-categorize →"
+echo "          wallet-sync-categories → wallet-fetch-accounts → wallet-dedup →"
+echo "          wallet-sync"
 echo "================================================================================"
 echo ""
 
 START_TIME=$(date +%s)
 
-# Step 1: Extract Gmail transactions
-echo "[1/6] GMAIL-EXTRACT: Extracting transactions from Gmail..."
+# Step 1: Fetch wallet records
+echo "[1/7] WALLET-FETCH: Fetching wallet records from Wallet API..."
+echo ""
+if ./auto run wallet-fetch; then
+    echo ""
+    echo "✓ Wallet fetch complete"
+else
+    echo ""
+    echo "✗ Wallet fetch failed"
+    exit 1
+fi
+echo ""
+
+# Step 2: Extract Gmail transactions
+echo "[2/7] GMAIL-EXTRACT: Extracting transactions from Gmail..."
 echo ""
 if ./auto run gmail-extract; then
     echo ""
@@ -29,7 +43,7 @@ fi
 echo ""
 
 # Step 2: Categorize Gmail transactions
-echo "[2/6] GMAIL-CATEGORIZE: AI-categorizing transactions..."
+echo "[3/7] GMAIL-CATEGORIZE: AI-categorizing transactions..."
 echo ""
 if ./auto run gmail-categorize; then
     echo ""
@@ -42,7 +56,7 @@ fi
 echo ""
 
 # Step 3: Sync categories to wallet
-echo "[3/6] WALLET-SYNC-CATEGORIES: Syncing categories to wallet Unknown records..."
+echo "[4/7] WALLET-SYNC-CATEGORIES: Syncing categories to wallet Unknown records..."
 echo ""
 if ./auto run wallet-sync-categories -- --apply; then
     echo ""
@@ -55,7 +69,7 @@ fi
 echo ""
 
 # Step 4: Fetch accounts
-echo "[4/6] WALLET-FETCH-ACCOUNTS: Fetching accounts from Wallet API..."
+echo "[5/7] WALLET-FETCH-ACCOUNTS: Fetching accounts from Wallet API..."
 echo ""
 if ./auto run wallet-fetch-accounts; then
     echo ""
@@ -68,7 +82,7 @@ fi
 echo ""
 
 # Step 5: Detect and dedup duplicates
-echo "[5/6] WALLET-DEDUP: Scanning for duplicate records..."
+echo "[6/7] WALLET-DEDUP: Scanning for duplicate records..."
 echo ""
 if ./auto run wallet-dedup scan; then
     echo ""
@@ -81,7 +95,7 @@ fi
 echo ""
 
 # Step 6: Sync to Wallet Server
-echo "[6/6] WALLET-SYNC: Pushing transactions to Wallet Server..."
+echo "[7/7] WALLET-SYNC: Pushing transactions to Wallet Server..."
 echo ""
 if ./auto run wallet-sync; then
     echo ""
@@ -105,12 +119,13 @@ echo "==========================================================================
 echo "Total time: ${MINUTES}m ${SECONDS}s"
 echo ""
 echo "Pipeline executed:"
-echo "  ✓ [1/6] Gmail extraction"
-echo "  ✓ [2/6] Gmail categorization (AI)"
-echo "  ✓ [3/6] Wallet category sync (to Unknown records)"
-echo "  ✓ [4/6] Account fetch"
-echo "  ✓ [5/6] Duplicate detection"
-echo "  ✓ [6/6] Transaction push to Wallet Server"
+echo "  ✓ [1/7] Wallet record fetch"
+echo "  ✓ [2/7] Gmail extraction"
+echo "  ✓ [3/7] Gmail categorization (AI)"
+echo "  ✓ [4/7] Wallet category sync (to Unknown records)"
+echo "  ✓ [5/7] Account fetch"
+echo "  ✓ [6/7] Duplicate detection"
+echo "  ✓ [7/7] Transaction push to Wallet Server"
 echo ""
 echo "Next steps:"
 echo "  • Review duplicate scan results: ./auto run wallet-dedup review"

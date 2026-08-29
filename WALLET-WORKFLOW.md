@@ -14,26 +14,43 @@ This executes all 6 steps in sequence with automatic error handling.
 ## Pipeline Overview
 
 ```
+Wallet App
+    ↓
+[1] wallet-fetch
+    ↓ (fetches current wallet records)
 Gmail Inbox
     ↓
-[1] gmail-extract
+[2] gmail-extract
     ↓ (extracts transactions to gmail/transactions.csv)
-[2] gmail-categorize
+[3] gmail-categorize
     ↓ (AI categorization with DeepSeek)
-[3] wallet-sync-categories
+[4] wallet-sync-categories
     ↓ (syncs categories to Wallet Unknown records)
-[4] wallet-fetch-accounts
+[5] wallet-fetch-accounts
     ↓ (refreshes accounts cache)
-[5] wallet-dedup
+[6] wallet-dedup
     ↓ (scans for duplicates, no auto-fix)
-[6] wallet-sync
+[7] wallet-sync
     ↓ (pushes to Wallet API)
 Wallet App ✓
 ```
 
 ## Step-by-Step Details
 
-### [1] Gmail Extract
+### [1] Wallet Fetch
+**Command:** `./auto run wallet-fetch`
+
+Fetches all wallet records from Wallet API and saves to `data/wallet/records.jsonl`. This snapshot is used for:
+- Matching unknown categories (wallet-sync-categories)
+- Building category ID map
+- Detecting duplicates (wallet-dedup)
+- Providing baseline for sync operations
+
+**Output:** `data/wallet/records.jsonl` (JSONL format, one record per line)
+
+---
+
+### [2] Gmail Extract
 **Command:** `./auto run gmail-extract`
 
 Extracts financial transactions from Gmail inbox using email pattern matching. Creates `data/gmail/transactions.csv` with:
@@ -122,27 +139,30 @@ Features:
 Run individual steps:
 
 ```bash
-# Step 1: Extract transactions
+# Step 1: Fetch wallet records
+./auto run wallet-fetch
+
+# Step 2: Extract transactions
 ./auto run gmail-extract
 
-# Step 2: Categorize with AI
+# Step 3: Categorize with AI
 ./auto run gmail-categorize
 
-# Step 3: Sync categories (dry-run first)
+# Step 4: Sync categories (dry-run first)
 ./auto run wallet-sync-categories
 ./auto run wallet-sync-categories -- --apply
 
-# Step 4: Fetch accounts for fallback matching
+# Step 5: Fetch accounts for fallback matching
 ./auto run wallet-fetch-accounts
 
-# Step 5: Scan for duplicates
+# Step 6: Scan for duplicates
 ./auto run wallet-dedup scan
 ./auto run wallet-dedup review
 # If duplicates found:
 ./auto run wallet-dedup execute
 ./auto run wallet-dedup finalize
 
-# Step 6: Sync to Wallet
+# Step 7: Sync to Wallet
 ./auto run wallet-sync
 ```
 
