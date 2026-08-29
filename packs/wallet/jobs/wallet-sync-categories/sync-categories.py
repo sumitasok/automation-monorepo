@@ -390,12 +390,13 @@ def main():
                 sys.exit(1)
 
             logger.info(f"Sending batch update: {len(updates_to_apply)} records")
-            logger.debug(f"API URL: https://api.budgetbakers.com/v1/api/records")
+            logger.debug(f"API URL: https://rest.budgetbakers.com/wallet/v1/api/records")
             logger.debug(f"Payload: {len(batch_payload)} items")
 
             try:
+                api_url = "https://rest.budgetbakers.com/wallet/v1/api/records"
                 response = requests.patch(
-                    f"https://api.budgetbakers.com/v1/api/records",
+                    api_url,
                     headers={
                         "Authorization": f"Bearer {token}",
                         "Content-Type": "application/json",
