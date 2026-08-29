@@ -4,6 +4,148 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## Auto CLI Commands by Pack
+
+Run pack operations via `./auto` with these commands:
+
+### Wallet Pack
+
+**Sync transactions**:
+```bash
+./auto run wallet-sync              # Real sync (requires WALLET_API_TOKEN)
+./auto run wallet-sync -- --dry-run # Dry-run (no token, no API calls)
+```
+Reads `data/gmail/transactions.csv`, creates one Wallet record per transaction, deduped by `MessageID+Amount`, tagged with label `source:automation-monorepo`.
+
+**Dedup workflow** (4-phase):
+```bash
+./auto run wallet-dedup scan                              # Phase 1: detect duplicates
+./auto run wallet-dedup review --decisions-file decisions.jsonl  # Phase 2: collect decisions
+./auto run wallet-dedup execute --decisions-file decisions.jsonl # Phase 3: plan deletions
+# (manually delete from Wallet API using IDs in dedup-results.jsonl)
+./auto run wallet-dedup finalize --dedup-results dedup-results.jsonl  # Phase 4: update records
+```
+See `packs/wallet/RUNBOOK.md` for detailed workflow, flags, and troubleshooting.
+
+---
+
+## 2026-08-29 — `config/config.yaml`: explicit `data_dir`, replacing the symlink-based assumption
+
+**Prompt summary**: Follow-up to the same-day sandbox fix. User: "lets
+create a config/config.yaml and start adding some defauult configs that
+auto asumes when no extra params are passed. so we will define data
+directory location there instead of the symlink based assumtion."
+
+**Files affected**:
+- `framework/tools/auto` — moved `load_yaml` above the workspace-constants
+  block; added `load_workspace_config()` (reads `config/config.yaml`) and
+  `_resolve_data_dir()` (prefers `data_dir:` from that file, falls back to
+  the existing `(WS / "data").resolve()` symlink convention).
+- `config/config.example.yaml` — new, committed template documenting
+  `data_dir`.
+- `config/config.yaml` — new, git-ignored, real value:
+  `data_dir: /Users/sumitasok/data`.
+- `.gitignore` — added `!config/config.example.yaml` alongside the existing
+  `!config/README.md` exception.
+- `config/README.md` — new "Workspace-wide defaults" section.
+- `docs/adr/0021-workspace-config-yaml.md` — new ADR.
+
+**Steps taken**:
+1. Confirmed `config/*` is already git-ignored except explicit exceptions
+   (`config/README.md`, `config/ai/*.example.yaml`) — followed the same
+   pattern for the new file rather than inventing a different one.
+2. Reordered the top of `framework/tools/auto` so `load_yaml` exists before
+   it's needed to read `config/config.yaml`, and so `CONFIG_ROOT` (needed to
+   find that file) is computed before `DATA` (which now may depend on its
+   contents) — `CONFIG_ROOT` → `load_workspace_config()` → `DATA`.
+3. Verified via direct module import (`importlib.machinery.SourceFileLoader`,
+   since `auto` has no `.py` suffix): with no `config/config.yaml`, `DATA`
+   still resolves to `/Users/sumitasok/data` (the old symlink fallback,
+   unchanged); with `config/config.yaml` containing
+   `data_dir: /Users/sumitasok/data`, `DATA` resolves to the same value via
+   the new explicit path. Ran `auto doctor` after each change — stayed
+   clean throughout.
+4. Wrote the real `config/config.yaml` for this machine and confirmed
+   `pack_data_dir('gmail')` now resolves to `/Users/sumitasok/data/gmail`
+   via the config value, not the symlink.
+
+**Outcome**: `auto` no longer needs the `data/` symlink to find real data —
+`config/config.yaml`'s `data_dir` is authoritative when present. The `data/`
+symlink itself was deliberately left in place (still points at the same real
+directory) for manual navigation; nothing currently reads through it.
+
+**Caveats**: Left over from testing — `config/_to_delete_config.yaml.testonly`
+in the workspace `config/` dir is a harmless scratch file; delete it
+whenever convenient (this session's file-bridge can't delete files itself).
+Still open from the previous entry: `filters/_forwarded-notes.yaml.state`
+and per-bank `filters/<name>.yaml.state` remain unmigrated to `data_files:`.
+
+---
+
+## 2026-08-29 — Sandbox write-roots weren't resolving a symlinked `data/`, breaking gmail-extract
+
+**Prompt summary**: User forwarded a failed `gmail-extract` run's output:
+`writing CSV: opening CSV for write: open transactions.csv: operation not
+permitted` and `[WARN] saving forwarded-notes state: ... operation not
+permitted`. Asked to diagnose, then specifically: "lets find the configs
+that auto loads and update the data path and config path in there."
+
+**Files affected**:
+- `framework/tools/auto` — `DATA` now `(WS / "data").resolve()`; new
+  `CONFIG_ROOT = (WS / "config").resolve()` constant replacing five inline
+  `WS / "config"` call sites (`pack_config_dir`, `ai_profile_dir`,
+  `_sandbox_write_roots`, both `sandbox-check` probe references).
+- `docs/adr/0018-write-sandbox-for-job-execution.md` — Amendment 3,
+  documenting the root cause and fix.
+
+**Steps taken**:
+1. Traced both errors to real files/paths on disk (via the connected-folder
+   bridge): `packs/gmail/transactions.csv` is a symlink through
+   `data/gmail/transactions.csv`, and this workspace's top-level `data/` is
+   itself a symlink to `/Users/sumitasok/data` (kept outside the repo).
+   `filters/_forwarded-notes.yaml.state` is a real file sitting directly in
+   `packs/gmail/filters/` — never migrated to `data_files:` (ADR 0019).
+2. Read ADR 0018 (write-sandbox) end to end, including Amendments 1/2 —
+   recognized the `transactions.csv` failure as the same class of bug those
+   amendments already fixed once (an allow-listed write silently landing
+   outside the sandbox's allow-list), but with a new cause.
+3. Found `_sandbox_write_roots()` builds the macOS Seatbelt profile from
+   `DATA = WS / "data"` without `.resolve()`. Reasoned through why this
+   matters from the base profile's own precedent — it already needs both
+   `(subpath "/tmp")` and `(subpath "/private/var/folders")`, because
+   `sandbox-exec` checks `(subpath ...)` against the *resolved* path a write
+   lands on, not the literal string in the profile. A `data/` symlinked
+   outside the workspace means the real write target is never a subpath of
+   the unresolved literal — every write under `data/` fails EPERM on any
+   machine shaped like this one.
+4. Patched `DATA`/added `CONFIG_ROOT` at the point they're computed (not
+   just inside `_macos_sandbox_profile`), so `AUTO_DATA_DIR` (injected into
+   every job's env — several jobs resolve paths from it directly, e.g.
+   `wallet fetch --out`, `gmail serve --data-dir`) also gets the real path,
+   not just the sandbox roots. Verified via `python3 -m py_compile`.
+5. Ran `./auto sandbox-check` through the connected-folder bridge to
+   confirm `DATA` now computes to `/Users/sumitasok/data` (it attempted to
+   `mkdir /Users/sumitasok/data/state` — the correct real target, versus the
+   old in-repo symlink path). Could not complete the check end-to-end: the
+   bridge executes on a Linux VM with only this repo folder mounted, so it
+   has neither a `sandbox-exec` binary nor access to
+   `/Users/sumitasok/data` itself — the exact "verify on the real machine"
+   blind spot ADR 0018 already flagged for its own original rollout.
+
+**Outcome**: The path-resolution bug is fixed and documented (Amendment 3).
+**Still needs**: `auto sandbox-check` run directly in a Mac terminal to
+confirm `sandbox-exec` enforcement itself now passes, then a real
+`./auto run gmail-extract` to confirm `transactions.csv` writes clean.
+
+**Caveats / not fixed**: `filters/_forwarded-notes.yaml.state` and every
+per-bank `filters/<name>.yaml.state` are real files directly inside
+`packs/gmail/`, correctly denied by the sandbox's `packs/` is read-only"
+contract — not touched by this fix, left as a follow-up (would need a
+`data_files:` migration for the gmail pack's filter-state sidecars,
+mirroring the ADR 0019 treatment `expenses`/`wallet` already got).
+
+---
+
 ## 2026-08-15 — Constitution v1.0.0: ratify the workspace/pack responsibility split
 
 **Prompt summary**: `/speckit-constitution` — "make sure automation mono repo is responsible
