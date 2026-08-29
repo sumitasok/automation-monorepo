@@ -3,6 +3,8 @@ class WalletApp {
     this.authSection = document.getElementById('authSection');
     this.viewerSection = document.getElementById('viewerSection');
     this.patForm = document.getElementById('patForm');
+    this.ownerInput = document.getElementById('ownerInput');
+    this.repoInput = document.getElementById('repoInput');
     this.patInput = document.getElementById('patInput');
     this.authButton = document.getElementById('authButton');
     this.authError = document.getElementById('authError');
@@ -15,9 +17,24 @@ class WalletApp {
   async init() {
     // Restore auth if available
     const hasAuth = restoreAuth();
-    
-    // Try to get repo info from .git/config
-    await githubAPI.getRepoInfo();
+
+    // Restore repo config if available
+    this.restoreRepoConfig();
+
+    // Subscribe to state changes
+    appState.subscribe(() => this.handleStateChange());
+
+    // Attach event listeners
+    this.patForm.addEventListener('submit', (e) => this.handleAuthSubmit(e));
+
+    // Attach sorting listeners to table headers
+    document.querySelectorAll('th a.sortable').forEach(link => {
+      link.addEventListener('click', (e) => {
+        e.preventDefault();
+        const column = e.target.dataset.column;
+        appState.setSort(column);
+      });
+    });
 
     // Subscribe to state changes
     appState.subscribe(() => this.handleStateChange());
@@ -42,12 +59,42 @@ class WalletApp {
     }
   }
 
+  restoreRepoConfig() {
+    const stored = localStorage.getItem('wallet_repo_config');
+    if (stored) {
+      try {
+        const config = JSON.parse(stored);
+        this.ownerInput.value = config.owner || 'sumitasok';
+        this.repoInput.value = config.repo || 'automation-monorepo';
+        githubAPI.setRepository(config.owner, config.repo);
+      } catch (e) {
+        // Silently fail, use defaults
+        this.setDefaultRepoConfig();
+      }
+    } else {
+      this.setDefaultRepoConfig();
+    }
+  }
+
+  setDefaultRepoConfig() {
+    this.ownerInput.value = 'sumitasok';
+    this.repoInput.value = 'automation-monorepo';
+    githubAPI.setRepository('sumitasok', 'automation-monorepo');
+  }
+
+  saveRepoConfig(owner, repo) {
+    localStorage.setItem('wallet_repo_config', JSON.stringify({ owner, repo }));
+  }
+
   async handleAuthSubmit(e) {
     e.preventDefault();
-    
+
+    const owner = this.ownerInput.value.trim();
+    const repo = this.repoInput.value.trim();
     const pat = this.patInput.value.trim();
-    if (!pat) {
-      this.showAuthError('Please enter a GitHub PAT');
+
+    if (!owner || !repo || !pat) {
+      this.showAuthError('Please fill in all fields (Owner, Repository, PAT)');
       return;
     }
 
@@ -59,11 +106,15 @@ class WalletApp {
       appState.setLoading(true);
       appState.setError(null);
 
-      // Set PAT and fetch records
+      // Configure and set PAT
+      githubAPI.setRepository(owner, repo);
       githubAPI.setPAT(pat);
+
+      // Fetch records
       const records = await githubAPI.fetchRecords();
 
-      // Store PAT securely
+      // Store config and PAT securely
+      this.saveRepoConfig(owner, repo);
       setAuthCookie(pat);
 
       // Update state

@@ -16,17 +16,43 @@
         <main class="app-main">
             <section id="authSection" class="auth-section">
                 <div class="auth-form">
-                    <h2>Authenticate with GitHub</h2>
-                    <p>Provide a read-only GitHub Personal Access Token to fetch wallet records.</p>
+                    <h2>Connect Wallet Records</h2>
+                    <p>Specify your GitHub repository and provide a read-only PAT to fetch wallet records.</p>
                     <form id="patForm">
                         <div class="form-group">
+                            <label for="ownerInput">GitHub Owner/Org</label>
+                            <input
+                                type="text"
+                                id="ownerInput"
+                                name="owner"
+                                placeholder="sumitasok"
+                                required
+                                aria-label="GitHub repository owner"
+                            >
+                            <small>Username or organization name</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="repoInput">Repository Name</label>
+                            <input
+                                type="text"
+                                id="repoInput"
+                                name="repo"
+                                placeholder="automation-monorepo"
+                                required
+                                aria-label="GitHub repository name"
+                            >
+                            <small>Repository name (without .git)</small>
+                        </div>
+
+                        <div class="form-group">
                             <label for="patInput">GitHub PAT (read-only)</label>
-                            <input 
-                                type="password" 
-                                id="patInput" 
-                                name="pat" 
-                                placeholder="ghp_..." 
-                                required 
+                            <input
+                                type="password"
+                                id="patInput"
+                                name="pat"
+                                placeholder="ghp_..."
+                                required
                                 aria-label="GitHub Personal Access Token"
                             >
                             <small>Your PAT is stored securely in browser cookies and never sent to external servers.</small>
