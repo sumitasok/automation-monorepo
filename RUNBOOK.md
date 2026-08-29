@@ -4,6 +4,46 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-08-30 — Integrate wallet-dedup into orchestration workflow
+
+**Prompt summary**: Add wallet-dedup (scan → review → execute → finalize) to the orchestration system so full sync + dedup can run with single command.
+
+**Files created**:
+- `orchestrator/gmail-wallet-sync-with-dedup.yaml` — New orchestration with 10 integrated steps
+
+**Files updated**:
+- `packs/wallet/dedup.go` — executeDedup now makes actual Wallet API DELETE calls
+- `packs/wallet/internal/wallet/wallet.go` — Added DeleteRecords method to Client
+- `WALLET-WORKFLOW.md` — Updated quick start and pipeline overview
+- Removed: `delete-dedup-records.py` (no longer needed)
+
+**Usage**:
+```bash
+export WALLET_API_TOKEN="your-premium-api-token"
+./auto orchestrate gmail-wallet-sync-with-dedup
+```
+
+**Workflow**:
+1. wallet-fetch → gmail-extract → gmail-categorize → wallet-sync-categories → wallet-fetch-accounts → wallet-sync
+2. wallet-dedup scan (detect)
+3. wallet-dedup review (interactive, collect decisions)
+4. wallet-dedup execute (DELETE from Wallet API)
+5. wallet-dedup finalize (cleanup local records.jsonl)
+
+**Key changes**:
+- execute now actually DELETEs from Wallet API (not just preparation)
+- Returns ✅/❌ for each deletion
+- Aborts if any deletion fails
+- Requires WALLET_API_TOKEN env var
+
+**Results**:
+- ✅ Full workflow chain with integrated dedup
+- ✅ Single orchestration command for complete sync + cleanup
+- ✅ Proper error handling (aborts if deletions fail)
+- ✅ Audit trail saved in dedup-results.json
+
+---
+
 ## 2026-08-30 — Duplicate wallet records display script
 
 **Prompt summary**: Create a display mechanism to view the 84 duplicate groups found by `wallet-dedup scan`.

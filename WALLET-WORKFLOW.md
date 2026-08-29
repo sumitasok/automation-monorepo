@@ -4,15 +4,22 @@ Complete end-to-end pipeline for syncing financial transactions from Gmail to Wa
 
 ## Quick Start
 
-Run the complete workflow:
+Run the complete workflow (with deduplication):
 ```bash
-./run-wallet-workflow.sh
+export WALLET_API_TOKEN="your-premium-api-token"
+./auto orchestrate gmail-wallet-sync-with-dedup
 ```
 
-This executes all 6 steps in sequence with automatic error handling.
+This runs all 10 steps in sequence: extract → categorize → sync → dedup (scan → review → execute → finalize).
+
+**Alternative**: Run without dedup:
+```bash
+./auto orchestrate gmail-wallet-sync
+```
 
 ## Pipeline Overview
 
+### With Deduplication (Recommended)
 ```
 Wallet App
     ↓
@@ -28,12 +35,28 @@ Gmail Inbox
     ↓ (syncs categories to Wallet Unknown records)
 [5] wallet-fetch-accounts
     ↓ (refreshes accounts cache)
-[6] wallet-dedup
-    ↓ (scans for duplicates, no auto-fix)
-[7] wallet-sync
+[6] wallet-sync
     ↓ (pushes to Wallet API)
+[7] wallet-dedup scan
+    ↓ (detects duplicates, read-only)
+[8] wallet-dedup review
+    ↓ (interactive: collect decisions)
+[9] wallet-dedup execute
+    ↓ (DELETE from Wallet API)
+[10] wallet-dedup finalize
+    ↓ (cleanup local records.jsonl)
 Wallet App ✓
 ```
+
+Run with: `./auto orchestrate gmail-wallet-sync-with-dedup`
+
+### Without Deduplication
+```
+[1] wallet-fetch → [2] gmail-extract → [3] gmail-categorize → 
+[4] wallet-sync-categories → [5] wallet-fetch-accounts → [6] wallet-sync → Wallet App ✓
+```
+
+Run with: `./auto orchestrate gmail-wallet-sync`
 
 ## Step-by-Step Details
 
