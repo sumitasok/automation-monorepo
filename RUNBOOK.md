@@ -4,6 +4,27 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-08-30 — Make gmail-extract respect config.yaml data directory
+
+**Prompt summary**: Ensure `./auto run gmail-extract` writes transactions to `~/data/gmail/transactions.csv` (configured in config.yaml), not via symlink.
+
+**Files affected**: `packs/gmail/main.go` (gmail submodule)
+
+**Steps taken**:
+1. Verified config.yaml already has `data_dir: /Users/sumitasok/data` (set by user earlier)
+2. Updated main.go extract flow to respect AUTO_DATA_DIR environment variable (set by auto CLI from config.yaml)
+3. Added `defaultCSVPath()` function to resolve `transactions.csv` path, matching behavior of `serve` and `categorize` subcommands
+4. Updated extract flow, categorize subcommand, and serve subcommand to use resolved path
+5. Tested: `./auto run gmail-extract --ai=deepseek` now outputs: `Done. 0 new rows written to /Users/sumitasok/data/gmail/transactions.csv`
+
+**Outcome**: ✅ Success. The extract flow now writes directly to `/Users/sumitasok/data/gmail/transactions.csv` when running under `auto run`, removing dependency on symlink workaround. Config-driven, not hardcoded.
+
+**Caveats**: 
+- When running `go run . --filters-dir ./filters` directly (outside auto), falls back to local `transactions.csv` in pack directory
+- Symlink `packs/gmail/transactions.csv` can now be removed (points to ../../data/gmail/transactions.csv, which was only needed during the symlink era)
+
+---
+
 ## Auto CLI Commands by Pack
 
 Run pack operations via `./auto` with these commands:
