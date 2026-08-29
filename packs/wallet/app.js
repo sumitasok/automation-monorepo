@@ -19,8 +19,12 @@ class WalletApp {
     // Restore auth if available
     const hasAuth = restoreAuth();
 
-    // Restore repo config if available
-    this.restoreRepoConfig();
+    // Only restore repo config if previously authenticated (avoids stale defaults on fresh start)
+    if (hasAuth) {
+      this.restoreRepoConfig();
+    } else {
+      this.setDefaultRepoConfig();
+    }
 
     // Subscribe to state changes
     appState.subscribe(() => this.handleStateChange());
@@ -66,8 +70,8 @@ class WalletApp {
       try {
         const config = JSON.parse(stored);
         this.ownerInput.value = config.owner || 'sumitasok';
-        this.repoInput.value = config.repo || 'automation-monorepo';
-        this.pathInput.value = config.path || 'data/wallet/records.jsonl';
+        this.repoInput.value = config.repo || 'automation-monorepo-data';
+        this.pathInput.value = config.path || 'wallet/records.jsonl';
         githubAPI.setRepository(config.owner, config.repo, config.path);
       } catch (e) {
         // Silently fail, use defaults
@@ -80,9 +84,9 @@ class WalletApp {
 
   setDefaultRepoConfig() {
     this.ownerInput.value = 'sumitasok';
-    this.repoInput.value = 'automation-monorepo';
-    this.pathInput.value = 'data/wallet/records.jsonl';
-    githubAPI.setRepository('sumitasok', 'automation-monorepo', 'data/wallet/records.jsonl');
+    this.repoInput.value = 'automation-monorepo-data';
+    this.pathInput.value = 'wallet/records.jsonl';
+    githubAPI.setRepository('sumitasok', 'automation-monorepo-data', 'wallet/records.jsonl');
   }
 
   saveRepoConfig(owner, repo, path) {
