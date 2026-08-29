@@ -146,6 +146,9 @@ class AppState {
         } else if (this.sortColumn === 'counterParty') {
           aVal = (a.counterParty || '').toLowerCase();
           bVal = (b.counterParty || '').toLowerCase();
+        } else if (this.sortColumn === 'category') {
+          aVal = (a.category?.name || '').toLowerCase();
+          bVal = (b.category?.name || '').toLowerCase();
         }
 
         if (aVal < bVal) return this.sortDirection === 'asc' ? -1 : 1;

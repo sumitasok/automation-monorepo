@@ -6,7 +6,7 @@ class TableRenderer {
 
   render(records) {
     if (!records || records.length === 0) {
-      this.tableBody.innerHTML = '<tr><td colspan="6" class="no-results">No records found</td></tr>';
+      this.tableBody.innerHTML = '<tr><td colspan="5" class="no-results">No records found</td></tr>';
       this.updateResultCount(0);
       return;
     }
@@ -18,7 +18,6 @@ class TableRenderer {
       const counterParty = record.counterParty || 'N/A';
       const category = record.category?.name || 'Uncategorized';
       const account = record.account?.name || 'N/A';
-      const state = record.recordState || 'N/A';
 
       return `
         <tr data-record-id="${record.id}" class="record-row">
@@ -27,7 +26,6 @@ class TableRenderer {
           <td class="amount ${amount < 0 ? 'negative' : 'positive'}">${amountStr}</td>
           <td>${truncate(category, 30)}</td>
           <td>${truncate(account, 30)}</td>
-          <td><span class="state-badge">${state}</span></td>
         </tr>
       `;
     }).join('');
