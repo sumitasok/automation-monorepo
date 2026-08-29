@@ -91,16 +91,29 @@ func loadRecords(recordsFile string) (*RecordsSnapshot, error) {
 	}
 
 	scanner := bufio.NewScanner(file)
+	lineNum := 0
 	for scanner.Scan() {
+		lineNum++
 		line := scanner.Bytes()
 		if len(line) == 0 {
 			continue
 		}
 
+		// Skip metadata header line (contains fetchedAt, recordCount, apiTotal)
+		if lineNum == 1 {
+			var meta map[string]interface{}
+			if err := json.Unmarshal(line, &meta); err == nil {
+				if _, ok := meta["fetchedAt"]; ok {
+					continue // Skip metadata line
+				}
+			}
+		}
+
 		var rec wallet.Record
 		if err := json.Unmarshal(line, &rec); err != nil {
-			return nil, fmt.Errorf("parse record line: %w", err)
+			return nil, fmt.Errorf("parse record line %d: %w", lineNum, err)
 		}
+
 		snap.Records = append(snap.Records, rec)
 	}
 
@@ -234,7 +247,7 @@ func getFieldValue(record wallet.Record, fieldPath string) (interface{}, bool) {
 	parts := strings.Split(fieldPath, ".")
 	var current interface{} = record
 
-	for _, part := range parts {
+	for i, part := range parts {
 		if current == nil {
 			return nil, false
 		}
@@ -345,11 +358,14 @@ func findDuplicateGroups(records []wallet.Record, config *DedupConfig) []Duplica
 		// Build a key string from primary key values
 		var keyParts []string
 		for _, keyField := range config.PrimaryKeys {
-			val, _ := getFieldValue(rec, keyField)
-			keyParts = append(keyParts, fmt.Sprintf("%v", val))
+			val, ok := getFieldValue(rec, keyField)
+			if !ok || val == nil {
+				keyParts = append(keyParts, "")
+			} else {
+				keyParts = append(keyParts, fmt.Sprintf("%v", val))
+			}
 		}
 		key := groupKey(strings.Join(keyParts, " | "))
-
 		groups[key] = append(groups[key], records[i])
 		seenKeys[key] = true
 	}
