@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wallet Records Viewer</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div id="app">
+        <header class="app-header">
+            <h1>Wallet Records Viewer</h1>
+            <div class="auth-status" id="authStatus"></div>
+        </header>
+        
+        <main class="app-main">
+            <section id="authSection" class="auth-section">
+                <div class="auth-form">
+                    <h2>Authenticate with GitHub</h2>
+                    <p>Provide a read-only GitHub Personal Access Token to fetch wallet records.</p>
+                    <form id="patForm">
+                        <div class="form-group">
+                            <label for="patInput">GitHub PAT (read-only)</label>
+                            <input 
+                                type="password" 
+                                id="patInput" 
+                                name="pat" 
+                                placeholder="ghp_..." 
+                                required 
+                                aria-label="GitHub Personal Access Token"
+                            >
+                            <small>Your PAT is stored securely in browser cookies and never sent to external servers.</small>
+                        </div>
+                        <button type="submit" id="authButton" class="btn btn-primary">Load Records</button>
+                    </form>
+                    <div id="authError" class="error-message" style="display: none;"></div>
+                </div>
+            </section>
+
+            <section id="viewerSection" class="viewer-section" style="display: none;">
+                <!-- Filter Controls -->
+                <div class="filters-panel">
+                    <div class="filter-group">
+                        <input 
+                            type="text" 
+                            id="searchInput" 
+                            placeholder="Search by counterparty..." 
+                            class="filter-input"
+                            aria-label="Search transactions by counterparty"
+                        >
+                    </div>
+                    
+                    <div class="filter-row">
+                        <div class="filter-group">
+                            <label for="dateStartInput">Date From</label>
+                            <input 
+                                type="date" 
+                                id="dateStartInput" 
+                                class="filter-input"
+                                aria-label="Filter from date"
+                            >
+                        </div>
+                        <div class="filter-group">
+                            <label for="dateEndInput">Date To</label>
+                            <input 
+                                type="date" 
+                                id="dateEndInput" 
+                                class="filter-input"
+                                aria-label="Filter to date"
+                            >
+                        </div>
+                    </div>
+                    
+                    <div class="filter-row">
+                        <div class="filter-group">
+                            <label for="amountMinInput">Amount Min</label>
+                            <input 
+                                type="number" 
+                                id="amountMinInput" 
+                                placeholder="-5000" 
+                                class="filter-input"
+                                aria-label="Minimum amount filter"
+                            >
+                        </div>
+                        <div class="filter-group">
+                            <label for="amountMaxInput">Amount Max</label>
+                            <input 
+                                type="number" 
+                                id="amountMaxInput" 
+                                placeholder="5000" 
+                                class="filter-input"
+                                aria-label="Maximum amount filter"
+                            >
+                        </div>
+                    </div>
+                    
+                    <button id="clearFiltersBtn" class="btn btn-secondary">Clear Filters</button>
+                    <div id="resultCount" class="result-count">Loading records...</div>
+                </div>
+
+                <!-- Records Table -->
+                <div class="table-container">
+                    <table id="recordsTable" class="records-table">
+                        <thead>
+                            <tr>
+                                <th><a href="#" data-column="recordDate" class="sortable">Date</a></th>
+                                <th><a href="#" data-column="counterParty" class="sortable">Counterparty</a></th>
+                                <th><a href="#" data-column="amount" class="sortable">Amount</a></th>
+                                <th>Category</th>
+                                <th>Account</th>
+                                <th>State</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tableBody">
+                            <tr><td colspan="6" class="loading">Loading records...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </main>
+
+        <!-- Detail Modal -->
+        <div id="detailModal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <button class="modal-close" id="modalCloseBtn" aria-label="Close detail view">&times;</button>
+                <div id="detailContent"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="utils.js"></script>
+    <script src="state.js"></script>
+    <script src="github.js"></script>
+    <script src="table.js"></script>
+    <script src="filters.js"></script>
+    <script src="detail.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

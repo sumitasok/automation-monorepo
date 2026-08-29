@@ -16,6 +16,7 @@ data/secrets/
 # Real values live here locally and are NEVER versioned in the workspace.
 config/*
 !config/README.md
+!config/config.example.yaml
 
 # Named AI provider profiles (ADR 0015, `auto run <job> --ai <name>`) — hold
 # real API keys, so only the *.example.yaml templates + README are versioned.
@@ -39,8 +40,14 @@ __pycache__/
 venv/
 node_modules/
 dist/
+coverage/
 *.exe
 *.out
+
+# Wallet UI test artifacts (Jest, browser testing)
+packs/wallet/__tests__/coverage/
+packs/wallet/node_modules/
+packs/wallet/.jest-cache/
 
 # OS cruft
 .DS_Store
