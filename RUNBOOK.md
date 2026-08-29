@@ -29,11 +29,12 @@ Run pack operations via `./auto` with these commands:
 
 3. **Dedup records** (4-phase workflow):
    ```bash
-   ./auto run wallet-dedup scan                              # Phase 1: detect duplicates
-   ./auto run wallet-dedup review --decisions-file decisions.jsonl  # Phase 2: collect decisions
-   ./auto run wallet-dedup execute --decisions-file decisions.jsonl # Phase 3: plan deletions
-   ./auto run wallet-dedup finalize --dedup-results dedup-results.jsonl  # Phase 4: finalize
+   ./auto run wallet-dedup scan                                      # Phase 1: detect duplicates
+   ./auto run wallet-dedup review -- --decisions-file decisions.jsonl  # Phase 2: collect decisions
+   ./auto run wallet-dedup execute -- --decisions-file decisions.jsonl # Phase 3: plan deletions
+   ./auto run wallet-dedup finalize -- --dedup-results dedup-results.jsonl  # Phase 4: finalize
    ```
+   (Use `--` to pass flags to the wallet command, not to auto)
    See `packs/wallet/RUNBOOK.md` for detailed workflow and flags.
 
 **Account mapping** (3-tier resolution during sync):
