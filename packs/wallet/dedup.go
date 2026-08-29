@@ -16,6 +16,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -78,17 +79,37 @@ type RecordsSnapshot struct {
 // loadRecords reads records.json into a working copy in memory.
 // The original file is never modified. Returns the snapshot with working copy of records.
 func loadRecords(recordsFile string) (*RecordsSnapshot, error) {
-	data, err := os.ReadFile(recordsFile)
+	file, err := os.Open(recordsFile)
 	if err != nil {
 		return nil, fmt.Errorf("load records: %w", err)
 	}
+	defer file.Close()
 
-	var snap RecordsSnapshot
-	if err := json.Unmarshal(data, &snap); err != nil {
-		return nil, fmt.Errorf("parse records.json: %w", err)
+	snap := &RecordsSnapshot{
+		FetchedAt: time.Now().UTC().Format(time.RFC3339),
+		Records:   []wallet.Record{},
 	}
 
-	return &snap, nil
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+
+		var rec wallet.Record
+		if err := json.Unmarshal(line, &rec); err != nil {
+			return nil, fmt.Errorf("parse record line: %w", err)
+		}
+		snap.Records = append(snap.Records, rec)
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("read records.jsonl: %w", err)
+	}
+
+	snap.Count = len(snap.Records)
+	return snap, nil
 }
 
 // loadDedupConfig loads dedup configuration from config path or uses defaults.
@@ -597,21 +618,35 @@ func collectDecisions(groups []DuplicateGroup) ([]DedupDecision, error) {
 
 // saveDedupDecisions writes decisions to a JSON file.
 func saveDedupDecisions(decisions []DedupDecision, outputPath string) error {
-	output := map[string]interface{}{
-		"timestamp": time.Now().UTC().Format(time.RFC3339),
-		"decisions": decisions,
-		"summary": map[string]int{
-			"totalGroupsReviewed": len(decisions),
-			"recordsToDelete":     countDeleteRecords(decisions),
-		},
-	}
-
-	data, err := json.MarshalIndent(output, "", "  ")
+	// Write JSONL format: one decision per line
+	file, err := os.Create(outputPath)
 	if err != nil {
-		return fmt.Errorf("marshal decisions: %w", err)
+		return fmt.Errorf("create decisions file: %w", err)
+	}
+	defer file.Close()
+
+	// Write header with summary
+	header := map[string]interface{}{
+		"_type":               "dedup-decisions-header",
+		"timestamp":           time.Now().UTC().Format(time.RFC3339),
+		"totalGroups":         len(decisions),
+		"totalRecordsToDelete": countDeleteRecords(decisions),
+	}
+	headerLine, _ := json.Marshal(header)
+	file.Write(append(headerLine, '\n'))
+
+	// Write each decision
+	for _, decision := range decisions {
+		line, err := json.Marshal(decision)
+		if err != nil {
+			return fmt.Errorf("marshal decision: %w", err)
+		}
+		if _, err := file.Write(append(line, '\n')); err != nil {
+			return fmt.Errorf("write decision: %w", err)
+		}
 	}
 
-	return os.WriteFile(outputPath, data, 0644)
+	return nil
 }
 
 // countDeleteRecords returns total records marked for deletion.
@@ -735,27 +770,48 @@ func executeDuplicates(recordsFile string, decisions []DedupDecision, dryRun boo
 	return nil
 }
 
-// loadDedupDecisions reads decisions from a JSON file saved by review command.
+// loadDedupDecisions reads decisions from JSONL file (one decision per line).
 func loadDedupDecisions(decisionFile string) ([]DedupDecision, error) {
-	data, err := os.ReadFile(decisionFile)
+	file, err := os.Open(decisionFile)
 	if err != nil {
 		return nil, fmt.Errorf("read decisions file: %w", err)
 	}
+	defer file.Close()
 
-	var output struct {
-		Timestamp string          `json:"timestamp"`
-		Decisions []DedupDecision `json:"decisions"`
+	var decisions []DedupDecision
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+
+		// Skip header line
+		var headerCheck map[string]interface{}
+		if err := json.Unmarshal(line, &headerCheck); err != nil {
+			continue
+		}
+		if isHeader, ok := headerCheck["_type"].(string); ok && isHeader == "dedup-decisions-header" {
+			continue
+		}
+
+		// Parse decision
+		var decision DedupDecision
+		if err := json.Unmarshal(line, &decision); err != nil {
+			continue
+		}
+		decisions = append(decisions, decision)
 	}
 
-	if err := json.Unmarshal(data, &output); err != nil {
-		return nil, fmt.Errorf("parse decisions JSON: %w", err)
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("read decisions.jsonl: %w", err)
 	}
 
-	if len(output.Decisions) == 0 {
+	if len(decisions) == 0 {
 		return nil, fmt.Errorf("no decisions found in %s", decisionFile)
 	}
 
-	return output.Decisions, nil
+	return decisions, nil
 }
 
 // applyDecisions removes records marked for deletion, returning the filtered set.
@@ -809,21 +865,32 @@ func validateUpdateJSON(originalRecords, updatedRecords []wallet.Record) error {
 
 // writeRecordsJSON atomically writes records to file using temp file + rename.
 func writeRecordsJSON(recordsFile string, records []wallet.Record) error {
-	data, err := json.MarshalIndent(records, "", "  ")
+	// Write to temp file first (JSONL format: one record per line)
+	tmpFile := recordsFile + ".tmp"
+	tmpWriter, err := os.Create(tmpFile)
 	if err != nil {
-		return fmt.Errorf("marshal records: %w", err)
+		return fmt.Errorf("create temp file: %w", err)
 	}
 
-	// Write to temp file first
-	tmpFile := recordsFile + ".tmp"
-	if err := os.WriteFile(tmpFile, data, 0644); err != nil {
-		return fmt.Errorf("write temp file: %w", err)
+	for _, rec := range records {
+		line, err := json.Marshal(rec)
+		if err != nil {
+			tmpWriter.Close()
+			os.Remove(tmpFile)
+			return fmt.Errorf("marshal record: %w", err)
+		}
+		if _, err := tmpWriter.Write(append(line, '\n')); err != nil {
+			tmpWriter.Close()
+			os.Remove(tmpFile)
+			return fmt.Errorf("write record: %w", err)
+		}
 	}
+	tmpWriter.Close()
 
 	// Atomic rename
 	if err := os.Rename(tmpFile, recordsFile); err != nil {
-		os.Remove(tmpFile) // best effort cleanup
-		return fmt.Errorf("rename temp to records file: %w", err)
+		os.Remove(tmpFile)
+		return fmt.Errorf("rename temp to records.jsonl: %w", err)
 	}
 
 	return nil
