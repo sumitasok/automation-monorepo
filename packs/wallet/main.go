@@ -6,6 +6,8 @@
 //	sync                 read transactions.csv and create one Wallet record per transaction,
 //	                     processed day by day, deduped by MessageID+Amount, tagged with a label.
 //	detect-duplicates    find potential duplicate wallet records.
+//	dedup                identify, review, and remove duplicate transaction records from records.json.
+//	                     Sub-operations: scan, review, execute.
 //
 // Run `wallet sync --help` for flags. See RUNBOOK.md for setup.
 package main
@@ -36,6 +38,10 @@ func main() {
 		}
 	case "detect-duplicates":
 		if err := runDetectDuplicates(os.Args[2:]); err != nil {
+			log.Fatalf("error: %v", err)
+		}
+	case "dedup":
+		if err := runDedup(os.Args[2:]); err != nil {
 			log.Fatalf("error: %v", err)
 		}
 	case "-h", "--help", "help":

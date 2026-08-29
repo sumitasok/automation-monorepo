@@ -17,11 +17,11 @@
 
 **Purpose**: Prepare wallet pack and CLI structure for dedup feature
 
-- [ ] T001 Add dedup subcommand case to packs/wallet/main.go switch statement (line ~40)
-- [ ] T002 [P] Create packs/wallet/dedup.go with function stubs: detectDuplicates(), reviewDuplicates(), executeDuplicates()
-- [ ] T003 [P] Create packs/wallet/dedup_test.go with test file structure and helper functions
-- [ ] T004 Add dedup section to packs/wallet/config.sample.yaml with primaryKeys, optionalKeys, minConfidence fields
-- [ ] T005 Create packs/wallet/jobs/wallet-dedup/manifest.yaml declaring the dedup job and data declarations
+- [x] T001 Add dedup subcommand case to packs/wallet/main.go switch statement (line ~40)
+- [x] T002 [P] Create packs/wallet/dedup.go with function stubs: detectRecordDuplicates(), reviewDuplicates(), executeDuplicates()
+- [x] T003 [P] Create packs/wallet/dedup_test.go with test file structure and helper functions
+- [x] T004 Add dedup section to packs/wallet/config.sample.yaml with primaryKeys, optionalKeys, minConfidence fields
+- [x] T005 Create packs/wallet/jobs/wallet-dedup/manifest.yaml declaring the dedup job and data declarations
 
 ---
 

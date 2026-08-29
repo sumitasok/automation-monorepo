@@ -57,5 +57,28 @@ files:
 # packs/wallet/ itself stays read-only (ADR 0019 — previously committed
 # directly inside the pack; reverted, see ADR 0018 Amendment 2).
 #   data/wallet/state.json — the sync dedupe ledger, local (git-ignored).
+#   data/wallet/records.json — fetched Wallet records mirror (ADR 0020), local (git-ignored).
 data_files:
   - state.json
+  - records.json
+
+# dedup: configuration for wallet record deduplication (new feature).
+dedup:
+  # Primary keys that define a duplicate (all three must match).
+  # Format: field names from Record struct (amount.value, recordDate, counterParty).
+  # Do not edit this unless you understand the impact on duplicate detection.
+  primaryKeys:
+    - recordDate
+    - amount.value
+    - counterParty
+
+  # Optional keys for extended dedup matching. If set, records that match on
+  # primary keys but differ on these fields are marked as "uncertain duplicates".
+  # Leave empty for default behavior (primary keys only).
+  # Example: ["category.id", "labels"]
+  optionalKeys: []
+
+  # Confidence threshold for display (0.0 to 1.0).
+  # Duplicates with confidence >= this value are shown during review.
+  # Set lower to include more "uncertain" matches; higher to be more conservative.
+  minConfidence: 0.5
