@@ -10,23 +10,36 @@ Run pack operations via `./auto` with these commands:
 
 ### Wallet Pack
 
-**Sync transactions**:
-```bash
-./auto run wallet-sync              # Real sync (requires WALLET_API_TOKEN)
-./auto run wallet-sync -- --dry-run # Dry-run (no token, no API calls)
-```
-Reads `data/gmail/transactions.csv`, creates one Wallet record per transaction, deduped by `MessageID+Amount`, tagged with label `source:automation-monorepo`.
+**Complete workflow** (sync → fetch → dedup):
 
-Account mapping:
-1. **Explicit mapping**: Uses `config/wallet/accounts.json` first (highest priority)
-2. **Auto-resolution**: Syncs and caches all Wallet accounts at `data/wallet/accounts-cache.json` (updated if > 24h old)
-3. **Fallback**: Unmapped accounts with empty code are skipped (set `_default.accountId` in accounts.json to map them)
+1. **Sync transactions to Wallet API**:
+   ```bash
+   ./auto run wallet-sync              # Real sync (requires WALLET_API_TOKEN)
+   ./auto run wallet-sync -- --dry-run # Dry-run (no token, no API calls)
+   ```
+   Reads `data/gmail/transactions.csv`, creates records in Wallet, updates `state.json` (dedup ledger).
+   Auto-syncs accounts cache (updated if > 24h old) for account code resolution.
 
-**Manual account cache refresh** (rarely needed):
-```bash
-./auto run wallet-fetch-accounts
-```
-Immediately re-fetches and updates accounts cache.
+2. **Fetch records back from Wallet API**:
+   ```bash
+   ./auto run wallet-fetch
+   ```
+   Downloads all records from Wallet → saves to `data/wallet/records.jsonl` (6000+ records, 4.5MB).
+   Needed before running dedup.
+
+3. **Dedup records** (4-phase workflow):
+   ```bash
+   ./auto run wallet-dedup scan                              # Phase 1: detect duplicates
+   ./auto run wallet-dedup review --decisions-file decisions.jsonl  # Phase 2: collect decisions
+   ./auto run wallet-dedup execute --decisions-file decisions.jsonl # Phase 3: plan deletions
+   ./auto run wallet-dedup finalize --dedup-results dedup-results.jsonl  # Phase 4: finalize
+   ```
+   See `packs/wallet/RUNBOOK.md` for detailed workflow and flags.
+
+**Account mapping** (3-tier resolution during sync):
+1. Explicit: `config/wallet/accounts.json` (highest priority)
+2. Cached: Auto-synced accounts from API (by ID, name, last-4 digits)
+3. Skip: Unmapped codes with empty accountId
 
 **Dedup workflow** (4-phase):
 ```bash
