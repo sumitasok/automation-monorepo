@@ -205,6 +205,10 @@ func runDetectDuplicates(args []string) error {
 		}
 	}
 
+	fmt.Printf("Working directory: %s\n", filepath.Dir(resolvedStatePath))
+	fmt.Printf("Reading CSV: %s\n", resolvedCSVPath)
+	fmt.Printf("Reading state: %s\n\n", resolvedStatePath)
+
 	report, err := detectDuplicates(resolvedCSVPath, resolvedStatePath)
 	if err != nil {
 		return err

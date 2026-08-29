@@ -84,6 +84,10 @@ func runSync(args []string) error {
 		return err
 	}
 
+	fmt.Printf("Working directory: %s\n", filepath.Dir(resolvedStatePath))
+	fmt.Printf("Reading CSV: %s\n", resolvedCSVPath)
+	fmt.Printf("State file (dedup ledger): %s\n\n", resolvedStatePath)
+
 	opts := sync.Options{
 		CSVPath:   resolvedCSVPath,
 		StatePath: resolvedStatePath,
