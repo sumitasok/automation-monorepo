@@ -247,14 +247,19 @@ func getFieldValue(record wallet.Record, fieldPath string) (interface{}, bool) {
 	parts := strings.Split(fieldPath, ".")
 	var current interface{} = record
 
-	for i, part := range parts {
+	for _, part := range parts {
 		if current == nil {
 			return nil, false
 		}
 
-		// Try to access as a map (any is alias for interface{})
-		m, ok := current.(map[string]interface{})
-		if !ok {
+		// wallet.Record is a type alias for map[string]any, so we need to handle it specially
+		var m map[string]interface{}
+		switch v := current.(type) {
+		case wallet.Record:
+			m = map[string]interface{}(v)
+		case map[string]interface{}:
+			m = v
+		default:
 			return nil, false
 		}
 
