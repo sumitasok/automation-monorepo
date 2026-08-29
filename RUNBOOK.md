@@ -6,12 +6,12 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ## 2026-08-30 — Wallet category update workflow (Gmail → Wallet sync)
 
-**Prompt summary**: Create a staging workflow to sync categories from Gmail (categorized via AI) to Wallet records that still have "Unknown" categories.
+**Prompt summary**: Create a staging workflow to sync categories from Gmail (categorized via AI) to Wallet records that still have "Unknown" categories. Implemented as proper `./auto` pack job.
 
-**Files created**: 
-- `data/wallet/generate-updates.py` — Analyze Gmail vs Wallet, stage updates
-- `data/wallet/apply-updates.sh` — Apply staged updates to Wallet API (dry-run by default)
-- `data/wallet/updates.jsonl` — Staging file (no changes to records.jsonl)
+**Job created**: 
+- `packs/wallet/jobs/wallet-sync-categories/` — Analyze Gmail vs Wallet, stage updates
+  - `manifest.yaml` — Job definition (discoverable via `./auto list`)
+  - `sync-categories.py` — Main script respecting AUTO_DATA_DIR
 
 **Workflow**:
 ```bash
@@ -20,19 +20,20 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 ./auto run gmail-categorize --ai=deepseek
 
 # Step 2: Generate update proposals (staging only)
-python3 data/wallet/generate-updates.py
+./auto run wallet-sync-categories
 
-# Step 3a: Review proposed updates
-cat data/wallet/updates.jsonl | jq '.[] | "\(.wallet_current.merchant): \(.wallet_current.category_current) → \(.proposed_update.category.name)"'
+# Step 3a: Dry-run (default, shows what would change, no API calls)
+./auto run wallet-sync-categories
 
-# Step 3b: Dry-run (show what would change)
-./data/wallet/apply-updates.sh
+# Step 3b: Review proposed updates with details
+./auto run wallet-sync-categories -- --review
 
 # Step 3c: Apply updates to Wallet API (requires WALLET_API_TOKEN)
-./data/wallet/apply-updates.sh --apply
+export WALLET_API_TOKEN=<your-token>
+./auto run wallet-sync-categories -- --apply
 
 # Or apply only high-confidence matches (same-day date match):
-./data/wallet/apply-updates.sh --apply-high
+./auto run wallet-sync-categories -- --apply-high
 ```
 
 **Results**: 
@@ -40,22 +41,25 @@ cat data/wallet/updates.jsonl | jq '.[] | "\(.wallet_current.merchant): \(.walle
 - ✅ High confidence (same-day match): 19 updates
 - ✅ Medium confidence (±1 day match): 10 updates
 - ✅ Categories to update: Food & Drinks (13), Life & Entertainment (5), System categories (7), Housing (2), Transportation (1), Shopping (1)
+- ✅ Staging file: `$AUTO_DATA_DIR/wallet/updates.jsonl`
 
 **Key Features**:
-- **Staging only**: Updates file generated but records.jsonl unchanged until explicitly applied
-- **Dry-run mode**: `./data/wallet/apply-updates.sh` shows what would change (no API calls)
+- **Proper pack job**: Discovered via `./auto list` and `./auto run wallet-sync-categories`
+- **Respects config.yaml**: Uses AUTO_DATA_DIR from workspace config
+- **Staging only**: Updates.jsonl generated but records.jsonl unchanged until explicitly applied
+- **Dry-run mode**: Default behavior shows what would change (no API calls)
 - **Confidence levels**: Matches by merchant + date (same day = high, ±1 day = medium)
 - **Safe**: Only updates "Unknown" category records, never overwrites existing categories
-- **Reversible**: Each update is a simple PATCH with category name
+- **Reversible**: Updates are simple PATCH requests, easy to revert
 
 **Caveats**:
 - Wallet API doesn't return MessageID, so matching is by merchant name + date, not direct ID linkage
 - 155 out of 178 "Unknown" wallet records have no Gmail email match (likely older or from other sources)
-- Updates require `WALLET_API_TOKEN` environment variable set
+- API updates require `WALLET_API_TOKEN` environment variable set
 
 **Next Steps**:
-1. Review any proposed updates: `python3 data/wallet/generate-updates.py --review`
-2. If Wallet API token available: `./data/wallet/apply-updates.sh --apply`
+1. Review proposed updates: `./auto run wallet-sync-categories -- --review`
+2. If Wallet API token available: `./auto run wallet-sync-categories -- --apply`
 3. Re-run after more Gmail categorization to find additional matches
 
 ---
