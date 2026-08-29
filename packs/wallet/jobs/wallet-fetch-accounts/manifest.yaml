@@ -1,0 +1,34 @@
+id: wallet-fetch-accounts
+name: Fetch and cache Wallet accounts
+description: >
+  Fetch all accounts from the BudgetBakers Wallet API and cache them locally.
+  The cache is indexed by account ID, name, and last-4 digits for fast lookup
+  when resolving unmapped account codes during sync operations.
+category: wallet
+owner: sumit
+language: go
+exec: "go run . fetch-accounts"
+workdir: "."
+tags: [wallet, finance, accounts]
+visibility: private
+
+runs_on:
+  os: [macos, linux]
+
+schedule:
+  cron: "15 7 * * *"             # every morning 07:15, before wallet-sync (07:30)
+  timezone: Asia/Kolkata
+  enabled: false                 # flip on once token is in place
+
+runtime:
+  timeout_seconds: 30
+  env:
+    - WALLET_API_TOKEN
+    - WALLET_BASE_URL
+
+data:
+  reads:  []
+  writes: [accounts-cache.json]
+
+health:
+  expect_run_every: 1d
