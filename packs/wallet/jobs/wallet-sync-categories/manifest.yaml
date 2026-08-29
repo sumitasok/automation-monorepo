@@ -1,0 +1,65 @@
+id: wallet-sync-categories
+name: Wallet sync categories from Gmail
+description: >
+  Analyze Gmail categorized transactions and identify wallet records
+  with "Unknown" categories that can be updated. Stages proposed updates
+  to wallet/updates.jsonl without modifying records.jsonl.
+
+  Matches by merchant name + date (±1 day). Provides confidence levels
+  (high = same day, medium = ±1 day) and dry-run support before applying.
+
+  When run with --apply flag, pushes updates to Wallet API via PATCH requests.
+  Requires WALLET_API_TOKEN environment variable for API updates.
+
+category: wallet
+owner: sumit
+language: python3
+exec: "python3 jobs/wallet-sync-categories/sync-categories.py"
+workdir: "."  # run in pack root (packs/wallet)
+
+tags: [wallet, categorization, gmail-sync, staging]
+visibility: private
+
+runs_on:
+  os: [macos, linux]
+  machines: [any]
+
+schedule:
+  cron: ""                  # manual only; run after gmail-categorize completes
+  timezone: Asia/Kolkata
+  enabled: false
+
+runtime:
+  timeout_seconds: 300
+  env:
+    - WALLET_API_TOKEN     # optional; required only for --apply flag
+
+data:
+  reads:
+    - ../../../data/gmail/transactions.csv
+    - ../../../data/wallet/records.jsonl
+  writes:
+    - ../../../data/wallet/updates.jsonl
+    - ../../../data/wallet/updates-applied.log  # if --apply used
+
+health:
+  expect_run_every: ""
+
+# Command-line options for this job
+options:
+  - name: apply
+    type: boolean
+    default: false
+    description: "Apply staged updates to Wallet API (requires WALLET_API_TOKEN)"
+  - name: apply-high
+    type: boolean
+    default: false
+    description: "Apply only high-confidence updates (same-day matches)"
+  - name: review
+    type: boolean
+    default: false
+    description: "Show detailed review of all proposed updates"
+  - name: dry-run
+    type: boolean
+    default: true
+    description: "Show what would change without making updates (default)"
