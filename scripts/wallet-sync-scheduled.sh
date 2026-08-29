@@ -4,8 +4,7 @@
 
 set -e
 
-# Source shell environment
-source ~/.zshrc
+# (zshrc is sourced by launchd)
 
 # Set working directory
 cd /Users/sumitasok/Claude/Projects/automation-monorepo
