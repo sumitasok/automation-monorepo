@@ -149,11 +149,33 @@ func resolveDataPath(autoPath, fallback string) string {
 	return fallback
 }
 
+func runDedup(args []string) error {
+	if len(args) < 1 {
+		fmt.Fprintf(os.Stderr, "dedup requires a subcommand: scan, review, or execute\n")
+		os.Exit(2)
+	}
+
+	subcommand := args[0]
+	subargs := args[1:]
+
+	switch subcommand {
+	case "scan":
+		return runDedupScan(subargs)
+	case "review":
+		return runDedupReview(subargs)
+	case "execute":
+		return fmt.Errorf("execute not yet implemented (Phase 5)")
+	default:
+		return fmt.Errorf("unknown dedup subcommand: %s (use scan, review, or execute)", subcommand)
+	}
+}
+
 func usage() {
 	fmt.Fprint(os.Stderr, `wallet — sync gmail-extracted transactions into the Wallet app
 
 Usage:
   wallet sync [flags]
+  wallet dedup [scan|review|execute] [flags]
 
 Flags (sync):
   --csv PATH        transactions.csv to read (default ../gmail/transactions.csv)
@@ -163,6 +185,18 @@ Flags (sync):
   --since YYYY-MM-DD  only records on/after this date
   --until YYYY-MM-DD  only records on/before this date
   --limit N         cap records pushed (0 = no cap)
+
+Flags (dedup scan):
+  --records-file    path to records.json (default $AUTO_DATA_DIR/wallet/records.json)
+  --dedup-config    path to dedup config in pack.yaml
+  --format          text or json (default text)
+  --min-confidence  minimum confidence score 0-1 (default 0.5)
+
+Flags (dedup review):
+  --records-file    path to records.json
+  --dedup-config    path to dedup config
+  --decisions-file  path to save decisions (default .dedup-decisions-{timestamp}.json)
+  --dry-run         show decisions without saving
 
 Setup and scheduling: see RUNBOOK.md
 `)

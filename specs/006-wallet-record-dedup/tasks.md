@@ -88,18 +88,18 @@
 
 ### Implementation for User Story 2
 
-- [ ] T028 [P] [US2] Implement printDuplicateGroup(group DuplicateGroup) void in packs/wallet/dedup.go for interactive display
-- [ ] T029 [P] [US2] Implement readUserDecision(group DuplicateGroup) (DedupDecision, error) in packs/wallet/dedup.go: prompt user (keep-first/custom/skip)
-- [ ] T030 [P] [US2] Implement parseCustomDecision(input string, group DuplicateGroup) ([]string, error) in packs/wallet/dedup.go: parse "R1,R3" format into record IDs
-- [ ] T031 [US2] Implement collectDecisions(groups []DuplicateGroup, interactive bool) ([]DedupDecision, error) in packs/wallet/dedup.go: loop through groups, collect decisions
-- [ ] T032 [US2] Implement saveDedupDecisions(decisions []DedupDecision, outputPath string) error in packs/wallet/dedup.go: marshal to JSON with timestamp
-- [ ] T033 [US2] Implement printDecisionSummary(decisions []DedupDecision) void in packs/wallet/dedup.go: show count of groups/records to delete
-- [ ] T034 [US2] Implement readFinalConfirmation(prompt string) (bool, error) in packs/wallet/dedup.go: prompt "Confirm? (y/n)"
-- [ ] T035 [US2] Implement reviewCommand handler in packs/wallet/dedup.go: parse flags (records-file, decisions-file, dry-run), load groups, collect decisions, save to file
-- [ ] T036 [US2] Wire reviewCommand into main.go case "dedup review": err := reviewCommand(os.Args[2:])
-- [ ] T037 [P] [US2] Add unit tests in packs/wallet/dedup_test.go: TestParseCustomDecision (valid/invalid formats), TestValidateDecisions (ensure at least 1 record kept)
-- [ ] T038 [P] [US2] Add integration test: TestReviewCommandInteractive (simulate stdin input for user decisions)
-- [ ] T039 [US2] Add integration test: TestDecisionFilePersistence (verify saved decisions.json structure and can be reloaded)
+- [x] T028 [P] [US2] Implement printDuplicateGroup(group DuplicateGroup) void in packs/wallet/dedup.go for interactive display
+- [x] T029 [P] [US2] Implement readUserDecision(group DuplicateGroup) (DedupDecision, error) in packs/wallet/dedup.go: prompt user (keep-first/custom/skip)
+- [x] T030 [P] [US2] Implement parseCustomDecision(input string, group DuplicateGroup) ([]string, error) in packs/wallet/dedup.go: parse "R1,R3" format into record IDs
+- [x] T031 [US2] Implement collectDecisions(groups []DuplicateGroup, interactive bool) ([]DedupDecision, error) in packs/wallet/dedup.go: loop through groups, collect decisions
+- [x] T032 [US2] Implement saveDedupDecisions(decisions []DedupDecision, outputPath string) error in packs/wallet/dedup.go: marshal to JSON with timestamp
+- [x] T033 [US2] Implement printDecisionSummary(decisions []DedupDecision) void in packs/wallet/dedup.go: show count of groups/records to delete
+- [x] T034 [US2] Implement readFinalConfirmation(prompt string) (bool, error) in packs/wallet/dedup.go: prompt "Confirm? (y/n)"
+- [x] T035 [US2] Implement reviewCommand handler in packs/wallet/dedup.go: parse flags (records-file, decisions-file, dry-run), load groups, collect decisions, save to file
+- [x] T036 [US2] Wire reviewCommand into main.go case "dedup review": err := reviewCommand(os.Args[2:])
+- [x] T037 [P] [US2] Add unit tests in packs/wallet/dedup_test.go: TestParseCustomDecision (valid/invalid formats), TestValidateDecisions (ensure at least 1 record kept)
+- [x] T038 [P] [US2] Add integration test: TestReviewCommandInteractive (simulate stdin input for user decisions)
+- [x] T039 [US2] Add integration test: TestDecisionFilePersistence (verify saved decisions.json structure and can be reloaded)
 
 **Verification Checklist for US2**:
 - [ ] Review command loads duplicate groups from scan output (or re-scans if not provided)

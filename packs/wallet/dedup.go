@@ -479,15 +479,259 @@ func runDedupScan(args []string) error {
 	return nil
 }
 
+// printDuplicateGroup displays a duplicate group to the user for review.
+func printDuplicateGroup(index int, group DuplicateGroup) {
+	fmt.Printf("\nGroup %d of duplicate records: %s\n", index, group.DuplicateKey)
+	fmt.Printf("Match Type: %s (confidence: %.0f%%)\n\n", group.MatchType, group.Confidence*100)
+
+	for i, rec := range group.Records {
+		marker := "DUPLICATE"
+		if rec.IsOriginal {
+			marker = "ORIGINAL"
+		}
+		fmt.Printf("  Record %d [%s] %s\n", i+1, marker, rec.CreatedAt)
+		fmt.Printf("    ID: %s\n", rec.ID)
+		fmt.Printf("    Amount: %.2f\n", rec.Amount)
+		fmt.Printf("    Counterparty: %s\n", rec.CounterParty)
+		if rec.Category != "" {
+			fmt.Printf("    Category: %s\n", rec.Category)
+		}
+		fmt.Println()
+	}
+}
+
+// readUserDecision prompts user for action on a duplicate group.
+func readUserDecision(groupIndex int, group DuplicateGroup) (string, error) {
+	for {
+		fmt.Printf("Action for Group %d? (keep-first/custom/skip) [keep-first]: ", groupIndex)
+		var input string
+		fmt.Scanln(&input)
+		if input == "" {
+			input = "keep-first"
+		}
+
+		switch input {
+		case "keep-first", "custom", "skip":
+			return input, nil
+		default:
+			fmt.Printf("Invalid action: %q. Use keep-first, custom, or skip.\n", input)
+		}
+	}
+}
+
+// parseCustomDecision parses user's custom keep/delete selection.
+func parseCustomDecision(group DuplicateGroup) ([]string, []string, error) {
+	fmt.Printf("Enter record numbers to KEEP (comma-separated, e.g., 1,3): ")
+	var input string
+	fmt.Scanln(&input)
+
+	if input == "" {
+		return nil, nil, fmt.Errorf("must keep at least one record")
+	}
+
+	parts := strings.Split(input, ",")
+	var keepIndices []int
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		idx, err := strconv.Atoi(p)
+		if err != nil || idx < 1 || idx > len(group.Records) {
+			return nil, nil, fmt.Errorf("invalid record number: %q", p)
+		}
+		keepIndices = append(keepIndices, idx-1)
+	}
+
+	var keepIDs, deleteIDs []string
+	for i, rec := range group.Records {
+		found := false
+		for _, keepIdx := range keepIndices {
+			if i == keepIdx {
+				found = true
+				break
+			}
+		}
+		if found {
+			keepIDs = append(keepIDs, rec.ID)
+		} else {
+			deleteIDs = append(deleteIDs, rec.ID)
+		}
+	}
+
+	if len(keepIDs) == 0 {
+		return nil, nil, fmt.Errorf("must keep at least one record")
+	}
+
+	return keepIDs, deleteIDs, nil
+}
+
+// collectDecisions walks through duplicate groups and collects user decisions.
+func collectDecisions(groups []DuplicateGroup) ([]DedupDecision, error) {
+	var decisions []DedupDecision
+
+	for i, group := range groups {
+		printDuplicateGroup(i+1, group)
+
+		action, err := readUserDecision(i+1, group)
+		if err != nil {
+			return nil, err
+		}
+
+		if action == "skip" {
+			fmt.Printf("Skipping Group %d\n", i+1)
+			continue
+		}
+
+		var decision DedupDecision
+		decision.DuplicateKey = group.DuplicateKey
+
+		if action == "keep-first" {
+			decision.Action = "keep_first_delete_rest"
+			decision.KeepRecordIDs = []string{group.Records[0].ID}
+			for _, rec := range group.Records[1:] {
+				decision.DeleteRecordIDs = append(decision.DeleteRecordIDs, rec.ID)
+			}
+			decision.Reason = "User selected keep-first (keep oldest)"
+		} else if action == "custom" {
+			decision.Action = "custom"
+			keepIDs, deleteIDs, err := parseCustomDecision(group)
+			if err != nil {
+				fmt.Printf("Error: %v. Skipping group.\n", err)
+				continue
+			}
+			decision.KeepRecordIDs = keepIDs
+			decision.DeleteRecordIDs = deleteIDs
+			decision.Reason = "User selected custom keep/delete"
+		}
+
+		decisions = append(decisions, decision)
+		fmt.Printf("✓ Group %d: keep %d, delete %d\n\n", i+1, len(decision.KeepRecordIDs), len(decision.DeleteRecordIDs))
+	}
+
+	return decisions, nil
+}
+
+// saveDedupDecisions writes decisions to a JSON file.
+func saveDedupDecisions(decisions []DedupDecision, outputPath string) error {
+	output := map[string]interface{}{
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+		"decisions": decisions,
+		"summary": map[string]int{
+			"totalGroupsReviewed": len(decisions),
+			"recordsToDelete":     countDeleteRecords(decisions),
+		},
+	}
+
+	data, err := json.MarshalIndent(output, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal decisions: %w", err)
+	}
+
+	return os.WriteFile(outputPath, data, 0644)
+}
+
+// countDeleteRecords returns total records marked for deletion.
+func countDeleteRecords(decisions []DedupDecision) int {
+	count := 0
+	for _, d := range decisions {
+		count += len(d.DeleteRecordIDs)
+	}
+	return count
+}
+
+// printDecisionSummary shows a summary of all decisions before execution.
+func printDecisionSummary(decisions []DedupDecision) {
+	totalDelete := countDeleteRecords(decisions)
+	fmt.Printf("\n=== Dedup Decision Summary ===\n")
+	fmt.Printf("Groups to process: %d\n", len(decisions))
+	fmt.Printf("Total records to delete: %d\n", totalDelete)
+	fmt.Printf("\nReview groups:\n")
+	for i, d := range decisions {
+		fmt.Printf("  %d. %s: keep %d, delete %d\n", i+1, d.DuplicateKey, len(d.KeepRecordIDs), len(d.DeleteRecordIDs))
+	}
+}
+
+// readFinalConfirmation prompts user for final confirmation before executing dedup.
+func readFinalConfirmation() (bool, error) {
+	fmt.Printf("\n⚠️  WARNING: This will DELETE %d records from records.json.\n", 0) // count passed separately
+	fmt.Printf("A backup will be created before any modification.\n")
+	fmt.Printf("\nProceed with dedup? (yes/no) [no]: ")
+	var input string
+	fmt.Scanln(&input)
+
+	if input == "yes" {
+		return true, nil
+	}
+	return false, nil
+}
+
+// runDedupReview implements the `wallet dedup review` subcommand.
+func runDedupReview(args []string) error {
+	fs := flag.NewFlagSet("dedup review", flag.ExitOnError)
+	recordsFile := fs.String("records-file", "", "path to records.json (default: $AUTO_DATA_DIR/wallet/records.json)")
+	dedupConfig := fs.String("dedup-config", "", "path to dedup config")
+	decisionsFile := fs.String("decisions-file", "", "path to save decisions (default: .dedup-decisions-{timestamp}.json)")
+	dryRun := fs.Bool("dry-run", false, "show decisions without saving")
+	fs.Parse(args)
+
+	// Resolve paths
+	if *recordsFile == "" {
+		*recordsFile = resolveDataPath("wallet/records.json", "records.json")
+	}
+
+	// Detect duplicates first
+	groups, err := detectRecordDuplicates(*recordsFile, *dedupConfig, 0.5)
+	if err != nil {
+		return err
+	}
+
+	if len(groups) == 0 {
+		fmt.Println("No duplicates found.")
+		return nil
+	}
+
+	fmt.Printf("Found %d duplicate groups. Review each group to decide which records to keep.\n\n", len(groups))
+
+	// Collect user decisions
+	decisions, err := collectDecisions(groups)
+	if err != nil {
+		return err
+	}
+
+	if len(decisions) == 0 {
+		fmt.Println("No decisions made (all groups skipped).")
+		return nil
+	}
+
+	// Show summary
+	printDecisionSummary(decisions)
+
+	if *dryRun {
+		fmt.Println("\n(DRY RUN - no decisions saved)")
+		return nil
+	}
+
+	// Save decisions to file
+	if *decisionsFile == "" {
+		*decisionsFile = ".dedup-decisions-" + time.Now().Format("20060102-150405") + ".json"
+	}
+
+	if err := saveDedupDecisions(decisions, *decisionsFile); err != nil {
+		return err
+	}
+
+	fmt.Printf("\n✓ Decisions saved to: %s\n", *decisionsFile)
+	fmt.Printf("Next: run 'wallet dedup execute --decisions-file %s' to apply changes\n", *decisionsFile)
+
+	return nil
+}
+
 // reviewDuplicates collects user decisions on duplicate groups (from working copy).
 // No modifications to records.json. Decisions are saved separately.
-// NOTE: Implemented in Phase 4 (review operation)
 func reviewDuplicates(groups []DuplicateGroup, interactive bool) ([]DedupDecision, error) {
 	// 1. Present duplicate groups from working copy to user
 	// 2. Collect which records to keep/delete
 	// 3. Save decisions to decisions.json
 	// 4. Original records.json untouched
-	return nil, nil
+	return collectDecisions(groups)
 }
 
 // executeDuplicates applies user decisions to records.json atomically.
@@ -503,47 +747,6 @@ func executeDuplicates(recordsFile string, decisions []DedupDecision, dryRun boo
 	// 6. Append audit trail to state.json
 	// 7. On failure: both records.json and backup exist for recovery
 	return nil
-}
-
-func runDedup(args []string) error {
-	if len(args) == 0 {
-		fmt.Fprintf(os.Stderr, `wallet dedup — identify and remove duplicate transaction records
-
-Usage:
-  wallet dedup scan [flags]      identify duplicates (read-only)
-  wallet dedup review [flags]    collect user decisions on which to delete
-  wallet dedup execute [flags]   apply decisions atomically with backup
-
-Run 'wallet dedup scan --help' for scan flags.
-`)
-		os.Exit(2)
-	}
-
-	switch args[0] {
-	case "scan":
-		return runDedupScan(args[1:])
-	case "review":
-		return runDedupReview(args[1:])
-	case "execute":
-		return runDedupExecute(args[1:])
-	case "-h", "--help", "help":
-		fmt.Fprintf(os.Stderr, `wallet dedup — identify and remove duplicate transaction records
-
-Usage:
-  wallet dedup scan [flags]      identify duplicates (read-only)
-  wallet dedup review [flags]    collect user decisions on which to delete
-  wallet dedup execute [flags]   apply decisions atomically with backup
-`)
-	default:
-		fmt.Fprintf(os.Stderr, "unknown dedup command %q\n", args[0])
-		os.Exit(2)
-	}
-	return nil
-}
-
-func runDedupReview(args []string) error {
-	// TODO: Implement review subcommand (Phase 4)
-	return fmt.Errorf("review command not yet implemented")
 }
 
 func runDedupExecute(args []string) error {
