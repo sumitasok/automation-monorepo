@@ -901,60 +901,32 @@ func executeDedup(recordsFile, decisionFile, stateFile string, dryRun bool) erro
 		return nil
 	}
 
-	// Apply decisions to create filtered set
-	filteredRecords, err := applyDecisions(originalRecords, decisions)
-	if err != nil {
-		return fmt.Errorf("apply decisions: %w", err)
+	// Build list of deleted record IDs from decisions
+	var deletedIDs []string
+	for _, decision := range decisions {
+		deletedIDs = append(deletedIDs, decision.DeleteRecordIDs...)
 	}
 
-	// Validate new records are valid JSON
-	if err := validateUpdateJSON(originalRecords, filteredRecords); err != nil {
-		return fmt.Errorf("validate filtered records: %w", err)
+	// Save dedup-results.json (for Wallet API sync phase, NOT for direct records.json update)
+	resultsFile := strings.TrimSuffix(recordsFile, ".json") + "-dedup-results.json"
+	results := map[string]interface{}{
+		"timestamp":        time.Now().UTC().Format(time.RFC3339),
+		"recordsToDelete":  deletedIDs,
+		"totalToDelete":    countToDelete,
+		"totalToKeep":      len(originalRecords) - countToDelete,
+		"decisions":        decisions,
+		"instructions":     "1) Review: cat " + resultsFile + "\n2) Delete from Wallet API: wallet sync --dedup-results\n3) After Wallet confirms, run: dedup finalize --dedup-results",
 	}
 
-	// Create backup BEFORE any modification
-	backupPath, err := createBackup(recordsFile)
-	if err != nil {
-		log.Printf("[ERROR] create backup: %v", err)
-		return fmt.Errorf("create backup: %w", err)
-	}
-	log.Printf("[INFO] Backup created: %s", backupPath)
-
-	// Write atomically
-	if err := writeRecordsJSON(recordsFile, filteredRecords); err != nil {
-		log.Printf("[ERROR] write records: %v", err)
-		fmt.Printf("ERROR: Write failed: %v\n", err)
-		fmt.Printf("Attempting rollback from backup...\n")
-		if rbErr := rollbackOnFailure(recordsFile, backupPath); rbErr != nil {
-			log.Printf("[ERROR] rollback failed: %v", rbErr)
-			fmt.Printf("Rollback FAILED: %v\n", rbErr)
-			fmt.Printf("Manual recovery required. Backup at: %s\n", backupPath)
-			return fmt.Errorf("write records failed (rollback failed): %w", err)
-		}
-		fmt.Println("Rollback successful. Original records restored.")
-		log.Printf("[INFO] Rollback successful")
-		return fmt.Errorf("write records failed (rolled back): %w", err)
+	resultsData, _ := json.MarshalIndent(results, "", "  ")
+	if err := os.WriteFile(resultsFile, resultsData, 0644); err != nil {
+		return fmt.Errorf("save dedup results: %w", err)
 	}
 
-	fmt.Printf("DEDUPLICATED: %d deleted | %d remaining\n", countToDelete, len(filteredRecords))
-	log.Printf("[SUCCESS] Records updated: deleted=%d, remaining=%d", countToDelete, len(filteredRecords))
-
-	// Append audit trail
-	if stateFile != "" {
-		// Build list of deleted record IDs from decisions
-		var deletedIDs []string
-		for _, decision := range decisions {
-			deletedIDs = append(deletedIDs, decision.DeleteRecordIDs...)
-		}
-
-		if err := appendAuditTrail(stateFile, "dedup_executed", deletedIDs, len(originalRecords), len(filteredRecords), backupPath); err != nil {
-			log.Printf("[WARN] audit trail: %v", err)
-		} else {
-			log.Printf("[INFO] Audit trail appended: %s", stateFile)
-		}
-	}
-
-	log.Printf("[INFO] Dedup execution completed successfully")
+	fmt.Printf("DEDUPLICATED: %d to delete | %d to keep\n", countToDelete, len(originalRecords)-countToDelete)
+	fmt.Printf("\nResults saved: %s\n", resultsFile)
+	fmt.Printf("\nNext: Delete from Wallet API, then run 'dedup finalize'\n")
+	log.Printf("[SUCCESS] Dedup results saved: delete=%d, keep=%d, file=%s", countToDelete, len(originalRecords)-countToDelete, resultsFile)
 	return nil
 }
 
@@ -1018,6 +990,115 @@ func validateDiskSpace(recordsFile string, requiredBytes int64) error {
 		return fmt.Errorf("disk space: cannot write to %s (may be full or permission denied)", dir)
 	}
 	os.Remove(testFile) // cleanup test file
+
+	return nil
+}
+
+// runDedupFinalize updates records.json after Wallet API confirms deletions.
+func runDedupFinalize(args []string) error {
+	fs := flag.NewFlagSet("dedup finalize", flag.ExitOnError)
+	recordsFile := fs.String("records-file", "", "path to records.json")
+	resultsFile := fs.String("dedup-results", "", "path to dedup-results.json (from execute command)")
+	stateFile := fs.String("state-file", "", "path to state.json for audit trail (optional)")
+	fs.Parse(args)
+
+	// Resolve paths
+	if *recordsFile == "" {
+		*recordsFile = resolveDataPath("wallet/records.json", "records.json")
+	}
+	if *resultsFile == "" {
+		*resultsFile = strings.TrimSuffix(*recordsFile, ".json") + "-dedup-results.json"
+	}
+	if *stateFile == "" {
+		*stateFile = resolveDataPath("wallet/state.json", "state.json")
+	}
+
+	// Load original records
+	snap, err := loadRecords(*recordsFile)
+	if err != nil {
+		return fmt.Errorf("load records: %w", err)
+	}
+	originalRecords := snap.Records
+	log.Printf("[INFO] Loaded %d records from %s", len(originalRecords), *recordsFile)
+
+	// Load dedup results
+	resultsData, err := os.ReadFile(*resultsFile)
+	if err != nil {
+		return fmt.Errorf("load dedup results: %w", err)
+	}
+	var results map[string]interface{}
+	if err := json.Unmarshal(resultsData, &results); err != nil {
+		return fmt.Errorf("parse dedup results: %w", err)
+	}
+	log.Printf("[INFO] Loaded dedup results from %s", *resultsFile)
+
+	// Confirm Wallet API deletions are complete
+	fmt.Printf("Confirm: Have you deleted these records from Wallet API? (yes/no) [no]: ")
+	var input string
+	fmt.Scanln(&input)
+	if input != "yes" {
+		fmt.Println("Finalization cancelled. Records.json not updated.")
+		return nil
+	}
+
+	// Extract deletion data
+	deleteIface := results["recordsToDelete"]
+	var recordsToDelete []string
+	if delList, ok := deleteIface.([]interface{}); ok {
+		for _, id := range delList {
+			if idStr, ok := id.(string); ok {
+				recordsToDelete = append(recordsToDelete, idStr)
+			}
+		}
+	}
+
+	// Apply decisions to create filtered set
+	decisions := []DedupDecision{}
+	if decisionsIface, ok := results["decisions"]; ok {
+		decData, _ := json.Marshal(decisionsIface)
+		json.Unmarshal(decData, &decisions)
+	}
+
+	filteredRecords, err := applyDecisions(originalRecords, decisions)
+	if err != nil {
+		return fmt.Errorf("apply decisions: %w", err)
+	}
+
+	// Validate new records
+	if err := validateUpdateJSON(originalRecords, filteredRecords); err != nil {
+		return fmt.Errorf("validate filtered records: %w", err)
+	}
+
+	// Create backup BEFORE writing
+	backupPath, err := createBackup(*recordsFile)
+	if err != nil {
+		return fmt.Errorf("create backup: %w", err)
+	}
+	log.Printf("[INFO] Backup created: %s", backupPath)
+
+	// Write records atomically
+	if err := writeRecordsJSON(*recordsFile, filteredRecords); err != nil {
+		log.Printf("[ERROR] write records: %v", err)
+		fmt.Printf("ERROR: Write failed. Attempting rollback...\n")
+		if rbErr := rollbackOnFailure(*recordsFile, backupPath); rbErr != nil {
+			return fmt.Errorf("write failed and rollback failed: %w", err)
+		}
+		return fmt.Errorf("write failed (rolled back): %w", err)
+	}
+
+	// Append audit trail
+	if *stateFile != "" {
+		if err := appendAuditTrail(*stateFile, "dedup_finalized", recordsToDelete, len(originalRecords), len(filteredRecords), backupPath); err != nil {
+			log.Printf("[WARN] audit trail: %v", err)
+		}
+	}
+
+	// Clean up dedup results file
+	os.Remove(*resultsFile)
+
+	fmt.Printf("FINALIZED: %d deleted | %d remaining\n", len(recordsToDelete), len(filteredRecords))
+	fmt.Printf("Records.json updated. Backup: %s\n", backupPath)
+	log.Printf("[SUCCESS] Finalization complete: deleted=%d, remaining=%d", len(recordsToDelete), len(filteredRecords))
 
 	return nil
 }

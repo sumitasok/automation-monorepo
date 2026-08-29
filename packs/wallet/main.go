@@ -165,8 +165,10 @@ func runDedup(args []string) error {
 		return runDedupReview(subargs)
 	case "execute":
 		return runDedupExecute(subargs)
+	case "finalize":
+		return runDedupFinalize(subargs)
 	default:
-		return fmt.Errorf("unknown dedup subcommand: %s (use scan, review, or execute)", subcommand)
+		return fmt.Errorf("unknown dedup subcommand: %s (use scan, review, execute, or finalize)", subcommand)
 	}
 }
 
