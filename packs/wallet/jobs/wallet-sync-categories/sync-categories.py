@@ -389,88 +389,87 @@ def main():
                 logger.error(f"No mappable updates - cannot proceed")
                 sys.exit(1)
 
-            logger.info(f"Sending batch update: {len(updates_to_apply)} records")
+            logger.info(f"Sending batch updates: {len(batch_payload)} records (max 10 per request)")
             logger.debug(f"API URL: https://rest.budgetbakers.com/wallet/v1/api/records")
-            logger.debug(f"Payload: {len(batch_payload)} items")
 
-            try:
-                api_url = "https://rest.budgetbakers.com/wallet/v1/api/records"
-                response = requests.patch(
-                    api_url,
-                    headers={
-                        "Authorization": f"Bearer {token}",
-                        "Content-Type": "application/json",
-                    },
-                    json=batch_payload,
-                    timeout=30,
-                )
-                logger.debug(f"Response status: {response.status_code}")
+            applied = 0
+            failed = 0
+            batch_size = 10
 
-                applied = 0
-                failed = 0
+            # Send updates in batches of max 10
+            for batch_idx in range(0, len(batch_payload), batch_size):
+                batch_chunk = batch_payload[batch_idx:batch_idx + batch_size]
+                chunk_num = (batch_idx // batch_size) + 1
+                total_chunks = (len(batch_payload) + batch_size - 1) // batch_size
 
-                if response.status_code in [200, 207]:
-                    # Parse batch response
-                    try:
-                        resp_data = response.json()
-                        results = resp_data.get('results', [])
+                logger.info(f"Batch {chunk_num}/{total_chunks}: Sending {len(batch_chunk)} records")
+                logger.debug(f"  Records {batch_idx + 1}-{min(batch_idx + batch_size, len(batch_payload))}")
 
-                        logger.info(f"Batch response: {len(results)} items")
+                try:
+                    api_url = "https://rest.budgetbakers.com/wallet/v1/api/records"
+                    response = requests.patch(
+                        api_url,
+                        headers={
+                            "Authorization": f"Bearer {token}",
+                            "Content-Type": "application/json",
+                        },
+                        json=batch_chunk,
+                        timeout=30,
+                    )
+                    logger.debug(f"  Response status: {response.status_code}")
 
-                        for result_idx, result in enumerate(results, 1):
-                            record_id = result.get('id', '?')
-                            success = result.get('success', False)
-                            error = result.get('error', '')
+                    if response.status_code in [200, 207]:
+                        # Parse batch response
+                        try:
+                            resp_data = response.json()
+                            results = resp_data.get('results', [])
 
-                            # Find the original update for logging
-                            orig_update = next((u for u in updates_to_apply if u['id'] == record_id), None)
-                            merchant = orig_update['wallet_current']['merchant'] if orig_update else '?'
-                            category = orig_update['proposed_update']['category']['name'] if orig_update else '?'
+                            for result in results:
+                                record_id = result.get('id', '?')
+                                success = result.get('success', False)
+                                error = result.get('error', '')
 
-                            if success:
-                                logger.info(f"  [{result_idx}/{len(results)}] ✅ {merchant} → {category}")
-                                applied += 1
-                            else:
-                                logger.error(f"  [{result_idx}/{len(results)}] ❌ {merchant}: {error}")
-                                failed += 1
-                    except json.JSONDecodeError as e:
-                        logger.error(f"Failed to parse batch response: {e}")
-                        logger.debug(f"Response body: {response.text[:500]}")
-                        failed = len(updates_to_apply)
-                else:
-                    logger.error(f"Batch request failed: HTTP {response.status_code}")
-                    logger.debug(f"Response: {response.text[:500]}")
-                    failed = len(updates_to_apply)
+                                # Find the original update for logging
+                                orig_update = next((u for u in updates_to_apply if u['id'] == record_id), None)
+                                merchant = orig_update['wallet_current']['merchant'] if orig_update else '?'
+                                category = orig_update['proposed_update']['category']['name'] if orig_update else '?'
 
-                logger.info(f"\n{'='*80}")
-                logger.info(f"API RESULTS")
-                logger.info(f"{'='*80}")
-                logger.info(f"Applied: {applied}")
-                logger.info(f"Failed: {failed}")
-                if apply_high:
-                    logger.info(f"Skipped (medium confidence): {len(updates) - len(updates_to_apply)}")
+                                if success:
+                                    logger.info(f"    ✅ {merchant} → {category}")
+                                    applied += 1
+                                else:
+                                    logger.error(f"    ❌ {merchant}: {error}")
+                                    failed += 1
+                        except json.JSONDecodeError as e:
+                            logger.error(f"  Failed to parse batch response: {e}")
+                            logger.debug(f"  Response body: {response.text[:500]}")
+                            failed += len(batch_chunk)
+                    else:
+                        logger.error(f"  Batch request failed: HTTP {response.status_code}")
+                        try:
+                            error_data = response.json()
+                            logger.debug(f"  Error: {error_data.get('message', error_data)}")
+                        except:
+                            logger.debug(f"  Response: {response.text[:500]}")
+                        failed += len(batch_chunk)
 
-            except requests.exceptions.Timeout:
-                logger.error(f"Timeout (30s) - batch request did not complete")
-                logger.info(f"\n{'='*80}")
-                logger.info(f"API RESULTS")
-                logger.info(f"{'='*80}")
-                logger.info(f"Applied: 0")
-                logger.info(f"Failed: {len(updates_to_apply)}")
-            except requests.exceptions.ConnectionError as e:
-                logger.error(f"Connection error: {e}")
-                logger.info(f"\n{'='*80}")
-                logger.info(f"API RESULTS")
-                logger.info(f"{'='*80}")
-                logger.info(f"Applied: 0")
-                logger.info(f"Failed: {len(updates_to_apply)}")
-            except Exception as e:
-                logger.error(f"Exception: {type(e).__name__}: {e}")
-                logger.info(f"\n{'='*80}")
-                logger.info(f"API RESULTS")
-                logger.info(f"{'='*80}")
-                logger.info(f"Applied: 0")
-                logger.info(f"Failed: {len(updates_to_apply)}")
+                except requests.exceptions.Timeout:
+                    logger.error(f"  Timeout (30s) - batch {chunk_num} did not complete")
+                    failed += len(batch_chunk)
+                except requests.exceptions.ConnectionError as e:
+                    logger.error(f"  Connection error: {e}")
+                    failed += len(batch_chunk)
+                except Exception as e:
+                    logger.error(f"  Exception: {type(e).__name__}: {e}")
+                    failed += len(batch_chunk)
+
+            logger.info(f"\n{'='*80}")
+            logger.info(f"API RESULTS")
+            logger.info(f"{'='*80}")
+            logger.info(f"Applied: {applied}")
+            logger.info(f"Failed: {failed}")
+            if apply_high:
+                logger.info(f"Skipped (medium confidence): {len(updates) - len(updates_to_apply)}")
     else:
         logger.info(f"\n{'='*80}")
         logger.info(f"DRY-RUN MODE - No API calls made")
