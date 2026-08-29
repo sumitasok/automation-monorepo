@@ -1,9 +1,9 @@
 name: gmail-wallet-sync
 description: >
   Complete wallet sync pipeline: fetch wallet records, extract & categorize Gmail transactions,
-  sync categories to wallet Unknown records, fetch accounts, detect duplicates, then push to Wallet API.
+  sync categories to wallet Unknown records, fetch accounts, then push to Wallet API.
   Steps: wallet-fetch → gmail-extract → gmail-categorize → wallet-sync-categories →
-  wallet-fetch-accounts → wallet-dedup → wallet-sync.
+  wallet-fetch-accounts → wallet-sync.
 steps:
   - job: wallet-fetch
     description: "Fetch current wallet records from Wallet API → records.jsonl"
@@ -21,10 +21,6 @@ steps:
 
   - job: wallet-fetch-accounts
     description: "Refresh accounts cache from Wallet API → accounts-cache.json"
-
-  - job: wallet-dedup
-    args: ["scan"]
-    description: "Scan for potential duplicate records (safe, read-only)"
 
   - job: wallet-sync
     description: "Push transactions to Wallet API with automatic retry on rate limits"
