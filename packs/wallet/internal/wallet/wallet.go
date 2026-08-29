@@ -330,6 +330,38 @@ func (c *Client) CreateRecords(records []NewRecord) ([]RecordResult, error) {
 	return out.Results, nil
 }
 
+// DeleteResult represents the result of a single DELETE operation.
+type DeleteResult struct {
+	ID     string `json:"id"`
+	Status int    `json:"status"`
+	Error  string `json:"error,omitempty"`
+}
+
+// DeleteRecords deletes multiple records from the Wallet API.
+// Returns per-record results showing success/failure for each ID.
+func (c *Client) DeleteRecords(recordIDs []string) ([]DeleteResult, error) {
+	if len(recordIDs) == 0 {
+		return nil, nil
+	}
+	if len(recordIDs) > 50 {
+		return nil, fmt.Errorf("batch too large: %d (max 50)", len(recordIDs))
+	}
+
+	var results []DeleteResult
+	for _, id := range recordIDs {
+		status, err := c.do("DELETE", "/v1/api/records/"+url.QueryEscape(id), nil, nil)
+		result := DeleteResult{ID: id, Status: status}
+		if err != nil {
+			result.Error = err.Error()
+		}
+		results = append(results, result)
+		if status != http.StatusOK && status != http.StatusNoContent && status != http.StatusNotFound {
+			result.Error = fmt.Sprintf("HTTP %d", status)
+		}
+	}
+	return results, nil
+}
+
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s

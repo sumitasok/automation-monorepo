@@ -1002,15 +1002,55 @@ func executeDedup(recordsFile, decisionFile, stateFile string, dryRun bool) erro
 		deletedIDs = append(deletedIDs, decision.DeleteRecordIDs...)
 	}
 
-	// Save dedup-results.json (for Wallet API sync phase, NOT for direct records.json update)
+	// Delete from Wallet API
+	fmt.Printf("\n[DELETE] Calling Wallet API to delete %d records...\n", len(deletedIDs))
+	token := os.Getenv("WALLET_API_TOKEN")
+	if token == "" {
+		return fmt.Errorf("WALLET_API_TOKEN not set")
+	}
+	baseURL := os.Getenv("WALLET_BASE_URL")
+	if baseURL == "" {
+		baseURL = "https://rest.budgetbakers.com/wallet"
+	}
+
+	client := wallet.New(baseURL, token)
+	deleteResults, err := client.DeleteRecords(deletedIDs)
+	if err != nil {
+		return fmt.Errorf("delete records: %w", err)
+	}
+
+	// Count successes/failures
+	successCount := 0
+	failureCount := 0
+	failedIDs := []string{}
+	for _, result := range deleteResults {
+		if result.Status == 200 || result.Status == 204 || result.Status == 404 {
+			successCount++
+			fmt.Printf("  [%d/%d] ✅ %s\n", successCount+failureCount, len(deletedIDs), result.ID)
+		} else {
+			failureCount++
+			failedIDs = append(failedIDs, result.ID)
+			fmt.Printf("  [%d/%d] ❌ %s (HTTP %d)\n", successCount+failureCount, len(deletedIDs), result.ID, result.Status)
+		}
+	}
+
+	if failureCount > 0 {
+		fmt.Printf("\n⚠️  %d deletion(s) failed (see above). Aborting.\n", failureCount)
+		return fmt.Errorf("failed to delete %d record(s)", failureCount)
+	}
+
+	fmt.Printf("\n✅ All %d records deleted from Wallet API\n", successCount)
+
+	// Save dedup-results.json for audit trail
 	resultsFile := strings.TrimSuffix(recordsFile, ".json") + "-dedup-results.json"
 	results := map[string]interface{}{
 		"timestamp":        time.Now().UTC().Format(time.RFC3339),
 		"recordsToDelete":  deletedIDs,
 		"totalToDelete":    countToDelete,
 		"totalToKeep":      len(originalRecords) - countToDelete,
+		"deletedFromAPI":   successCount,
 		"decisions":        decisions,
-		"instructions":     "1) Review: cat " + resultsFile + "\n2) Delete from Wallet API: wallet sync --dedup-results\n3) After Wallet confirms, run: dedup finalize --dedup-results",
+		"instructions":     "Run: dedup finalize to remove deleted records from local records.jsonl",
 	}
 
 	resultsData, _ := json.MarshalIndent(results, "", "  ")
@@ -1018,10 +1058,9 @@ func executeDedup(recordsFile, decisionFile, stateFile string, dryRun bool) erro
 		return fmt.Errorf("save dedup results: %w", err)
 	}
 
-	fmt.Printf("DEDUPLICATED: %d to delete | %d to keep\n", countToDelete, len(originalRecords)-countToDelete)
-	fmt.Printf("\nResults saved: %s\n", resultsFile)
-	fmt.Printf("\nNext: Delete from Wallet API, then run 'dedup finalize'\n")
-	log.Printf("[SUCCESS] Dedup results saved: delete=%d, keep=%d, file=%s", countToDelete, len(originalRecords)-countToDelete, resultsFile)
+	fmt.Printf("Results saved: %s\n", resultsFile)
+	fmt.Printf("\nNext: ./auto run wallet-dedup finalize\n")
+	log.Printf("[SUCCESS] Deleted %d records from Wallet API, saved results to %s", successCount, resultsFile)
 	return nil
 }
 
