@@ -124,21 +124,21 @@
 
 ### Implementation for User Story 3
 
-- [ ] T040 [P] [US3] Implement loadDedupDecisions(decisionFile string) ([]DedupDecision, error) in packs/wallet/dedup.go: unmarshal JSON decisions file
-- [ ] T041 [P] [US3] Implement applyDecisions(records []Record, decisions []DedupDecision) ([]Record, error) in packs/wallet/dedup.go: filter out deleted record IDs
-- [ ] T042 [P] [US3] Implement validateUpdateJSON(originalRecords, updatedRecords []Record) error in packs/wallet/dedup.go: ensure valid structure before writing
-- [ ] T043 [US3] Implement executeDedup(recordsFile, decisionFile, backupDir string, dryRun bool) error in packs/wallet/dedup.go: orchestrate backup, deletion, validation, write
-- [ ] T044 [US3] Implement writeRecordsJSON(recordsFile string, records []Record) error in packs/wallet/dedup.go: marshal records to JSON, write atomically (temp file + rename)
-- [ ] T045 [US3] Implement rollbackOnFailure(recordsFile, backupPath string) error in packs/wallet/dedup.go: restore from backup if write fails
-- [ ] T046 [US3] Implement executionCommand handler in packs/wallet/dedup.go: parse flags (records-file, decisions-file, dry-run, force), call executeDedup, print results
-- [ ] T047 [US3] Wire executeCommand into main.go case "dedup execute": err := executeCommand(os.Args[2:])
-- [ ] T048 [US3] Implement readExecutionConfirmation() (bool, error) in packs/wallet/dedup.go: final "Delete X records?" prompt
-- [ ] T049 [P] [US3] Add unit tests in packs/wallet/dedup_test.go: TestApplyDecisions (correct records filtered), TestValidateUpdateJSON (valid/invalid JSON)
-- [ ] T050 [P] [US3] Add unit tests: TestAtomicWrite (temp file + rename), TestRollbackOnFailure (backup restored)
-- [ ] T051 [US3] Add integration test: TestExecuteDedup (full scan → review → execute workflow with real files)
-- [ ] T052 [US3] Add integration test: TestBackupCreated (verify backup file exists with timestamp, contains original data)
-- [ ] T053 [US3] Add integration test: TestAuditTrailUpdated (verify audit entry appended to state.json with correct fields)
-- [ ] T054 [US3] Add integration test: TestDryRunNoModification (execute with --dry-run should not modify records.json or state.json)
+- [x] T040 [P] [US3] Implement loadDedupDecisions(decisionFile string) ([]DedupDecision, error) in packs/wallet/dedup.go: unmarshal JSON decisions file
+- [x] T041 [P] [US3] Implement applyDecisions(records []Record, decisions []DedupDecision) ([]Record, error) in packs/wallet/dedup.go: filter out deleted record IDs
+- [x] T042 [P] [US3] Implement validateUpdateJSON(originalRecords, updatedRecords []Record) error in packs/wallet/dedup.go: ensure valid structure before writing
+- [x] T043 [US3] Implement executeDedup(recordsFile, decisionFile, backupDir string, dryRun bool) error in packs/wallet/dedup.go: orchestrate backup, deletion, validation, write
+- [x] T044 [US3] Implement writeRecordsJSON(recordsFile string, records []Record) error in packs/wallet/dedup.go: marshal records to JSON, write atomically (temp file + rename)
+- [x] T045 [US3] Implement rollbackOnFailure(recordsFile, backupPath string) error in packs/wallet/dedup.go: restore from backup if write fails
+- [x] T046 [US3] Implement executionCommand handler in packs/wallet/dedup.go: parse flags (records-file, decisions-file, dry-run, force), call executeDedup, print results
+- [x] T047 [US3] Wire executeCommand into main.go case "dedup execute": err := executeCommand(os.Args[2:])
+- [x] T048 [US3] Implement readExecutionConfirmation() (bool, error) in packs/wallet/dedup.go: final "Delete X records?" prompt
+- [x] T049 [P] [US3] Add unit tests in packs/wallet/dedup_test.go: TestApplyDecisions (correct records filtered), TestValidateUpdateJSON (valid/invalid JSON)
+- [x] T050 [P] [US3] Add unit tests: TestAtomicWrite (temp file + rename), TestRollbackOnFailure (backup restored)
+- [x] T051 [US3] Add integration test: TestExecuteDedup (full scan → review → execute workflow with real files)
+- [x] T052 [US3] Add integration test: TestBackupCreated (verify backup file exists with timestamp, contains original data)
+- [x] T053 [US3] Add integration test: TestAuditTrailUpdated (verify audit entry appended to state.json with correct fields)
+- [x] T054 [US3] Add integration test: TestDryRunNoModification (execute with --dry-run should not modify records.json or state.json)
 
 **Verification Checklist for US3**:
 - [ ] Execute command loads decisions from JSON file

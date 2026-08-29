@@ -749,7 +749,251 @@ func executeDuplicates(recordsFile string, decisions []DedupDecision, dryRun boo
 	return nil
 }
 
+// loadDedupDecisions reads decisions from a JSON file saved by review command.
+func loadDedupDecisions(decisionFile string) ([]DedupDecision, error) {
+	data, err := os.ReadFile(decisionFile)
+	if err != nil {
+		return nil, fmt.Errorf("read decisions file: %w", err)
+	}
+
+	var output struct {
+		Timestamp string          `json:"timestamp"`
+		Decisions []DedupDecision `json:"decisions"`
+	}
+
+	if err := json.Unmarshal(data, &output); err != nil {
+		return nil, fmt.Errorf("parse decisions JSON: %w", err)
+	}
+
+	if len(output.Decisions) == 0 {
+		return nil, fmt.Errorf("no decisions found in %s", decisionFile)
+	}
+
+	return output.Decisions, nil
+}
+
+// applyDecisions removes records marked for deletion, returning the filtered set.
+func applyDecisions(records []wallet.Record, decisions []DedupDecision) ([]wallet.Record, error) {
+	// Build set of record IDs to delete
+	toDelete := make(map[string]bool)
+	for _, decision := range decisions {
+		for _, id := range decision.DeleteRecordIDs {
+			toDelete[id] = true
+		}
+	}
+
+	// Filter records: keep those not in delete set
+	var filtered []wallet.Record
+	for _, rec := range records {
+		id, ok := rec["id"].(string)
+		if !ok {
+			return nil, fmt.Errorf("record missing or invalid id field")
+		}
+		if !toDelete[id] {
+			filtered = append(filtered, rec)
+		}
+	}
+
+	return filtered, nil
+}
+
+// validateUpdateJSON ensures the filtered records form valid JSON.
+func validateUpdateJSON(originalRecords, updatedRecords []wallet.Record) error {
+	if len(updatedRecords) >= len(originalRecords) {
+		return fmt.Errorf("no records deleted: expected fewer records after dedup")
+	}
+
+	if len(updatedRecords) == 0 {
+		return fmt.Errorf("dedup would delete all records; aborting")
+	}
+
+	// Test marshal/unmarshal
+	data, err := json.Marshal(updatedRecords)
+	if err != nil {
+		return fmt.Errorf("marshal updated records: %w", err)
+	}
+
+	var test []wallet.Record
+	if err := json.Unmarshal(data, &test); err != nil {
+		return fmt.Errorf("unmarshal updated records: %w", err)
+	}
+
+	return nil
+}
+
+// writeRecordsJSON atomically writes records to file using temp file + rename.
+func writeRecordsJSON(recordsFile string, records []wallet.Record) error {
+	data, err := json.MarshalIndent(records, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal records: %w", err)
+	}
+
+	// Write to temp file first
+	tmpFile := recordsFile + ".tmp"
+	if err := os.WriteFile(tmpFile, data, 0644); err != nil {
+		return fmt.Errorf("write temp file: %w", err)
+	}
+
+	// Atomic rename
+	if err := os.Rename(tmpFile, recordsFile); err != nil {
+		os.Remove(tmpFile) // best effort cleanup
+		return fmt.Errorf("rename temp to records file: %w", err)
+	}
+
+	return nil
+}
+
+// rollbackOnFailure restores records from backup if something went wrong.
+func rollbackOnFailure(recordsFile, backupPath string) error {
+	if backupPath == "" {
+		return fmt.Errorf("no backup available for rollback")
+	}
+
+	data, err := os.ReadFile(backupPath)
+	if err != nil {
+		return fmt.Errorf("read backup file: %w", err)
+	}
+
+	if err := os.WriteFile(recordsFile, data, 0644); err != nil {
+		return fmt.Errorf("restore from backup: %w", err)
+	}
+
+	return nil
+}
+
+// readExecutionConfirmation prompts user to confirm deletion before proceeding.
+func readExecutionConfirmation(countToDelete int) (bool, error) {
+	fmt.Printf("\n⚠️  WARNING: This will DELETE %d records from records.json\n", countToDelete)
+	fmt.Printf("A backup will be created at records.json.backup.{timestamp}\n")
+	fmt.Printf("This action cannot be undone (restore from backup required)\n")
+	fmt.Printf("\nProceed with dedup execution? (yes/no) [no]: ")
+
+	var input string
+	fmt.Scanln(&input)
+
+	if input == "yes" {
+		return true, nil
+	}
+	return false, nil
+}
+
+// executeDedup orchestrates the full dedup execution workflow.
+func executeDedup(recordsFile, decisionFile, stateFile string, dryRun bool) error {
+	// Load original records
+	snap, err := loadRecords(recordsFile)
+	if err != nil {
+		return fmt.Errorf("load records: %w", err)
+	}
+	originalRecords := snap.Records
+
+	// Load decisions
+	decisions, err := loadDedupDecisions(decisionFile)
+	if err != nil {
+		return fmt.Errorf("load decisions: %w", err)
+	}
+
+	// Count records to delete
+	countToDelete := countDeleteRecords(decisions)
+	fmt.Printf("Loaded %d decisions\n", len(decisions))
+	fmt.Printf("Will delete %d records (from %d total)\n", countToDelete, len(originalRecords))
+
+	// Confirm before proceeding
+	if !dryRun {
+		ok, err := readExecutionConfirmation(countToDelete)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			fmt.Println("Execution cancelled.")
+			return nil
+		}
+	}
+
+	if dryRun {
+		fmt.Println("\n(DRY RUN: No changes will be made)")
+		fmt.Printf("Would delete %d records, keeping %d\n", countToDelete, len(originalRecords)-countToDelete)
+		return nil
+	}
+
+	// Apply decisions to create filtered set
+	filteredRecords, err := applyDecisions(originalRecords, decisions)
+	if err != nil {
+		return fmt.Errorf("apply decisions: %w", err)
+	}
+
+	// Validate new records are valid JSON
+	if err := validateUpdateJSON(originalRecords, filteredRecords); err != nil {
+		return fmt.Errorf("validate filtered records: %w", err)
+	}
+
+	// Create backup BEFORE any modification
+	backupPath, err := createBackup(recordsFile)
+	if err != nil {
+		return fmt.Errorf("create backup: %w", err)
+	}
+	fmt.Printf("✓ Backup created: %s\n", backupPath)
+
+	// Write atomically
+	if err := writeRecordsJSON(recordsFile, filteredRecords); err != nil {
+		fmt.Printf("ERROR: Write failed: %v\n", err)
+		fmt.Printf("Attempting rollback from backup...\n")
+		if rbErr := rollbackOnFailure(recordsFile, backupPath); rbErr != nil {
+			fmt.Printf("Rollback FAILED: %v\n", rbErr)
+			fmt.Printf("Manual recovery required. Backup at: %s\n", backupPath)
+			return fmt.Errorf("write records failed (rollback failed): %w", err)
+		}
+		fmt.Println("Rollback successful. Original records restored.")
+		return fmt.Errorf("write records failed (rolled back): %w", err)
+	}
+
+	fmt.Printf("✓ Records updated: %d deleted, %d remaining\n", countToDelete, len(filteredRecords))
+
+	// Append audit trail
+	if stateFile != "" {
+		// Build list of deleted record IDs from decisions
+		var deletedIDs []string
+		for _, decision := range decisions {
+			deletedIDs = append(deletedIDs, decision.DeleteRecordIDs...)
+		}
+
+		if err := appendAuditTrail(stateFile, "dedup_executed", deletedIDs, len(originalRecords), len(filteredRecords), backupPath); err != nil {
+			fmt.Printf("Warning: Failed to append audit trail: %v\n", err)
+		} else {
+			fmt.Printf("✓ Audit trail updated: %s\n", stateFile)
+		}
+	}
+
+	fmt.Println("\n✓ Dedup execution complete!")
+	return nil
+}
+
+// runDedupExecute implements the `wallet dedup execute` subcommand.
 func runDedupExecute(args []string) error {
-	// TODO: Implement execute subcommand (Phase 5)
-	return fmt.Errorf("execute command not yet implemented")
+	fs := flag.NewFlagSet("dedup execute", flag.ExitOnError)
+	recordsFile := fs.String("records-file", "", "path to records.json")
+	decisionFile := fs.String("decisions-file", "", "path to decisions.json (from review command)")
+	stateFile := fs.String("state-file", "", "path to state.json for audit trail (optional)")
+	dryRun := fs.Bool("dry-run", false, "show what would be deleted without making changes")
+	fs.Parse(args)
+
+	// Resolve paths
+	if *recordsFile == "" {
+		*recordsFile = resolveDataPath("wallet/records.json", "records.json")
+	}
+	if *decisionFile == "" {
+		return fmt.Errorf("--decisions-file required (from dedup review command)")
+	}
+	if *stateFile == "" {
+		*stateFile = resolveDataPath("wallet/state.json", "state.json")
+	}
+
+	fmt.Printf("Records: %s\n", *recordsFile)
+	fmt.Printf("Decisions: %s\n", *decisionFile)
+
+	// Execute dedup
+	if err := executeDedup(*recordsFile, *decisionFile, *stateFile, *dryRun); err != nil {
+		return err
+	}
+
+	return nil
 }

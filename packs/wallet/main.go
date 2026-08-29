@@ -164,7 +164,7 @@ func runDedup(args []string) error {
 	case "review":
 		return runDedupReview(subargs)
 	case "execute":
-		return fmt.Errorf("execute not yet implemented (Phase 5)")
+		return runDedupExecute(subargs)
 	default:
 		return fmt.Errorf("unknown dedup subcommand: %s (use scan, review, or execute)", subcommand)
 	}
