@@ -13,11 +13,13 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/sumitasok/sa.automation.wallet/internal/config"
@@ -90,7 +92,19 @@ func runSync(args []string) error {
 
 	fmt.Printf("Working directory: %s\n", filepath.Dir(resolvedStatePath))
 	fmt.Printf("Reading CSV: %s\n", resolvedCSVPath)
-	fmt.Printf("State file (dedup ledger): %s\n\n", resolvedStatePath)
+	fmt.Printf("State file (dedup ledger): %s\n", resolvedStatePath)
+
+	// Sync accounts cache (for auto-resolution of unmapped codes)
+	accountsCacheFile := filepath.Join(filepath.Dir(resolvedStatePath), "accounts-cache.json")
+	if !*dryRun {
+		if err := syncAccountsCache(cfg, accountsCacheFile); err != nil {
+			fmt.Printf("Warning: could not sync accounts cache: %v\n", err)
+			// Continue anyway — sync still works with explicit accounts.json mapping
+		} else {
+			fmt.Printf("Accounts cache: %s\n", accountsCacheFile)
+		}
+	}
+	fmt.Println()
 
 	opts := sync.Options{
 		CSVPath:   resolvedCSVPath,
@@ -178,6 +192,95 @@ func runDedup(args []string) error {
 	default:
 		return fmt.Errorf("unknown dedup subcommand: %s (use scan, review, execute, or finalize)", subcommand)
 	}
+}
+
+// syncAccountsCache fetches accounts from the Wallet API and caches them locally.
+// Silently skips on error (doesn't fail the sync).
+func syncAccountsCache(cfg *config.Config, cacheFile string) error {
+	// Check if cache exists and is fresh (< 24 hours)
+	if info, err := os.Stat(cacheFile); err == nil {
+		age := time.Since(info.ModTime())
+		if age < 24*time.Hour {
+			return nil // Cache is fresh, skip
+		}
+	}
+
+	// Fetch accounts from API
+	client := wallet.New(cfg.BaseURL, cfg.APIToken)
+	accs, err := client.GetAccounts()
+	if err != nil {
+		return fmt.Errorf("fetch accounts: %w", err)
+	}
+
+	// Build cache (using same structure as fetch-accounts command)
+	type cachedAccount struct {
+		ID           string `json:"id"`
+		Name         string `json:"name"`
+		CurrencyCode string `json:"currencyCode"`
+		Archived     bool   `json:"archived"`
+		LastDigits   string `json:"lastDigits"`
+		FetchedAt    string `json:"fetchedAt"`
+	}
+	type accountCache struct {
+		FetchedAt    string             `json:"fetchedAt"`
+		Count        int                `json:"count"`
+		Accounts     []cachedAccount    `json:"accounts"`
+		ByID         map[string]int     `json:"_byId"`
+		ByName       map[string][]int   `json:"_byName"`
+		ByLastFour   map[string][]int   `json:"_byLastFour"`
+	}
+
+	cache := accountCache{
+		FetchedAt:  time.Now().UTC().Format(time.RFC3339),
+		Accounts:   []cachedAccount{},
+		ByID:       map[string]int{},
+		ByName:     map[string][]int{},
+		ByLastFour: map[string][]int{},
+	}
+
+	for _, acc := range accs {
+		lastDigits := ""
+		if len(acc.Name) >= 4 {
+			lastDigits = acc.Name[len(acc.Name)-4:]
+		}
+
+		cached := cachedAccount{
+			ID:           acc.ID,
+			Name:         acc.Name,
+			CurrencyCode: acc.CurrencyCode,
+			Archived:     acc.Archived,
+			LastDigits:   lastDigits,
+			FetchedAt:    cache.FetchedAt,
+		}
+
+		idx := len(cache.Accounts)
+		cache.Accounts = append(cache.Accounts, cached)
+		cache.ByID[acc.ID] = idx
+
+		// Index by name substrings
+		parts := strings.Fields(acc.Name)
+		if len(parts) > 0 {
+			lastPart := parts[len(parts)-1]
+			cache.ByName[lastPart] = append(cache.ByName[lastPart], idx)
+		}
+
+		// Index by last 4 digits
+		if lastDigits != "" {
+			cache.ByLastFour[lastDigits] = append(cache.ByLastFour[lastDigits], idx)
+		}
+	}
+	cache.Count = len(cache.Accounts)
+
+	// Save cache
+	data, _ := json.MarshalIndent(cache, "", "  ")
+	if err := os.MkdirAll(filepath.Dir(cacheFile), 0755); err != nil {
+		return fmt.Errorf("create cache dir: %w", err)
+	}
+	if err := os.WriteFile(cacheFile, data, 0644); err != nil {
+		return fmt.Errorf("write cache: %w", err)
+	}
+
+	return nil
 }
 
 func usage() {
