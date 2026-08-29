@@ -452,7 +452,7 @@ func countDuplicateRecords(groups []DuplicateGroup) int {
 // runDedupScan implements the `wallet dedup scan` subcommand.
 func runDedupScan(args []string) error {
 	fs := flag.NewFlagSet("dedup scan", flag.ExitOnError)
-	recordsFile := fs.String("records-file", "", "path to records.json (default: $AUTO_DATA_DIR/wallet/records.json or ./records.json)")
+	recordsFile := fs.String("records-file", "", "path to records.json (default: $AUTO_DATA_DIR/wallet/records.jsonl or ./records.json)")
 	dedupConfig := fs.String("dedup-config", "", "path to dedup config (default: config.yaml)")
 	format := fs.String("format", "text", "output format: text or json")
 	minConfidence := fs.Float64("min-confidence", 0.5, "minimum confidence threshold (0.0-1.0)")
@@ -460,7 +460,7 @@ func runDedupScan(args []string) error {
 
 	// Resolve paths
 	if *recordsFile == "" {
-		*recordsFile = resolveDataPath("wallet/records.json", "records.json")
+		*recordsFile = resolveDataPath("wallet/records.jsonl", "records.jsonl")
 	}
 
 	fmt.Printf("Working directory: %s\n", filepath.Dir(*recordsFile))
@@ -690,7 +690,7 @@ func readFinalConfirmation() (bool, error) {
 // runDedupReview implements the `wallet dedup review` subcommand.
 func runDedupReview(args []string) error {
 	fs := flag.NewFlagSet("dedup review", flag.ExitOnError)
-	recordsFile := fs.String("records-file", "", "path to records.json (default: $AUTO_DATA_DIR/wallet/records.json)")
+	recordsFile := fs.String("records-file", "", "path to records.json (default: $AUTO_DATA_DIR/wallet/records.jsonl)")
 	dedupConfig := fs.String("dedup-config", "", "path to dedup config")
 	decisionsFile := fs.String("decisions-file", "", "path to save decisions (default: .dedup-decisions-{timestamp}.json)")
 	dryRun := fs.Bool("dry-run", false, "show decisions without saving")
@@ -698,7 +698,7 @@ func runDedupReview(args []string) error {
 
 	// Resolve paths
 	if *recordsFile == "" {
-		*recordsFile = resolveDataPath("wallet/records.json", "records.json")
+		*recordsFile = resolveDataPath("wallet/records.jsonl", "records.jsonl")
 	}
 
 	fmt.Printf("Working directory: %s\n", filepath.Dir(*recordsFile))
@@ -1077,7 +1077,7 @@ func runDedupFinalize(args []string) error {
 
 	// Resolve paths
 	if *recordsFile == "" {
-		*recordsFile = resolveDataPath("wallet/records.json", "records.json")
+		*recordsFile = resolveDataPath("wallet/records.jsonl", "records.jsonl")
 	}
 	if *resultsFile == "" {
 		*resultsFile = strings.TrimSuffix(*recordsFile, ".json") + "-dedup-results.json"
@@ -1190,7 +1190,7 @@ func runDedupExecute(args []string) error {
 
 	// Resolve paths
 	if *recordsFile == "" {
-		*recordsFile = resolveDataPath("wallet/records.json", "records.json")
+		*recordsFile = resolveDataPath("wallet/records.jsonl", "records.jsonl")
 	}
 	if *decisionFile == "" {
 		return fmt.Errorf("--decisions-file required (from dedup review command)")
