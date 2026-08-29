@@ -44,6 +44,13 @@ type Label struct {
 	Name string `json:"name"`
 }
 
+// Record is a wallet transaction record from GET /records.
+// Stored as map[string]any to preserve all fields the API returns (id, accountId,
+// amount, category, labels, note, counterParty, transfer, recordDate, createdAt,
+// updatedAt, ...) without risking silent field loss if the live schema gains or
+// renames a field.
+type Record map[string]any
+
 // NewRecord is a record to create via POST /records.
 type NewRecord struct {
 	AccountID    string   `json:"accountId"`

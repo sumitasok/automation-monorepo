@@ -31,17 +31,17 @@
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T006 [P] Define Record type in packs/wallet/internal/wallet/wallet.go (extend existing Record struct if needed)
-- [ ] T007 [P] Define DuplicateGroup struct in packs/wallet/dedup.go with fields: duplicateKey, matchType, confidence, records[]
-- [ ] T008 [P] Define DedupDecision struct in packs/wallet/dedup.go with fields: duplicateKey, action, keepRecordIds, deleteRecordIds, reason
-- [ ] T009 [P] Define AuditTrailEntry struct in packs/wallet/internal/state/state.go with fields: timestamp, operation, deletedRecordIds, totals, backupFile
-- [ ] T010 Implement loadRecords() helper in packs/wallet/dedup.go to read and parse records.json (error handling for invalid JSON)
-- [ ] T011 Implement loadDedupConfig() helper in packs/wallet/dedup.go to read dedup config from config.yaml or environment overrides
-- [ ] T012 [P] Implement dedup key matching function matchKey(record1, record2, config) bool in packs/wallet/dedup.go
-- [ ] T013 Implement confidence calculation function calculateConfidence(record1, record2, config) float64 in packs/wallet/dedup.go
-- [ ] T014 Implement createBackup(recordsFile string) (backupPath string, error) in packs/wallet/dedup.go with timestamp in filename
-- [ ] T015 Implement appendAuditTrail(operation string, deletedIDs []string, before/after counts, backupFile) in packs/wallet/internal/state/state.go
-- [ ] T016 Add unit tests in packs/wallet/dedup_test.go for: loadRecords (valid/invalid JSON), matchKey, calculateConfidence, createBackup
+- [x] T006 [P] Define Record type in packs/wallet/internal/wallet/wallet.go (extend existing Record struct if needed)
+- [x] T007 [P] Define DuplicateGroup struct in packs/wallet/dedup.go with fields: duplicateKey, matchType, confidence, records[]
+- [x] T008 [P] Define DedupDecision struct in packs/wallet/dedup.go with fields: duplicateKey, action, keepRecordIds, deleteRecordIds, reason
+- [x] T009 [P] Define AuditTrailEntry struct in packs/wallet/internal/state/state.go with fields: timestamp, operation, deletedRecordIds, totals, backupFile
+- [x] T010 Implement loadRecords() helper in packs/wallet/dedup.go to read and parse records.json (error handling for invalid JSON)
+- [x] T011 Implement loadDedupConfig() helper in packs/wallet/dedup.go to read dedup config from config.yaml or environment overrides
+- [x] T012 [P] Implement dedup key matching function matchKey(record1, record2, config) bool in packs/wallet/dedup.go
+- [x] T013 Implement confidence calculation function calculateConfidence(record1, record2, config) float64 in packs/wallet/dedup.go
+- [x] T014 Implement createBackup(recordsFile string) (backupPath string, error) in packs/wallet/dedup.go with timestamp in filename
+- [x] T015 Implement appendAuditTrail(operation string, deletedIDs []string, before/after counts, backupFile) in packs/wallet/internal/state/state.go
+- [x] T016 Add unit tests in packs/wallet/dedup_test.go for: loadRecords (valid/invalid JSON), matchKey, calculateConfidence, createBackup
 
 **Checkpoint**: Foundation ready — all data types, config loading, and helper functions in place. User story implementation can now begin.
 
