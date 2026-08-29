@@ -38,6 +38,10 @@ func main() {
 		if err := runSync(os.Args[2:]); err != nil {
 			log.Fatalf("error: %v", err)
 		}
+	case "fetch":
+		if err := runFetch(os.Args[2:]); err != nil {
+			log.Fatalf("error: %v", err)
+		}
 	case "detect-duplicates":
 		if err := runDetectDuplicates(os.Args[2:]); err != nil {
 			log.Fatalf("error: %v", err)
@@ -287,6 +291,7 @@ func usage() {
 
 Usage:
   wallet sync [flags]
+  wallet fetch [flags]
   wallet fetch-accounts [flags]
   wallet dedup [scan|review|execute|finalize] [flags]
   wallet detect-duplicates [flags]
