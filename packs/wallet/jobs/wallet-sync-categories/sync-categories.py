@@ -54,6 +54,64 @@ def get_data_dir():
     return Path(data_dir)
 
 
+def load_accounts_cache(data_dir):
+    """Load accounts cache and build lastDigits->ID map."""
+    accounts_cache_path = data_dir / 'wallet' / 'accounts-cache.json'
+    account_by_last_digits = {}
+    all_accounts = {}
+
+    if accounts_cache_path.exists():
+        try:
+            with open(accounts_cache_path, 'r') as f:
+                cache = json.load(f)
+                for account in cache.get('accounts', []):
+                    account_id = account.get('id', '')
+                    last_digits = account.get('lastDigits', '').strip()
+                    account_name = account.get('name', '')
+
+                    if account_id:
+                        all_accounts[account_id] = account
+
+                    if last_digits and account_id and not account.get('archived', False):
+                        account_by_last_digits[last_digits] = {
+                            'id': account_id,
+                            'name': account_name,
+                            'lastDigits': last_digits
+                        }
+        except (json.JSONDecodeError, IOError) as e:
+            logger.warning(f"Could not load accounts cache: {e}")
+
+    return account_by_last_digits, all_accounts
+
+
+def extract_account_last_digits(account_id):
+    """Extract last 4 digits from UUID or ID string."""
+    if not account_id:
+        return None
+    # Get last 4 characters of the ID
+    return account_id[-4:] if len(account_id) >= 4 else account_id
+
+
+def find_account_by_id(account_id, all_accounts):
+    """Find account by ID, with fallback using last digits."""
+    if not account_id:
+        return None
+
+    # Direct lookup
+    if account_id in all_accounts:
+        return all_accounts[account_id]
+
+    # Try matching by last digits
+    last_digits = extract_account_last_digits(account_id)
+    if last_digits:
+        for acc_id, account in all_accounts.items():
+            if extract_account_last_digits(acc_id) == last_digits:
+                logger.debug(f"  Account match by last digits: {account_id[-4:]} → {acc_id}")
+                return account
+
+    return None
+
+
 def main():
     logger.info("=" * 80)
     logger.info("WALLET SYNC CATEGORIES - Starting")
@@ -116,6 +174,11 @@ def main():
 
     logger.info(f"✓ Gmail transactions: {len(gmail_data)} total")
     logger.debug(f"  Unique merchants indexed: {len(gmail_by_merchant)}")
+
+    # Load accounts cache for enrichment
+    logger.info("Loading accounts cache...")
+    account_by_last_digits, all_accounts = load_accounts_cache(data_dir)
+    logger.info(f"✓ Indexed {len(account_by_last_digits)} active accounts, {len(all_accounts)} total in cache")
 
     # Read Wallet records with Unknown category
     logger.info("Reading Wallet records...")
