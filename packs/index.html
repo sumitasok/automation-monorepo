@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Data Viewers - Unified Access</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+        .container { max-width: 500px; width: 100%; }
+        
+        .card { background: white; border-radius: 12px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2); padding: 40px; }
+        h1 { font-size: 28px; margin-bottom: 10px; color: #333; }
+        .subtitle { color: #666; margin-bottom: 30px; font-size: 14px; }
+        
+        .auth-section { margin-bottom: 30px; padding-bottom: 30px; border-bottom: 2px solid #eee; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; font-weight: 500; margin-bottom: 5px; color: #333; font-size: 13px; }
+        .form-group input { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; }
+        .form-group input:focus { outline: none; border-color: #667eea; box-shadow: 0 0 4px rgba(102, 126, 234, 0.3); }
+        .form-group small { display: block; color: #999; font-size: 12px; margin-top: 4px; }
+        
+        .btn { padding: 12px; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; transition: all 0.2s; font-size: 14px; }
+        .btn-primary { width: 100%; background: #667eea; color: white; margin-bottom: 10px; }
+        .btn-primary:hover { background: #5568d3; transform: translateY(-1px); }
+        .btn-secondary { width: 100%; background: #f0f0f0; color: #333; }
+        .btn-secondary:hover { background: #e0e0e0; }
+        
+        .error { color: #c33; background: #fee; padding: 10px; border-radius: 6px; margin-bottom: 15px; font-size: 13px; display: none; }
+        .success { color: #2a5634; background: #efe; padding: 10px; border-radius: 6px; margin-bottom: 15px; font-size: 13px; display: none; }
+        
+        .viewers-section h2 { font-size: 16px; margin-bottom: 15px; color: #333; }
+        .viewers-grid { display: grid; gap: 10px; }
+        .viewer-link { display: block; padding: 15px; background: #f8f9fa; border: 2px solid #ddd; border-radius: 8px; text-decoration: none; color: #333; transition: all 0.2s; text-align: center; }
+        .viewer-link:hover { border-color: #667eea; background: #f0f3ff; }
+        .viewer-link strong { display: block; margin-bottom: 4px; }
+        .viewer-link small { color: #666; font-size: 12px; }
+        .viewer-link.disabled { opacity: 0.5; cursor: not-allowed; }
+        .viewer-link.disabled:hover { border-color: #ddd; background: #f8f9fa; }
+        
+        .status { display: flex; align-items: center; gap: 8px; font-size: 13px; margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee; }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; }
+        .status-dot.connected { background: #27ae60; }
+        .status-dot.disconnected { background: #c0392b; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <h1>📊 Data Viewers</h1>
+            <p class="subtitle">Unified access to your data from GitHub</p>
+
+            <div class="auth-section" id="authSection">
+                <form id="authForm">
+                    <div class="error" id="authError"></div>
+                    <div class="success" id="authSuccess"></div>
+
+                    <div class="form-group">
+                        <label for="ownerInput">GitHub Owner/Org</label>
+                        <input type="text" id="ownerInput" placeholder="sumitasok" required>
+                        <small>GitHub username or organization</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="repoInput">Repository Name</label>
+                        <input type="text" id="repoInput" placeholder="automation-monorepo-data" required>
+                        <small>Repository containing your data (without .git)</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="patInput">GitHub PAT (Read-Only)</label>
+                        <input type="password" id="patInput" placeholder="ghp_..." required>
+                        <small>Personal Access Token - stored securely in browser cookies</small>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary">Connect Repository</button>
+                    <button type="button" id="logoutBtn" class="btn btn-secondary" style="display: none;">Disconnect</button>
+                </form>
+            </div>
+
+            <div class="viewers-section" id="viewersSection" style="display: none;">
+                <h2>Available Viewers</h2>
+                <div class="viewers-grid">
+                    <a href="wallet/index.html" class="viewer-link">
+                        <strong>💳 Wallet Records</strong>
+                        <small>Transaction data from records.jsonl</small>
+                    </a>
+                    <a href="gmail/index.html" class="viewer-link">
+                        <strong>📧 Gmail Transactions</strong>
+                        <small>Transaction data from transactions.csv</small>
+                    </a>
+                </div>
+            </div>
+
+            <div class="status" id="statusBar" style="display: none;">
+                <div class="status-dot connected"></div>
+                <div>
+                    <strong id="statusText">Connected</strong><br>
+                    <small id="statusRepo"></small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="shared-auth.js"></script>
+    <script>
+        const authForm = document.getElementById('authForm');
+        const authSection = document.getElementById('authSection');
+        const viewersSection = document.getElementById('viewersSection');
+        const statusBar = document.getElementById('statusBar');
+        const ownerInput = document.getElementById('ownerInput');
+        const repoInput = document.getElementById('repoInput');
+        const patInput = document.getElementById('patInput');
+        const authError = document.getElementById('authError');
+        const authSuccess = document.getElementById('authSuccess');
+        const logoutBtn = document.getElementById('logoutBtn');
+        const statusText = document.getElementById('statusText');
+        const statusRepo = document.getElementById('statusRepo');
+
+        // Set defaults
+        ownerInput.value = 'sumitasok';
+        repoInput.value = 'automation-monorepo-data';
+
+        // Subscribe to auth changes
+        sharedAuth.subscribe(() => updateUI());
+
+        // Handle form submission
+        authForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const owner = ownerInput.value.trim();
+            const repo = repoInput.value.trim();
+            const pat = patInput.value.trim();
+
+            if (!owner || !repo || !pat) {
+                showError('Please fill in all fields');
+                return;
+            }
+
+            sharedAuth.setCredentials(pat, owner, repo);
+            showSuccess('Connected successfully!');
+            patInput.value = '';
+            setTimeout(() => updateUI(), 500);
+        });
+
+        // Handle logout
+        logoutBtn.addEventListener('click', () => {
+            sharedAuth.clearCredentials();
+            patInput.value = '';
+            updateUI();
+        });
+
+        // Update UI based on auth state
+        function updateUI() {
+            if (sharedAuth.isAuthenticated()) {
+                authForm.style.display = 'none';
+                viewersSection.style.display = 'block';
+                statusBar.style.display = 'flex';
+                logoutBtn.style.display = 'block';
+                statusText.textContent = 'Connected';
+                const { owner, repo } = sharedAuth.getRepoInfo();
+                statusRepo.textContent = `${owner}/${repo}`;
+            } else {
+                authForm.style.display = 'block';
+                viewersSection.style.display = 'none';
+                statusBar.style.display = 'none';
+                logoutBtn.style.display = 'none';
+                ownerInput.value = ownerInput.value || 'sumitasok';
+                repoInput.value = repoInput.value || 'automation-monorepo-data';
+            }
+        }
+
+        function showError(msg) {
+            authError.textContent = msg;
+            authError.style.display = 'block';
+            authSuccess.style.display = 'none';
+            setTimeout(() => { authError.style.display = 'none'; }, 5000);
+        }
+
+        function showSuccess(msg) {
+            authSuccess.textContent = msg;
+            authSuccess.style.display = 'block';
+            authError.style.display = 'none';
+            setTimeout(() => { authSuccess.style.display = 'none'; }, 3000);
+        }
+
+        // Initial UI
+        updateUI();
+    </script>
+</body>
+</html>

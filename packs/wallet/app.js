@@ -16,14 +16,23 @@ class WalletApp {
   }
 
   async init() {
-    // Restore auth if available
-    const hasAuth = restoreAuth();
+    // Use shared auth from parent (packs/index.html)
+    const hasSharedAuth = sharedAuth && sharedAuth.isAuthenticated();
 
-    // Only restore repo config if previously authenticated (avoids stale defaults on fresh start)
-    if (hasAuth) {
-      this.restoreRepoConfig();
+    if (hasSharedAuth) {
+      // Use credentials from shared auth
+      const { owner, repo } = sharedAuth.getRepoInfo();
+      githubAPI.setRepository(owner, repo, 'data/wallet/records.jsonl');
+      githubAPI.setPAT(sharedAuth.getPAT());
+      this.setSharedAuthUI(owner, repo);
     } else {
-      this.setDefaultRepoConfig();
+      // Fallback to local auth if shared auth not available
+      const hasAuth = restoreAuth();
+      if (hasAuth) {
+        this.restoreRepoConfig();
+      } else {
+        this.setDefaultRepoConfig();
+      }
     }
 
     // Subscribe to state changes
@@ -61,6 +70,35 @@ class WalletApp {
       this.showViewerSection();
     } else {
       this.showAuthSection();
+    }
+  }
+
+  setSharedAuthUI(owner, repo) {
+    // When using shared auth, hide the auth form and show viewer
+    this.patForm.style.display = 'none';
+    this.authStatus.textContent = `Using shared credentials (${owner}/${repo})`;
+    // Auto-load data
+    this.loadRecordsWithSharedAuth();
+  }
+
+  async loadRecordsWithSharedAuth() {
+    try {
+      this.authButton.disabled = true;
+      this.authButton.textContent = 'Loading...';
+      appState.setLoading(true);
+      appState.setError(null);
+
+      const records = await githubAPI.fetchRecords();
+      appState.setRecords(records);
+      appState.setAuthenticated(true);
+      appState.setLoading(false);
+      this.showViewerSection();
+    } catch (error) {
+      appState.setError(error.message);
+      this.showAuthError(error.message);
+      appState.setLoading(false);
+      this.authButton.disabled = false;
+      this.authButton.textContent = 'Load Records';
     }
   }
 
