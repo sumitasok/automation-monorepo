@@ -30,6 +30,7 @@ class GitHubAPI {
 
     try {
       const url = `https://api.github.com/repos/${this.owner}/${this.repo}/contents/${this.path}`;
+      console.log('Fetching from URL:', url);
       
       const response = await fetch(url, {
         headers: {

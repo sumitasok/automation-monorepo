@@ -97,6 +97,8 @@ class WalletApp {
     const path = this.pathInput.value.trim();
     const pat = this.patInput.value.trim();
 
+    console.log('Form submitted:', { owner, repo, path, pat: pat ? '***' : '' });
+
     if (!owner || !repo || !path || !pat) {
       this.showAuthError('Please fill in all fields (Owner, Repository, Path, PAT)');
       return;
@@ -111,6 +113,7 @@ class WalletApp {
       appState.setError(null);
 
       // Configure and set PAT
+      console.log('Configuring API with:', { owner, repo, path });
       githubAPI.setRepository(owner, repo, path);
       githubAPI.setPAT(pat);
 
