@@ -240,7 +240,10 @@ def main():
                             'source': gmail_source,
                         },
                         'proposed_update': {
-                            'category': {'name': gmail_category}
+                            'category': {
+                                'name': gmail_category,
+                                'id': None  # Will need to be resolved before API call
+                            }
                         },
                         'reason': f'Matched with Gmail transaction: {gmail_category}',
                         'timestamp': datetime.now().isoformat(),
@@ -313,7 +316,7 @@ def main():
             sys.exit(1)
 
         logger.info(f"\n{'='*80}")
-        logger.info(f"APPLYING UPDATES TO WALLET API")
+        logger.info(f"APPLYING UPDATES TO WALLET API (BATCH)")
         logger.info(f"{'='*80}")
 
         # Token is injected by auto framework from config/wallet/config.yaml
@@ -329,61 +332,148 @@ def main():
         logger.info(f"Token loaded from config")
         logger.info(f"Mode: {'Apply HIGH-CONFIDENCE only' if apply_high else 'Apply ALL'}")
 
-        applied = 0
-        failed = 0
-        skipped_confidence = 0
+        # Fetch categories from Wallet API to build name->ID map
+        logger.info(f"Fetching categories from Wallet API...")
+        category_name_to_id = {}
+        try:
+            resp = requests.get(
+                "https://api.budgetbakers.com/v1/categories",
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                categories = resp.json().get('categories', [])
+                for cat in categories:
+                    cat_name = cat.get('name', '')
+                    cat_id = cat.get('id', '')
+                    if cat_name and cat_id:
+                        category_name_to_id[cat_name] = cat_id
+                logger.info(f"✓ Loaded {len(category_name_to_id)} categories")
+            else:
+                logger.warning(f"Failed to fetch categories: HTTP {resp.status_code}")
+        except Exception as e:
+            logger.warning(f"Error fetching categories: {e}")
 
-        for update_idx, update in enumerate(updates, 1):
-            record_id = update['id']
-            category = update['proposed_update']['category']['name']
-            merchant = update['wallet_current']['merchant']
-            confidence = update['match_confidence']
-
-            if apply_high and confidence != 'high':
-                logger.debug(f"[{update_idx}/{len(updates)}] Skipping (medium confidence): {merchant}")
-                skipped_confidence += 1
+        # Filter updates by confidence if needed
+        updates_to_apply = []
+        for update in updates:
+            if apply_high and update['match_confidence'] != 'high':
+                logger.debug(f"Skipping (medium confidence): {update['wallet_current']['merchant']}")
                 continue
+            updates_to_apply.append(update)
 
-            logger.info(f"[{update_idx}/{len(updates)}] Applying: {merchant} ({confidence}) → {category}")
-            logger.debug(f"  Record ID: {record_id}")
-            logger.debug(f"  API URL: https://api.budgetbakers.com/v1/records/{record_id}")
+        if not updates_to_apply:
+            logger.warning(f"No updates to apply (all filtered by confidence level)")
+            logger.info(f"\n{'='*80}")
+            logger.info(f"API RESULTS")
+            logger.info(f"{'='*80}")
+            logger.info(f"Applied: 0")
+            logger.info(f"Failed: 0")
+            logger.info(f"Skipped: {len(updates)}")
+        else:
+            # Build batch payload: array of {id, categoryId}
+            batch_payload = []
+            unmapped_cats = set()
+            for update in updates_to_apply:
+                cat_name = update['proposed_update']['category']['name']
+                cat_id = category_name_to_id.get(cat_name)
+                if cat_id:
+                    batch_payload.append({
+                        'id': update['id'],
+                        'categoryId': cat_id,
+                    })
+                else:
+                    unmapped_cats.add(cat_name)
+
+            if unmapped_cats:
+                logger.warning(f"Could not map {len(unmapped_cats)} category names to IDs: {', '.join(sorted(unmapped_cats))}")
+                logger.info(f"Only {len(batch_payload)} of {len(updates_to_apply)} updates can be applied")
+
+            if not batch_payload:
+                logger.error(f"No mappable updates - cannot proceed")
+                sys.exit(1)
+
+            logger.info(f"Sending batch update: {len(updates_to_apply)} records")
+            logger.debug(f"API URL: https://api.budgetbakers.com/v1/api/records")
+            logger.debug(f"Payload: {len(batch_payload)} items")
 
             try:
                 response = requests.patch(
-                    f"https://api.budgetbakers.com/v1/records/{record_id}",
+                    f"https://api.budgetbakers.com/v1/api/records",
                     headers={
                         "Authorization": f"Bearer {token}",
                         "Content-Type": "application/json",
                     },
-                    json={"category": {"name": category}},
-                    timeout=10,
+                    json=batch_payload,
+                    timeout=30,
                 )
-                logger.debug(f"  Response status: {response.status_code}")
+                logger.debug(f"Response status: {response.status_code}")
 
-                if response.status_code in [200, 204]:
-                    logger.info(f"  ✅ Success")
-                    applied += 1
+                applied = 0
+                failed = 0
+
+                if response.status_code in [200, 207]:
+                    # Parse batch response
+                    try:
+                        resp_data = response.json()
+                        results = resp_data.get('results', [])
+
+                        logger.info(f"Batch response: {len(results)} items")
+
+                        for result_idx, result in enumerate(results, 1):
+                            record_id = result.get('id', '?')
+                            success = result.get('success', False)
+                            error = result.get('error', '')
+
+                            # Find the original update for logging
+                            orig_update = next((u for u in updates_to_apply if u['id'] == record_id), None)
+                            merchant = orig_update['wallet_current']['merchant'] if orig_update else '?'
+                            category = orig_update['proposed_update']['category']['name'] if orig_update else '?'
+
+                            if success:
+                                logger.info(f"  [{result_idx}/{len(results)}] ✅ {merchant} → {category}")
+                                applied += 1
+                            else:
+                                logger.error(f"  [{result_idx}/{len(results)}] ❌ {merchant}: {error}")
+                                failed += 1
+                    except json.JSONDecodeError as e:
+                        logger.error(f"Failed to parse batch response: {e}")
+                        logger.debug(f"Response body: {response.text[:500]}")
+                        failed = len(updates_to_apply)
                 else:
-                    logger.error(f"  ❌ HTTP {response.status_code}")
-                    logger.debug(f"  Response: {response.text[:200]}")
-                    failed += 1
-            except requests.exceptions.Timeout:
-                logger.error(f"  ❌ Timeout (10s)")
-                failed += 1
-            except requests.exceptions.ConnectionError as e:
-                logger.error(f"  ❌ Connection error: {e}")
-                failed += 1
-            except Exception as e:
-                logger.error(f"  ❌ Exception: {type(e).__name__}: {e}")
-                failed += 1
+                    logger.error(f"Batch request failed: HTTP {response.status_code}")
+                    logger.debug(f"Response: {response.text[:500]}")
+                    failed = len(updates_to_apply)
 
-        logger.info(f"\n{'='*80}")
-        logger.info(f"API RESULTS")
-        logger.info(f"{'='*80}")
-        logger.info(f"Applied: {applied}")
-        logger.info(f"Failed: {failed}")
-        if apply_high:
-            logger.info(f"Skipped (medium confidence): {skipped_confidence}")
+                logger.info(f"\n{'='*80}")
+                logger.info(f"API RESULTS")
+                logger.info(f"{'='*80}")
+                logger.info(f"Applied: {applied}")
+                logger.info(f"Failed: {failed}")
+                if apply_high:
+                    logger.info(f"Skipped (medium confidence): {len(updates) - len(updates_to_apply)}")
+
+            except requests.exceptions.Timeout:
+                logger.error(f"Timeout (30s) - batch request did not complete")
+                logger.info(f"\n{'='*80}")
+                logger.info(f"API RESULTS")
+                logger.info(f"{'='*80}")
+                logger.info(f"Applied: 0")
+                logger.info(f"Failed: {len(updates_to_apply)}")
+            except requests.exceptions.ConnectionError as e:
+                logger.error(f"Connection error: {e}")
+                logger.info(f"\n{'='*80}")
+                logger.info(f"API RESULTS")
+                logger.info(f"{'='*80}")
+                logger.info(f"Applied: 0")
+                logger.info(f"Failed: {len(updates_to_apply)}")
+            except Exception as e:
+                logger.error(f"Exception: {type(e).__name__}: {e}")
+                logger.info(f"\n{'='*80}")
+                logger.info(f"API RESULTS")
+                logger.info(f"{'='*80}")
+                logger.info(f"Applied: 0")
+                logger.info(f"Failed: {len(updates_to_apply)}")
     else:
         logger.info(f"\n{'='*80}")
         logger.info(f"DRY-RUN MODE - No API calls made")
