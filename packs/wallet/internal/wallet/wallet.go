@@ -303,7 +303,7 @@ type RecordResult struct {
 }
 
 // CreateRecords posts a batch (max 20). Handles 200 and 207 (partial success).
-// Uses POST /v1/api/records (same endpoint as PATCH for batch updates).
+// Uses POST /v1/api/records with request body as direct array (not wrapped in object).
 func (c *Client) CreateRecords(records []NewRecord) ([]RecordResult, error) {
 	if len(records) == 0 {
 		return nil, nil
@@ -318,7 +318,7 @@ func (c *Client) CreateRecords(records []NewRecord) ([]RecordResult, error) {
 			Succeeded int `json:"succeeded"`
 		} `json:"summary"`
 	}
-	status, err := c.do("POST", "/v1/api/records", map[string]any{"records": records}, &out)
+	status, err := c.do("POST", "/v1/api/records", records, &out)
 	if err != nil {
 		return nil, err
 	}
