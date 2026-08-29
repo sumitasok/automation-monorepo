@@ -4,6 +4,62 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-08-30 — Wallet category update workflow (Gmail → Wallet sync)
+
+**Prompt summary**: Create a staging workflow to sync categories from Gmail (categorized via AI) to Wallet records that still have "Unknown" categories.
+
+**Files created**: 
+- `data/wallet/generate-updates.py` — Analyze Gmail vs Wallet, stage updates
+- `data/wallet/apply-updates.sh` — Apply staged updates to Wallet API (dry-run by default)
+- `data/wallet/updates.jsonl` — Staging file (no changes to records.jsonl)
+
+**Workflow**:
+```bash
+# Step 1: Extract and categorize Gmail transactions
+./auto run gmail-extract --ai=deepseek
+./auto run gmail-categorize --ai=deepseek
+
+# Step 2: Generate update proposals (staging only)
+python3 data/wallet/generate-updates.py
+
+# Step 3a: Review proposed updates
+cat data/wallet/updates.jsonl | jq '.[] | "\(.wallet_current.merchant): \(.wallet_current.category_current) → \(.proposed_update.category.name)"'
+
+# Step 3b: Dry-run (show what would change)
+./data/wallet/apply-updates.sh
+
+# Step 3c: Apply updates to Wallet API (requires WALLET_API_TOKEN)
+./data/wallet/apply-updates.sh --apply
+
+# Or apply only high-confidence matches (same-day date match):
+./data/wallet/apply-updates.sh --apply-high
+```
+
+**Results**: 
+- ✅ Generated 29 category update proposals
+- ✅ High confidence (same-day match): 19 updates
+- ✅ Medium confidence (±1 day match): 10 updates
+- ✅ Categories to update: Food & Drinks (13), Life & Entertainment (5), System categories (7), Housing (2), Transportation (1), Shopping (1)
+
+**Key Features**:
+- **Staging only**: Updates file generated but records.jsonl unchanged until explicitly applied
+- **Dry-run mode**: `./data/wallet/apply-updates.sh` shows what would change (no API calls)
+- **Confidence levels**: Matches by merchant + date (same day = high, ±1 day = medium)
+- **Safe**: Only updates "Unknown" category records, never overwrites existing categories
+- **Reversible**: Each update is a simple PATCH with category name
+
+**Caveats**:
+- Wallet API doesn't return MessageID, so matching is by merchant name + date, not direct ID linkage
+- 155 out of 178 "Unknown" wallet records have no Gmail email match (likely older or from other sources)
+- Updates require `WALLET_API_TOKEN` environment variable set
+
+**Next Steps**:
+1. Review any proposed updates: `python3 data/wallet/generate-updates.py --review`
+2. If Wallet API token available: `./data/wallet/apply-updates.sh --apply`
+3. Re-run after more Gmail categorization to find additional matches
+
+---
+
 ## 2026-08-30 — Make gmail-extract respect config.yaml data directory
 
 **Prompt summary**: Ensure `./auto run gmail-extract` writes transactions to `~/data/gmail/transactions.csv` (configured in config.yaml), not via symlink.
