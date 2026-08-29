@@ -109,9 +109,19 @@ Subcommands:
 - `execute` — apply dedup decisions (destructive)
 - `finalize` — cleanup after execute
 
+**Display Duplicates:**
+**Command:** `python3 show-duplicates.py`
+
+Shows a formatted index of all duplicate groups with:
+- Duplicate group number and record count
+- MessageID for the group
+- For each record: Date, Merchant, Amount, Category, Record ID
+- Creation timestamp to identify newest vs oldest (oldest marked for KEEP)
+- Summary showing total groups, records to delete, records to keep
+
 **Flow:**
 ```
-scan → review → execute → finalize
+scan → (python3 show-duplicates.py) → review → execute → finalize
 ```
 
 ---

@@ -4,6 +4,44 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-08-30 — Duplicate wallet records display script
+
+**Prompt summary**: Create a display mechanism to view the 84 duplicate groups found by `wallet-dedup scan`.
+
+**Files created**:
+- `show-duplicates.py` — CLI tool to display duplicate records in formatted index
+
+**Usage**:
+```bash
+# After running wallet-dedup scan to identify duplicates:
+./auto run wallet-dedup scan
+
+# Display the duplicates in a readable table:
+python3 show-duplicates.py
+```
+
+**Features**:
+- Loads wallet records from `~/data/wallet/records.jsonl`
+- Finds duplicates by MessageID (same email pushed twice)
+- Groups records with same MessageID and shows:
+  - Duplicate group number (e.g., "Group 1/84")
+  - MessageID for the group
+  - For each record: Date, Merchant, Amount, Category, Wallet Record ID, Created timestamp
+  - Oldest record marked as "KEEP", others marked as "DELETE"
+- Summary: Total groups, total duplicate records, records to delete vs keep
+
+**Results**:
+- ✅ Found 84 duplicate groups (84 records to delete, 84 to keep)
+- ✅ Readable indexed display showing which records are duplicates
+- ✅ Integration into wallet workflow: scan → display → execute → finalize
+
+**Notes**:
+- Reads from local `records.jsonl` (populated by `./auto run wallet-fetch`)
+- No writes to Wallet API; purely informational
+- Next step: `./auto run wallet-dedup execute` to delete duplicates
+
+---
+
 ## 2026-08-30 — Wallet category update workflow (Gmail → Wallet sync)
 
 **Prompt summary**: Create a staging workflow to sync categories from Gmail (categorized via AI) to Wallet records that still have "Unknown" categories. Implemented as proper `./auto` pack job.
