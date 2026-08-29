@@ -172,12 +172,9 @@ type Record map[string]any
 const farPastFloor = "2000-01-01"
 
 // GetRecords lists every record via GET /v1/api/records, paginated 200 at a
-// time (same page size as GetAccounts/GetLabels). Unlike GetAccounts/
-// GetLabels/CreateRecords, which live at the un-prefixed path (e.g.
-// POST /records — confirmed working in production by wallet-sync), reading
-// records requires the /v1/api prefix; the un-prefixed GET /records 404s
-// with "no Route matched with those values" (confirmed against the live
-// API 2026-08-29 — see ADR 0020 correction).
+// time. CreateRecords and batch update (PATCH) both use POST/PATCH /v1/api/records.
+// The un-prefixed GET /records 404s with "no Route matched with those values"
+// (confirmed against the live API 2026-08-29 — see ADR 0020 correction).
 //
 // recordDateFrom, when non-empty (YYYY-MM-DD), filters to records dated
 // on/after that date via recordDate=gte.<value> — the range-filter
@@ -306,6 +303,7 @@ type RecordResult struct {
 }
 
 // CreateRecords posts a batch (max 20). Handles 200 and 207 (partial success).
+// Uses POST /v1/api/records (same endpoint as PATCH for batch updates).
 func (c *Client) CreateRecords(records []NewRecord) ([]RecordResult, error) {
 	if len(records) == 0 {
 		return nil, nil
@@ -320,12 +318,12 @@ func (c *Client) CreateRecords(records []NewRecord) ([]RecordResult, error) {
 			Succeeded int `json:"succeeded"`
 		} `json:"summary"`
 	}
-	status, err := c.do("POST", "/records", map[string]any{"records": records}, &out)
+	status, err := c.do("POST", "/v1/api/records", map[string]any{"records": records}, &out)
 	if err != nil {
 		return nil, err
 	}
 	if status != http.StatusOK && status != http.StatusMultiStatus {
-		return out.Results, fmt.Errorf("POST /records: HTTP %d", status)
+		return out.Results, fmt.Errorf("POST /v1/api/records: HTTP %d", status)
 	}
 	// Some responses may return a bare array; if Results is empty but status ok,
 	// synthesise success results so callers can record IDs when present.
