@@ -11,6 +11,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -181,12 +182,30 @@ func checkCrossIssues(txns []csvtxn.Txn, st *state.State) []string {
 
 func runDetectDuplicates(args []string) error {
 	fs := flag.NewFlagSet("detect-duplicates", flag.ExitOnError)
-	csvPath := fs.String("csv", "../gmail/transactions.csv", "path to transactions.csv")
-	statePath := fs.String("state", "state.json", "path to wallet state.json")
+	csvPath := fs.String("csv", "", "path to transactions.csv (default: $AUTO_DATA_DIR/gmail/transactions.csv)")
+	statePath := fs.String("state", "", "path to wallet state.json (default: $AUTO_DATA_DIR/wallet/state.json)")
 	reportFormat := fs.String("format", "text", "output format: text or json")
 	fs.Parse(args)
 
-	report, err := detectDuplicates(*csvPath, *statePath)
+	// Resolve data paths
+	resolvedCSVPath := *csvPath
+	if resolvedCSVPath == "" {
+		if dataDir := os.Getenv("AUTO_DATA_DIR"); dataDir != "" {
+			resolvedCSVPath = filepath.Join(dataDir, "gmail/transactions.csv")
+		} else {
+			resolvedCSVPath = "../gmail/transactions.csv"
+		}
+	}
+	resolvedStatePath := *statePath
+	if resolvedStatePath == "" {
+		if dataDir := os.Getenv("AUTO_DATA_DIR"); dataDir != "" {
+			resolvedStatePath = filepath.Join(dataDir, "wallet/state.json")
+		} else {
+			resolvedStatePath = "state.json"
+		}
+	}
+
+	report, err := detectDuplicates(resolvedCSVPath, resolvedStatePath)
 	if err != nil {
 		return err
 	}

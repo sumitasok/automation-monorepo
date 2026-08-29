@@ -3,8 +3,9 @@
 Sync the transactions extracted by the **gmail** pack
 (`data/gmail/transactions.csv`) into the **BudgetBakers Wallet** app via the
 Wallet REST API. One record per transaction, processed day by day, deduped by
-`MessageID` (so re-runs never duplicate), each tagged with the label
-`source:automation-monorepo`.
+`MessageID+Amount` composite key (preventing duplicates even if emails repeat),
+preserving actual purchase timestamps from bank alerts, and each tagged with the
+label `source:automation-monorepo`.
 
 See design & rationale in `docs/adr/0009-wallet-pack.md`.
 
@@ -12,17 +13,35 @@ See design & rationale in `docs/adr/0009-wallet-pack.md`.
 
 ## TL;DR
 
+### Via auto CLI (recommended; workspace-integrated)
+
+```bash
+# 1. Preview without creating records (no token needed):
+./auto run wallet-sync -- --dry-run
+
+# 2. Sync for real:
+./auto run wallet-sync
+
+# 3. Check for duplicate issues:
+./auto run wallet-detect-duplicates
+
+# Full pipeline (extract → categorize → sync → check):
+./auto run gmail-wallet-sync
+```
+
+### Direct commands (for development/debugging)
+
 ```bash
 cd packs/wallet
 
-# 1. See exactly what WOULD be synced — no token, no API calls (but accounts.json is still required):
+# Dry run (no token, no API calls):
 make dry-run                       # or: go run . sync --dry-run
 
-# 2. Once configured (token + accounts.json), push for real:
+# Sync for real:
 make sync                          # or: go run . sync
 
-# Scheduler path (env-injected, per ADR 0007):
-../../auto run wallet-sync         # or: make auto-sync
+# Detect duplicates:
+go run . detect-duplicates
 ```
 
 ---
@@ -126,15 +145,44 @@ Records are pushed in batches of ≤20 per day. Successes are written to
 `auto run` injects env + `accounts.json` and applies the manifest's timeout:
 
 ```bash
-../../auto run wallet-sync          # real sync
-make auto-dry-run                    # dry-run via auto (accounts.json still required)
+./auto run wallet-sync              # real sync
+./auto run wallet-sync -- --dry-run # dry-run via auto (accounts.json still required)
 ```
 
 Enable the daily schedule (07:30 IST, after gmail-extract) by setting
 `schedule.enabled: true` in `jobs/wallet-sync/manifest.yaml`, then:
 
 ```bash
-../../auto schedule sync
+./auto schedule sync
+```
+
+### Detect duplicates
+
+Check for potential duplicate records (same MessageID or MessageID+Amount appearing
+multiple times):
+
+```bash
+# Direct command:
+go run . detect-duplicates
+
+# Via auto:
+./auto run wallet-detect-duplicates
+
+# Export as JSON for processing:
+go run . detect-duplicates --format json
+```
+
+The tool reports:
+- **CSV Duplicates**: same MessageID appearing multiple times in `transactions.csv`
+- **State Duplicates**: evidence of same transaction synced multiple times
+- **Cross-Check Issues**: MessageID with different amounts (data anomaly)
+
+Example output:
+```
+=== Duplicate Detection Report ===
+Total Duplicate Records: 0
+Recommendations:
+✓ No duplicates detected. Deduplication is working correctly.
 ```
 
 ---
@@ -168,7 +216,9 @@ Enable the daily schedule (07:30 IST, after gmail-extract) by setting
 
 - **amount** — thousands separators stripped; `Debit` → negative (expense),
   `Credit` → positive (income).
-- **recordDate** — `TxnDate` if parseable, else `EmailDate`; date-only values are
+- **recordDate** — Prefers `EmailDate` (full timestamp with time) over `TxnDate`
+  (often date-only). This preserves the actual time of purchase from bank alerts
+  (e.g. 14:27:56) instead of using the sync schedule time. Date-only values are
   placed at local midnight in `WALLET_TIMEZONE`.
 - **counterParty** — the CSV `Merchant`.
 - **note** — the CSV `Info`/`Subject` plus `[gmail-csv <shortId>]` for tracing
@@ -214,11 +264,15 @@ behavior called the nonexistent endpoint and aborted on its 404).
 
 ## Idempotency & re-runs
 
-`state.json` records every pushed `MessageID` (and the returned Wallet record ID).
-Re-running skips anything already there, so the daily job is safe to run
-repeatedly. To force a full re-sync, delete `state.json` (this will create
-duplicates unless you also remove the previously-created records in Wallet —
-filter them by the `source:automation-monorepo` label).
+`state.json` records every pushed transaction using a composite key: `MessageID + Amount`.
+This ensures idempotency: even if the same email appears multiple times in the CSV
+(or if you have duplicate emails in Gmail), each unique transaction is only synced
+once.
+
+Re-running skips anything already synced, so the daily job is safe to run repeatedly.
+To force a full re-sync, delete `state.json` (this will create duplicates unless you
+also remove the previously-created records in Wallet — filter them by the
+`source:automation-monorepo` label).
 
 ## Filtering / undoing what this pack wrote
 

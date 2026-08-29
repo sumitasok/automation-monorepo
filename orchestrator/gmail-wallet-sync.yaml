@@ -1,11 +1,26 @@
 name: gmail-wallet-sync
-description: Extract Gmail transactions, then categorize them.
+description: >
+  Extract Gmail transactions, categorize them, sync to wallet app, then detect duplicates.
+  Steps: gmail-extract → gmail-categorize → expenses-update-event → wallet-sync →
+  wallet-detect-duplicates (optional).
 steps:
   - job: gmail-extract
     ai: deepseek
+    description: "Fetch emails → extract transactions.csv"
+
   - job: gmail-categorize
     ai: deepseek
     args: ["--batch-size", "0"]
+    description: "AI-categorize extracted transactions"
+
   - job: expenses-update-event
     ai: deepseek
     args: ["--write-csv"]
+    description: "Update calendar events with expense details"
+
+  - job: wallet-sync
+    description: "Sync categorized transactions → BudgetBakers Wallet app"
+
+  - job: wallet-detect-duplicates
+    description: "Optional: Report any duplicate issues in wallet records"
+    skip_on_failure: true

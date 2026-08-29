@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/sumitasok/sa.automation.wallet/internal/config"
@@ -48,9 +49,9 @@ func main() {
 
 func runSync(args []string) error {
 	fs := flag.NewFlagSet("sync", flag.ExitOnError)
-	csvPath := fs.String("csv", "../gmail/transactions.csv", "path to transactions.csv")
-	statePath := fs.String("state", "state.json", "path to dedupe state file")
-	accountsPath := fs.String("accounts", "", "path to accounts.json map (default: $AUTO_PACK_CONFIG_DIR/accounts.json, then ./accounts.json)")
+	csvPath := fs.String("csv", "", "path to transactions.csv (default: $AUTO_DATA_DIR/gmail/transactions.csv)")
+	statePath := fs.String("state", "", "path to dedupe state file (default: $AUTO_DATA_DIR/wallet/state.json)")
+	accountsPath := fs.String("accounts", "", "path to accounts.json map (default: $AUTO_PACK_CONFIG_DIR/accounts.json)")
 	dryRun := fs.Bool("dry-run", false, "parse, map and report — do not call the API or require a token")
 	since := fs.String("since", "", "only sync records on/after this date (YYYY-MM-DD)")
 	until := fs.String("until", "", "only sync records on/before this date (YYYY-MM-DD)")
@@ -62,14 +63,24 @@ func runSync(args []string) error {
 		return fmt.Errorf("load timezone: %w", err)
 	}
 
+	// Resolve data paths: use auto's data dir if env is set, else fall back to relative paths
+	resolvedCSVPath := *csvPath
+	if resolvedCSVPath == "" {
+		resolvedCSVPath = resolveDataPath("gmail/transactions.csv", "../gmail/transactions.csv")
+	}
+	resolvedStatePath := *statePath
+	if resolvedStatePath == "" {
+		resolvedStatePath = resolveDataPath("wallet/state.json", "state.json")
+	}
+
 	cfg, err := config.Load(*accountsPath, !*dryRun)
 	if err != nil {
 		return err
 	}
 
 	opts := sync.Options{
-		CSVPath:   *csvPath,
-		StatePath: *statePath,
+		CSVPath:   resolvedCSVPath,
+		StatePath: resolvedStatePath,
 		DryRun:    *dryRun,
 		Limit:     *limit,
 	}
@@ -121,6 +132,15 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// resolveDataPath returns the path to a data file, using AUTO_DATA_DIR if set
+// (workspace mode via ./auto), otherwise the relative fallback (dev mode).
+func resolveDataPath(autoPath, fallback string) string {
+	if dataDir := os.Getenv("AUTO_DATA_DIR"); dataDir != "" {
+		return filepath.Join(dataDir, autoPath)
+	}
+	return fallback
 }
 
 func usage() {

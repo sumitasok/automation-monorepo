@@ -1,0 +1,32 @@
+id: wallet-detect-duplicates
+name: Wallet duplicate detection report
+description: >
+  Detect potential duplicate wallet records by checking if the same Gmail MessageID
+  or MessageID+Amount combination appears multiple times in the transactions.csv or
+  if they've been synced multiple times to the wallet app.
+category: wallet
+owner: sumit
+language: go
+exec: "go run . detect-duplicates"
+workdir: "."
+tags: [wallet, finance, quality-check]
+visibility: private
+
+runs_on:
+  os: [macos, linux]
+  machines: [home-server]
+
+schedule:
+  cron: ""
+  timezone: Asia/Kolkata
+  enabled: false
+
+runtime:
+  timeout_seconds: 300
+
+data:
+  reads: [../gmail/transactions.csv, state.json]
+  writes: []
+
+health:
+  expect_run_every: manual
