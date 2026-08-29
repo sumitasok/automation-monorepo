@@ -28,6 +28,11 @@ from datetime import datetime
 from collections import defaultdict
 from pathlib import Path
 
+try:
+    import requests
+except ImportError:
+    requests = None
+
 # Set up detailed logging
 log_format = '%(asctime)s [%(levelname)8s] %(message)s'
 logging.basicConfig(
@@ -303,7 +308,9 @@ def main():
             print(f"... and {len(updates) - 20} more")
 
     if apply_all or apply_high:
-        import requests
+        if not requests:
+            logger.error(f"requests module not installed. Install with: pip install requests")
+            sys.exit(1)
 
         logger.info(f"\n{'='*80}")
         logger.info(f"APPLYING UPDATES TO WALLET API")
