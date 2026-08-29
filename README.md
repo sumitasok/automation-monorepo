@@ -65,14 +65,110 @@ directory.
 The `wallet` pack reads the gmail pack's `data/gmail/transactions.csv` and creates
 one Wallet record per transaction (day by day, deduped, tagged with the
 `source:automation-monorepo` label). Full setup in
-**[packs/wallet/RUNBOOK.md](packs/wallet/RUNBOOK.md)**; design in `docs/adr/0009`.
+**[packs/wallet/RUNBOOK.md](packs/wallet/RUNBOOK.md)** and **[WALLET-WORKFLOW.md](WALLET-WORKFLOW.md)**; design in `docs/adr/0009`.
+
+#### Complete Workflow (Recommended)
 
 ```bash
-cd packs/wallet && make dry-run   # preview mappings — no token, no API calls
-./auto config init wallet         # scaffold config/wallet/ (set WALLET_API_TOKEN)
-#   ...then copy accounts.sample.json → config/wallet/accounts.json and fill UUIDs
-./auto run wallet-sync            # sync for real (env-injected, scheduler path)
+export WALLET_API_TOKEN="your-premium-api-token"
+./auto orchestrate gmail-wallet-sync-with-dedup
 ```
+
+This runs 10 steps in sequence:
+1. **wallet-fetch** — Fetches all wallet records from Wallet API → `data/wallet/records.jsonl`
+2. **gmail-extract** — Extracts financial transactions from Gmail inbox → `data/gmail/transactions.csv`
+3. **gmail-categorize** — AI-categorizes transactions using DeepSeek
+4. **wallet-sync-categories** — Syncs Gmail categories to Wallet records with "Unknown" category (±1 day date matching)
+5. **wallet-fetch-accounts** — Refreshes accounts cache from Wallet API → `data/wallet/accounts-cache.json`
+6. **wallet-sync** — Pushes new transactions to Wallet API with automatic retry on rate limits
+7. **wallet-dedup scan** — Scans for duplicate records by MessageID (read-only)
+8. **wallet-dedup review** — Interactive: reviews duplicates and collects keep/delete decisions
+9. **wallet-dedup execute** — Deletes duplicate records from Wallet API
+10. **wallet-dedup finalize** — Removes deleted records from local `records.jsonl`, creates backup
+
+#### Individual Commands
+
+**Setup**:
+```bash
+./auto config init wallet                    # Scaffold config/wallet/ (set WALLET_API_TOKEN)
+# Then edit config/wallet/accounts.json to map account codes to Wallet UUIDs
+```
+
+**Fetch & Extract**:
+```bash
+./auto run wallet-fetch                      # Fetch current wallet records (for reference)
+./auto run gmail-extract                     # Extract transactions from Gmail
+./auto run gmail-categorize                  # AI-categorize transactions (requires DEEPSEEK_API_KEY)
+```
+
+**Categorize in Wallet**:
+```bash
+./auto run wallet-sync-categories            # Dry-run: show what categories would sync
+./auto run wallet-sync-categories -- --apply # Apply all category updates (all confidence levels)
+./auto run wallet-sync-categories -- --apply-high  # Apply only high-confidence matches (same-day)
+./auto run wallet-fetch-accounts             # Refresh accounts cache for fallback matching
+```
+
+**Sync to Wallet**:
+```bash
+./auto run wallet-sync                       # Push transactions to Wallet API (with rate-limit retry)
+```
+
+**Deduplication Workflow**:
+```bash
+./auto run wallet-dedup scan                 # Detect duplicates (read-only)
+./auto run wallet-dedup review               # Interactive: review and collect decisions
+# Generates: data/wallet/.dedup-decisions-{timestamp}.json
+
+./auto run wallet-dedup execute --decisions-file data/wallet/.dedup-decisions-{timestamp}.json
+# DELETE from Wallet API + create backup + save results
+
+./auto run wallet-dedup finalize             # Remove deleted records from local records.jsonl
+```
+
+**Orchestrations**:
+```bash
+./auto orchestrate gmail-wallet-sync                   # Extract → sync (6 steps, no dedup)
+./auto orchestrate gmail-wallet-sync-with-dedup       # Extract → sync → dedup (10 steps, full workflow)
+```
+
+#### What Each Command Achieves
+
+| Command | Input | Output | Purpose |
+|---------|-------|--------|---------|
+| **wallet-fetch** | Wallet API | `records.jsonl` | Mirror all wallet records locally for reference/matching |
+| **gmail-extract** | Gmail inbox | `transactions.csv` | Extract financial transactions from emails |
+| **gmail-categorize** | `transactions.csv` | `transactions.csv` (enhanced) | AI-assign categories using DeepSeek |
+| **wallet-sync-categories** | Gmail CSV + Wallet records | Wallet API updates | Match Gmail categories to Wallet "Unknown" records |
+| **wallet-fetch-accounts** | Wallet API | `accounts-cache.json` | Cache account mappings for fallback matching |
+| **wallet-sync** | `transactions.csv` | Wallet API records | Create records in Wallet, dedupe by MessageID, rate-limit retry |
+| **wallet-dedup scan** | `records.jsonl` | Console output | Identify duplicate records (same MessageID, different amounts/dates) |
+| **wallet-dedup review** | `records.jsonl` | `decisions.json` | Interactive: decide which duplicates to keep/delete |
+| **wallet-dedup execute** | `decisions.json` | Wallet API deletes | Actually DELETE duplicate records from Wallet |
+| **wallet-dedup finalize** | `records.jsonl` + deletion results | `records.jsonl` (updated) | Remove deleted records from local copy, backup original |
+
+#### Key Features
+
+- **Deduplication by MessageID**: Each Gmail MessageID tracked in `state.json` — re-runs never duplicate
+- **Rate-limit retry**: Automatic exponential backoff (2s, 4s, 8s) for HTTP 429 errors
+- **Account mapping**: Fallback to `accounts-cache.json` for unmapped account codes
+- **Category matching**: High confidence (same-day) and medium (±1 day), reviewable before applying
+- **Comprehensive logging**: Every step shows progress, per-record results, success/failure counts
+- **Audit trail**: Dedup decisions and results saved to JSON for review
+- **Backups**: Automatic backups created before any destructive operations
+
+#### Configuration
+
+**Required**:
+- `WALLET_API_TOKEN` — Premium plan API token from https://web.budgetbakers.com/settings/rest-api
+- `config/wallet/accounts.json` — Map CSV account codes to Wallet UUIDs
+
+**Optional**:
+- `WALLET_BASE_URL` — Wallet API endpoint (default: `https://rest.budgetbakers.com/wallet`)
+- `WALLET_TIMEZONE` — Timezone for record dates (default: `Asia/Kolkata`)
+- `WALLET_LABEL_ID` — Label UUID for new records (or use `WALLET_LABEL` name)
+
+See `config/wallet/config.sample.yaml` for all options.
 
 ### Expenses events (AI clustering of transactions into trips, festivals, …)
 
