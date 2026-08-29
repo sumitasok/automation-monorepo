@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -117,12 +118,12 @@ func (c *Client) GetAccounts() ([]Account, error) {
 			Accounts   []Account `json:"accounts"`
 			NextOffset *int      `json:"nextOffset"`
 		}
-		status, err := c.do("GET", fmt.Sprintf("/accounts?limit=200&offset=%d", offset), nil, &page)
+		status, err := c.do("GET", fmt.Sprintf("/v1/api/accounts?limit=200&offset=%d", offset), nil, &page)
 		if err != nil {
 			return nil, err
 		}
 		if status >= 300 {
-			return nil, fmt.Errorf("GET /accounts: HTTP %d", status)
+			return nil, fmt.Errorf("GET /v1/api/accounts: HTTP %d: %w", status, err)
 		}
 		all = append(all, page.Accounts...)
 		if page.NextOffset == nil {
@@ -156,6 +157,109 @@ func (c *Client) GetLabels() ([]Label, error) {
 		offset = *page.NextOffset
 	}
 	return all, nil
+}
+
+// Record is a Wallet record as returned by GET /records, kept as a raw
+// key/value map rather than a fixed struct so fetch can round-trip whatever
+// fields the API returns (id, accountId, amount, category, labels, note,
+// counterParty, transfer, recordDate, createdAt, updatedAt, ...) without
+// risking silent field loss if the live schema gains or renames a field.
+type Record map[string]any
+
+// farPastFloor is sent as the recordDate lower bound when the caller doesn't
+// supply one, so GetRecords always sends an explicit recordDate=gte. filter
+// rather than omitting the parameter — see the recordDateFrom doc below.
+const farPastFloor = "2000-01-01"
+
+// GetRecords lists every record via GET /v1/api/records, paginated 200 at a
+// time (same page size as GetAccounts/GetLabels). Unlike GetAccounts/
+// GetLabels/CreateRecords, which live at the un-prefixed path (e.g.
+// POST /records — confirmed working in production by wallet-sync), reading
+// records requires the /v1/api prefix; the un-prefixed GET /records 404s
+// with "no Route matched with those values" (confirmed against the live
+// API 2026-08-29 — see ADR 0020 correction).
+//
+// recordDateFrom, when non-empty (YYYY-MM-DD), filters to records dated
+// on/after that date via recordDate=gte.<value> — the range-filter
+// dimension this API's own docs describe. When recordDateFrom is empty,
+// farPastFloor is sent instead of omitting the filter entirely: the
+// endpoint's own OpenAPI spec (confirmed 2026-08-29,
+// /wallet/openapi/ui#/Banking/getRecords) documents that an omitted
+// recordDate gets a default 3-month window applied
+// ("appliedRecordDateFilters" in the response) — "[p]rovide any single
+// bound... to override the default". A fetch that relied on the missing-
+// filter default returned only 504 of 6,328 real records, every one dated
+// within the prior ~92 days, before this was understood. Always sending an
+// explicit wide-open lower bound avoids depending on that default — this
+// matters even for updatedAtFrom-only (incremental) calls, since the spec
+// ties the default window to recordDate specifically, independent of any
+// other filter: an incremental fetch that only set updatedAtFrom and left
+// recordDate to its default could silently miss a months-old record that
+// was only just re-categorized, because its (old) recordDate would fall
+// outside the implicit window even though its (recent) updatedAt matches.
+//
+// updatedAtFrom, when non-empty (RFC3339), additionally filters to records
+// last modified on/after that timestamp via updatedAt=gte.<value> — the
+// dimension an incremental fetch uses to catch both newly-created records
+// and edits to old ones (e.g. a future recategorization job patching an
+// old record's category — recordDate stays the same, updatedAt moves).
+// This is a genuine, documented filter dimension (GET /v1/api/records
+// query param "updatedAt": "Filter by last sync timestamp... Requires
+// range prefix") — an earlier version of this pack used it without also
+// pinning recordDate wide open and saw no effect, which at the time looked
+// like the API silently ignoring it; in hindsight that run most likely
+// never sent updatedAt at all (it predates this parameter existing on this
+// method) and was actually hitting the recordDate default-window bug
+// instead. Left empty, no updatedAt filter is sent at all.
+//
+// withTotal=true is sent only on the first page (offset 0): per the spec it
+// "requires an additional database query", and the total shouldn't change
+// mid-fetch, so one page pays for it rather than every page. Returns the
+// fetched records plus that reported total, so callers can sanity-check the
+// fetched count against what the server itself claims exists. Without
+// withTotal=true the spec's example response shows "total": 0 — i.e. the
+// field is present but meaningless unless explicitly requested; a caller
+// must not treat a zero total as authoritative when withTotal was omitted,
+// which is why GetRecords always requests it on the first page itself
+// rather than leaving that to callers.
+func (c *Client) GetRecords(recordDateFrom, updatedAtFrom string) ([]Record, int, error) {
+	lower := recordDateFrom
+	if lower == "" {
+		lower = farPastFloor
+	}
+	var all []Record
+	apiTotal := 0
+	offset := 0
+	for {
+		path := fmt.Sprintf("/v1/api/records?limit=200&offset=%d&recordDate=gte.%s", offset, url.QueryEscape(lower))
+		if updatedAtFrom != "" {
+			path += "&updatedAt=gte." + url.QueryEscape(updatedAtFrom)
+		}
+		if offset == 0 {
+			path += "&withTotal=true"
+		}
+		var page struct {
+			Records    []Record `json:"records"`
+			NextOffset *int     `json:"nextOffset"`
+			Total      int      `json:"total"`
+		}
+		status, err := c.do("GET", path, nil, &page)
+		if err != nil {
+			return nil, 0, err
+		}
+		if status >= 300 {
+			return nil, 0, fmt.Errorf("GET /v1/api/records: HTTP %d", status)
+		}
+		all = append(all, page.Records...)
+		if offset == 0 {
+			apiTotal = page.Total
+		}
+		if page.NextOffset == nil {
+			break
+		}
+		offset = *page.NextOffset
+	}
+	return all, apiTotal, nil
 }
 
 // CreateLabel creates a label and returns its ID. Best-effort: if the endpoint
