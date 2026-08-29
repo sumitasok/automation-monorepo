@@ -1,0 +1,36 @@
+id: wallet-fetch
+name: Wallet record fetch
+description: >
+  Fetch records from the BudgetBakers Wallet app via GET /v1/api/records
+  and store them locally at data/wallet/records.json (ADR 0020) — full the
+  first run, incrementally (only what changed since the last downloaded
+  record, merged in) on every run after (ADR 0022). This is the local
+  mirror that duplicate-resolution and Unknown-category recategorization
+  (follow-up jobs, not yet built) read from instead of re-querying the API
+  on every pass.
+category: wallet
+owner: sumit
+language: go
+exec: "go run . fetch"
+workdir: "."
+tags: [wallet, finance, sync]
+visibility: private
+
+runs_on:
+  os: [macos, linux]
+  machines: [home-server]
+
+schedule:
+  cron: ""
+  timezone: Asia/Kolkata
+  enabled: false
+
+runtime:
+  timeout_seconds: 600
+
+data:
+  reads: []
+  writes: [records.json]
+
+health:
+  expect_run_every: manual

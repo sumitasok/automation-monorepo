@@ -59,3 +59,7 @@ files:
 #   data/wallet/state.json — the sync dedupe ledger, local (git-ignored).
 data_files:
   - state.json
+  # Full local mirror of every Wallet record (ADR 0020), refreshed by
+  # `wallet-fetch`. Read by duplicate-resolution/recategorization jobs
+  # instead of re-querying the API on every pass.
+  - records.json

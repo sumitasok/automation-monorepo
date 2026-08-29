@@ -1,8 +1,8 @@
 # Workspace pack config (git-ignored)
 
 Real config values and secret files for each pack live here, one folder per
-pack: `config/<pack>/`. **Nothing in here except this README is versioned** — it
-holds secrets and machine-local overrides.
+pack: `config/<pack>/`. **Nothing in here except this README and `config.example.yaml` is
+versioned** — it holds secrets and machine-local overrides.
 
 How it works (see `docs/adr/0007`):
 
@@ -15,3 +15,18 @@ How it works (see `docs/adr/0007`):
    is called, from the workspace, without secrets touching either git repo.
 
 Check status any time: `auto config <pack>`.
+
+## Workspace-wide defaults (`config/config.yaml`)
+
+Separate from any pack: `config/config.yaml` holds settings for the
+workspace itself — right now, just `data_dir` (where produced data lives,
+overriding the legacy `data/` symlink-at-workspace-root convention; see ADR
+0021 and ADR 0018 Amendment 3). Copy `config/config.example.yaml` to get
+started:
+
+```
+cp config/config.example.yaml config/config.yaml
+```
+
+then edit it. Unlike per-pack config there's no `init` subcommand for this
+one file — `auto` reads it automatically, every run, if it exists.

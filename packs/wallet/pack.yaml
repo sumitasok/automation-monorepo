@@ -5,7 +5,12 @@ description: >
   the Wallet REST API. Records are processed day by day, deduped by MessageID so
   re-runs never duplicate, and every record carries a single label
   (source:automation-monorepo) so this pack's writes can be filtered in Wallet.
-  One app-backed job (see jobs/wallet-sync/).
+  A second job, wallet-fetch, pulls Wallet records back down via GET
+  /v1/api/records into a local mirror (data/wallet/records.json, ADR 0020) —
+  full the first run, incrementally after (ADR 0022) — that duplicate-
+  resolution and Unknown-category recategorization (follow-up work) read
+  from. Three app-backed jobs (see jobs/wallet-sync/, jobs/wallet-fetch/,
+  jobs/wallet-detect-duplicates/).
 default_visibility: private     # holds a Wallet API token + personal finance data
 maintainers: [sumit]
 # This repo is mounted into a workspace as a pack. The Go code (pure stdlib)

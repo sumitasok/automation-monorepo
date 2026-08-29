@@ -226,3 +226,59 @@ This supersedes Amendment 1's write-roots change (not its diagnosis of the
 too broad). See ADR 0019 for the full `data_files:` mechanism and the
 ADR 0009/0011 amendments recording where wallet's and expenses' state
 actually live now.
+
+## Amendment 3 (2026-08-29): allow-listed roots must be `.resolve()`d — a symlinked `data/` silently denied every write under it
+
+`gmail-extract` started failing on every scheduled run: `writing CSV: opening
+CSV for write: open transactions.csv: operation not permitted`, plus a
+`[WARN] saving forwarded-notes state: ... operation not permitted` on the
+same run. `transactions.csv` is exactly the kind of write this ADR is
+supposed to allow — a symlink from `packs/gmail/transactions.csv` through
+`data/gmail/transactions.csv` — yet the sandbox was denying it.
+
+**Root cause:** on this workspace, `data/` at the workspace root is *itself*
+a symlink (`automation-monorepo/data -> /Users/sumitasok/data`, kept outside
+the repo). `_sandbox_write_roots()` built its allow-list from
+`DATA = WS / "data"` without ever resolving it, so the generated Seatbelt
+profile allow-listed the literal, unresolved path
+`.../automation-monorepo/data`. But `sandbox-exec` evaluates a
+`(subpath ...)` rule against the resolved/canonical path a write actually
+lands on, not the literal string handed to it when the profile was
+generated — this is precisely why the base profile already needed both
+`(subpath "/tmp")` *and* `(subpath "/private/var/folders")` (macOS's real
+`/tmp` resolves into the latter). The real write target,
+`/Users/sumitasok/data/gmail/transactions.csv`, is not a subpath of the
+unresolved `.../automation-monorepo/data` string, so Seatbelt denied it —
+silently, for every write under `data/`, on any machine where `data/` (or,
+had it come up, `config/`) is a symlink outside the workspace. This is a
+strictly more severe version of the exact bug this ADR already exists to
+catch (Amendments 1/2): the *fix itself* had an unresolved-symlink gap.
+
+**Fix:** resolve each allow-listed root once, at the point the workspace
+computes it — `DATA = (WS / "data").resolve()` and a new
+`CONFIG_ROOT = (WS / "config").resolve()` (replacing the five inline
+`WS / "config"` call sites: `pack_config_dir`, `ai_profile_dir`,
+`_sandbox_write_roots`, and both `sandbox-check` probe references) — rather
+than resolving only inside `_macos_sandbox_profile`. This keeps `DATA`/
+`CONFIG_ROOT` consistent everywhere they're used, including the
+`AUTO_DATA_DIR` env var injected into every job's process (several jobs —
+`wallet fetch --out`, `wallet detect-duplicates`, `gmail serve --data-dir`
+— resolve paths from `$AUTO_DATA_DIR` themselves; they now get the real
+path too, not just the sandbox).
+
+**Verification:** `DATA` now resolves to `/Users/sumitasok/data` (confirmed
+via `auto sandbox-check`, which tried to create `/Users/sumitasok/data/state`
+— the correct real target — rather than the old in-repo symlink path).
+Full `sandbox-exec` enforcement itself still needs to be re-verified with
+`auto sandbox-check` run directly on the Mac (this fix was authored and
+partially checked through a Linux-based remote bridge that has no
+`sandbox-exec` binary at all, the same blind spot the original ADR called
+out for its own initial verification).
+
+**Not fixed by this amendment:** a separate, unrelated bug surfaced in the
+same failing run — `filters/_forwarded-notes.yaml.state` (and, it turns out,
+every per-bank `filters/<name>.yaml.state`) is a real file sitting directly
+in `packs/gmail/filters/`, never migrated to the `data_files:` mechanism
+(ADR 0019) the way it should have been alongside `transactions.csv`. The
+sandbox is *correctly* denying that write per this ADR's own contract —
+`packs/` is read-only. Left open for a follow-up ADR/fix.

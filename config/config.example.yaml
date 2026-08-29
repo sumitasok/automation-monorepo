@@ -1,0 +1,25 @@
+# Workspace-wide defaults `auto` assumes when nothing more specific (a
+# pack's own config, a CLI flag, an env var) says otherwise (ADR 0021).
+#
+# This file is COMMITTED — it has no secrets, only documentation and
+# defaults. Real, machine-local values go in config/config.yaml (git-ignored,
+# same convention as every config/<pack>/config.yaml — see config/README.md):
+#
+#   cp config/config.example.yaml config/config.yaml
+#
+# then edit config/config.yaml. It's read automatically on every `auto`
+# invocation — there's no `auto config init` step for this one file.
+
+# Where produced data lives: registries, ledgers, transactions.csv, and
+# everything else under data/<pack>/ (ADR 0019). Absolute path, or a path
+# relative to the workspace root; ~ is expanded. Optional — when unset,
+# `auto` falls back to a `data/` directory (or symlink) at the workspace
+# root, the pre-ADR-0021 convention.
+#
+# Set this explicitly (rather than relying on a `data/` symlink into some
+# other location) if your real data lives outside the workspace — e.g. in
+# an iCloud/Dropbox-synced folder, or just outside version control. ADR
+# 0018 Amendment 3 covers why an unresolved symlink there could silently
+# break every write under it; an explicit data_dir here sidesteps that
+# question entirely.
+data_dir: ""

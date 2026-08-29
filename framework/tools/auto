@@ -35,6 +35,11 @@ FRAMEWORK = Path(__file__).resolve().parent.parent          # .../framework
 VISIBILITIES = ("private", "shared", "public")
 
 
+def load_yaml(p: Path) -> dict:
+    with open(p) as f:
+        return yaml.safe_load(f) or {}
+
+
 # ---------- workspace & packs ------------------------------------------------
 def find_workspace() -> Path:
     """Workspace root = nearest ancestor containing packs.yaml."""
@@ -46,14 +51,56 @@ def find_workspace() -> Path:
     return FRAMEWORK.parent   # fallback: framework usually sits inside the workspace
 
 WS = find_workspace()
-DATA = WS / "data"
+# .resolve(): CONFIG_ROOT/DATA are handed out as AUTO_DATA_DIR / the config
+# dir to every job and (critically) become the write-sandbox's allow-listed
+# roots (ADR 0018). sandbox-exec (Seatbelt) evaluates a (subpath ...) rule
+# against the resolved/canonical path a write actually lands on, not the
+# literal string we hand it — the same reason the base profile already needs
+# both (subpath "/tmp") and (subpath "/private/var/folders"). An unresolved
+# root silently makes every write under it fail EPERM if the directory turns
+# out to be a symlink (ADR 0018 Amendment 3).
+CONFIG_ROOT = (WS / "config").resolve()
+
+def load_workspace_config() -> dict:
+    """Workspace-wide defaults `auto` assumes when nothing more specific (a
+    pack's own config, a CLI flag, an env var) overrides them. Lives at
+    config/config.yaml — git-ignored like everything else under config/
+    (config/README.md), since even a bare directory path can be
+    machine-local. config/config.example.yaml (committed) documents every
+    key `auto` actually reads; copy it to get started — no `auto config
+    init` needed for this one file, it's read automatically if present.
+
+    Distinct from config/<pack>/config.yaml (per-pack secret/env overrides,
+    ADR 0007) and config/ai/<name>.yaml (named AI provider profiles, ADR
+    0015) — this is the one file for settings that belong to the workspace
+    itself, not to any single pack. See ADR 0021."""
+    f = CONFIG_ROOT / "config.yaml"
+    return load_yaml(f) if f.exists() else {}
+
+_WS_CFG = load_workspace_config()
+
+def _resolve_data_dir() -> Path:
+    """Where produced data lives. Prefers an explicit `data_dir:` in
+    config/config.yaml (ADR 0021) — a plain absolute path, or one relative
+    to the workspace root, `.resolve()`d so a configured value that is
+    itself a symlink still lands consistently everywhere DATA is used
+    (sandbox roots, AUTO_DATA_DIR, pack_data_dir()). Falls back to the
+    pre-ADR-0021 convention — a `data/` directory (or symlink) at the
+    workspace root — for a workspace that hasn't added `data_dir` yet; that
+    fallback is itself `.resolve()`d for the same reason (ADR 0018
+    Amendment 3)."""
+    configured = _WS_CFG.get("data_dir")
+    if configured:
+        p = Path(configured).expanduser()
+        if not p.is_absolute():
+            p = WS / p
+        return p.resolve()
+    return (WS / "data").resolve()
+
+DATA = _resolve_data_dir()
 GEN = WS / "schedules" / "generated"
 WORKLOG = WS / "docs" / "worklog"
 ORCH_DIR = WS / "orchestrator"
-
-def load_yaml(p: Path) -> dict:
-    with open(p) as f:
-        return yaml.safe_load(f) or {}
 
 def load_packs() -> list[dict]:
     pf = WS / "packs.yaml"
@@ -75,7 +122,7 @@ def pack_default_vis(pack: dict) -> str:
 
 def pack_config_dir(pack_name: str) -> Path:
     """Workspace-local, git-ignored dir holding a pack's real config + secrets."""
-    return WS / "config" / pack_name
+    return CONFIG_ROOT / pack_name
 
 def pack_data_dir(pack_name: str) -> Path:
     """Workspace-local dir holding a pack's own produced data — registries,
@@ -121,7 +168,7 @@ def load_pack_config(pack: dict):
 def ai_profile_dir() -> Path:
     """Workspace-local, git-ignored dir holding named AI provider profiles,
     shared by every pack — see config/ai/README.md."""
-    return WS / "config" / "ai"
+    return CONFIG_ROOT / "ai"
 
 def load_ai_profile(name: str) -> dict:
     """Load and validate config/ai/<name>.yaml: provider, api_key (required),
@@ -329,7 +376,7 @@ def _sandbox_write_roots(j: dict) -> list[Path]:
     briefly widened to include the whole pack directory in Amendment 1,
     which was too broad — reverted) and ADR 0019 (the data_files
     mechanism)."""
-    roots = [WS / "config", DATA]
+    roots = [CONFIG_ROOT, DATA]
     lang = j.get("language", "")
     if lang == "go" and shutil.which("go"):
         for key in ("GOCACHE", "GOMODCACHE", "GOPATH"):
@@ -473,12 +520,12 @@ def cmd_sandbox_check(args):
     blocked), and a read from packs/ (must succeed, since job code has to be
     readable to run)."""
     probe_data = DATA / "state" / ".sandbox-check"
-    probe_config = (WS / "config") / ".sandbox-check"
+    probe_config = CONFIG_ROOT / ".sandbox-check"
     probe_root = WS / ".sandbox-check-should-fail"
     probe_home = Path.home() / ".sandbox-check-should-fail"
     read_probe = WS / "packs.yaml"
     (DATA / "state").mkdir(parents=True, exist_ok=True)
-    (WS / "config").mkdir(parents=True, exist_ok=True)
+    CONFIG_ROOT.mkdir(parents=True, exist_ok=True)
 
     script = f'''
 try() {{

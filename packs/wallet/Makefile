@@ -35,6 +35,10 @@ sync: ## sync transactions.csv -> Wallet (needs WALLET_API_TOKEN + accounts.json
 dry-run: ## parse + map + report only; no API calls, no token needed; override source with CSV=path
 	$(GO) run $(PKG) sync --dry-run --csv $(CSV) $(ARGS)
 
+.PHONY: fetch
+fetch: ## pull Wallet records -> records.json; full first run, incremental after (needs WALLET_API_TOKEN)
+	$(GO) run $(PKG) fetch $(ARGS)
+
 ## ---- run (via auto: env-injected, scheduler path) ----------------------
 
 .PHONY: auto-sync
@@ -44,6 +48,10 @@ auto-sync: ## run wallet-sync through the workspace auto CLI; override source wi
 .PHONY: auto-dry-run
 auto-dry-run: ## dry-run wallet-sync through auto (no token needed; accounts.json still required); override source with CSV=path
 	$(AUTO) run wallet-sync -- --dry-run --csv $(CSV) $(ARGS)
+
+.PHONY: auto-fetch
+auto-fetch: ## run wallet-fetch through the workspace auto CLI; full first run, incremental after
+	$(AUTO) run wallet-fetch -- $(ARGS)
 
 ## ---- quality -----------------------------------------------------------
 
