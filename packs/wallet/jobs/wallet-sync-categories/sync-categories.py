@@ -219,10 +219,16 @@ def main():
     if apply_all or apply_high:
         import requests
 
+        # Token is injected by auto framework from config/wallet/config.yaml
         token = os.getenv('WALLET_API_TOKEN')
+
         if not token:
-            print("\n❌ WALLET_API_TOKEN not set")
-            print("   Export it before running: export WALLET_API_TOKEN=<your-token>")
+            print("\n❌ WALLET_API_TOKEN not configured")
+            print(f"\n   The auto framework reads from: config/wallet/config.yaml")
+            print(f"   Under the 'env:' section:")
+            print(f"     WALLET_API_TOKEN: <your-actual-token>")
+            print(f"\n   Get your token from: https://app.budgetbakers.com/settings/api")
+            print(f"   (Premium plan required)")
             sys.exit(1)
 
         print(f"\n🚀 APPLYING UPDATES TO WALLET API...")

@@ -32,7 +32,7 @@ schedule:
 runtime:
   timeout_seconds: 300
   env:
-    - WALLET_API_TOKEN     # optional; required only for --apply flag
+    - WALLET_API_TOKEN     # from config/wallet/config.yaml; required for --apply flag
 
 data:
   reads:
