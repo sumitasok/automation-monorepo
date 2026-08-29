@@ -1,26 +1,30 @@
 name: gmail-wallet-sync
 description: >
-  Extract Gmail transactions, categorize them, sync to wallet app, then detect duplicates.
-  Steps: gmail-extract → gmail-categorize → expenses-update-event → wallet-sync →
-  wallet-detect-duplicates (optional).
+  Complete wallet sync pipeline: fetch wallet records, extract & categorize Gmail transactions,
+  sync categories to wallet Unknown records, fetch accounts, detect duplicates, then push to Wallet API.
+  Steps: wallet-fetch → gmail-extract → gmail-categorize → wallet-sync-categories →
+  wallet-fetch-accounts → wallet-dedup → wallet-sync.
 steps:
+  - job: wallet-fetch
+    description: "Fetch current wallet records from Wallet API → records.jsonl"
+
   - job: gmail-extract
-    ai: deepseek
-    description: "Fetch emails → extract transactions.csv"
+    description: "Fetch emails → extract transactions to transactions.csv"
 
   - job: gmail-categorize
     ai: deepseek
-    args: ["--batch-size", "0"]
-    description: "AI-categorize extracted transactions"
+    description: "AI-categorize extracted transactions with DeepSeek"
 
-  - job: expenses-update-event
-    ai: deepseek
-    args: ["--write-csv"]
-    description: "Update calendar events with expense details"
+  - job: wallet-sync-categories
+    args: ["--apply"]
+    description: "Sync Gmail categories to Wallet Unknown records (±1 day matching)"
+
+  - job: wallet-fetch-accounts
+    description: "Refresh accounts cache from Wallet API → accounts-cache.json"
+
+  - job: wallet-dedup
+    args: ["scan"]
+    description: "Scan for potential duplicate records (safe, read-only)"
 
   - job: wallet-sync
-    description: "Sync categorized transactions → BudgetBakers Wallet app"
-
-  - job: wallet-detect-duplicates
-    description: "Optional: Report any duplicate issues in wallet records"
-    skip_on_failure: true
+    description: "Push transactions to Wallet API with automatic retry on rate limits"
