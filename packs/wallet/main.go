@@ -107,6 +107,11 @@ func runSync(args []string) error {
 			fmt.Printf("Accounts cache: %s\n", accountsCacheFile)
 		}
 	}
+	// Load accounts cache for fallback matching (even in dry-run)
+	if err := cfg.LoadAccountsCache(accountsCacheFile); err != nil {
+		fmt.Printf("Warning: could not load accounts cache: %v\n", err)
+		// Continue anyway — explicit accounts.json mapping still works
+	}
 	fmt.Println()
 
 	opts := sync.Options{

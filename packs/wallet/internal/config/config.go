@@ -18,6 +18,13 @@ type AccountRule struct {
 	PaymentType string `json:"paymentType,omitempty"`
 }
 
+// CachedAccount represents an account from accounts-cache.json
+type CachedAccount struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	LastDigits string `json:"lastDigits"`
+}
+
 // Config is the fully-resolved runtime configuration.
 type Config struct {
 	BaseURL            string                 // Wallet REST base URL
@@ -30,6 +37,8 @@ type Config struct {
 	// DefaultAccount is used for rows whose account code is empty or unmapped.
 	// Key "_default" inside the accounts map. Empty AccountID means "skip".
 	DefaultAccount AccountRule
+	// AccountsCache is populated from accounts-cache.json for fallback matching
+	AccountsCache []CachedAccount // Wallet API accounts cache for fuzzy matching
 }
 
 const (
@@ -82,6 +91,37 @@ func Load(accountsPath string, requireToken bool) (*Config, error) {
 	return c, nil
 }
 
+// LoadAccountsCache loads the accounts-cache.json file if it exists.
+// This provides a fallback for account matching when the explicit accounts.json
+// doesn't have an entry. The cache contains all accounts synced from the Wallet API
+// with their lastDigits (e.g. "6003" for "XX6003").
+func (c *Config) LoadAccountsCache(cachePath string) error {
+	if cachePath == "" || !fileExists(cachePath) {
+		return nil // Cache file is optional
+	}
+
+	raw, err := os.ReadFile(cachePath)
+	if err != nil {
+		return fmt.Errorf("read accounts cache %s: %w", cachePath, err)
+	}
+
+	var cacheData struct {
+		Accounts []CachedAccount `json:"accounts"`
+	}
+	if err := json.Unmarshal(raw, &cacheData); err != nil {
+		return fmt.Errorf("parse accounts cache %s: %w", cachePath, err)
+	}
+
+	c.AccountsCache = cacheData.Accounts
+	return nil
+}
+
+// fileExists returns true if the file exists and is readable
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
 // ResolveAccount returns the Wallet account ID and payment type for a CSV
 // account code, applying the default rule and default payment type. ok is
 // false when the row should be skipped (no mapping and no default account).
@@ -100,6 +140,13 @@ func (c *Config) ResolveAccount(code string) (accountID, paymentType string, ok 
 			if r, ok2 := c.Accounts[key]; ok2 && r.AccountID != "" {
 				rule, found = r, true
 			}
+		}
+	}
+	// If still not found, try matching against accounts cache (fallback)
+	if !found || rule.AccountID == "" {
+		if acc, matched := c.fuzzyMatchAccountCache(code); matched {
+			rule = AccountRule{AccountID: acc.ID}
+			found = true
 		}
 	}
 	if !found || rule.AccountID == "" {
@@ -135,13 +182,40 @@ func (c *Config) fuzzyMatchAccount(code string) (key string, matched bool) {
 			return candidates[0], true
 		}
 		// 0 matches: fall through to the shorter suffix length. 2+ matches:
-		// ambiguous at this length — a shorter suffix would only be MORE
+		// ambiguous at this level — a shorter suffix would only be MORE
 		// ambiguous, so give up entirely rather than trying length 3 too.
 		if len(candidates) > 1 {
 			return "", false
 		}
 	}
 	return "", false
+}
+
+// fuzzyMatchAccountCache finds a cached account (from Wallet API) matching code's
+// trailing digits, trying a 4-digit suffix first, then a 3-digit suffix.
+// This is a fallback when the explicit accounts.json doesn't have an entry.
+func (c *Config) fuzzyMatchAccountCache(code string) (acc CachedAccount, matched bool) {
+	for _, n := range []int{4, 3} {
+		codeSuffix, ok := lastDigits(code, n)
+		if !ok {
+			continue
+		}
+		var candidates []CachedAccount
+		for _, acc := range c.AccountsCache {
+			// Match against lastDigits field from cache (e.g., "6003")
+			if cacheSuffix, ok := lastDigits(acc.LastDigits, n); ok && cacheSuffix == codeSuffix {
+				candidates = append(candidates, acc)
+			}
+		}
+		if len(candidates) == 1 {
+			return candidates[0], true
+		}
+		// 0 matches: fall through to shorter suffix. 2+ matches: ambiguous, give up.
+		if len(candidates) > 1 {
+			return CachedAccount{}, false
+		}
+	}
+	return CachedAccount{}, false
 }
 
 // lastDigits returns the last n digit characters found in s (scanning from
