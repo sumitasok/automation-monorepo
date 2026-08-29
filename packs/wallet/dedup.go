@@ -759,7 +759,8 @@ func runDedupReview(args []string) error {
 
 	// Save decisions to file
 	if *decisionsFile == "" {
-		*decisionsFile = ".dedup-decisions-" + time.Now().Format("20060102-150405") + ".json"
+		defaultName := ".dedup-decisions-" + time.Now().Format("20060102-150405") + ".json"
+		*decisionsFile = resolveDataPath("wallet/"+defaultName, defaultName)
 	}
 
 	if err := saveDedupDecisions(decisions, *decisionsFile); err != nil {
