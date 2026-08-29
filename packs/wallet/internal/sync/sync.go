@@ -16,6 +16,34 @@ import (
 	"github.com/sumitasok/sa.automation.wallet/internal/wallet"
 )
 
+// retryWithBackoff retries a function with exponential backoff on rate limit (429)
+func retryWithBackoff(out func(string, ...any), fn func() ([]wallet.RecordResult, error)) ([]wallet.RecordResult, error) {
+	var results []wallet.RecordResult
+	var err error
+	baseDelay := 2 * time.Second
+	maxRetries := 3
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		results, err = fn()
+		if err == nil {
+			return results, nil
+		}
+
+		// Check if this is a rate limit error
+		if strings.Contains(err.Error(), "429") {
+			if attempt < maxRetries {
+				delay := baseDelay * time.Duration(1<<uint(attempt)) // exponential backoff: 2s, 4s, 8s
+				out("rate limited (429) — waiting %v before retry %d/%d", delay, attempt+1, maxRetries)
+				time.Sleep(delay)
+				continue
+			}
+		}
+		// Non-rate-limit error or max retries exceeded
+		return results, err
+	}
+	return results, err
+}
+
 // Options controls a sync run.
 type Options struct {
 	CSVPath   string
@@ -201,7 +229,9 @@ func (r *Runner) Run(o Options) (Result, error) {
 			}
 			totalBatches := (len(items) + batchSize - 1) / batchSize
 			r.Out("  batch %d/%d: sending %d record(s)...", batchNum, totalBatches, len(recs))
-			results, err := r.Client.CreateRecords(recs)
+			results, err := retryWithBackoff(r.Out, func() ([]wallet.RecordResult, error) {
+				return r.Client.CreateRecords(recs)
+			})
 			if err != nil && len(results) == 0 {
 				return res, fmt.Errorf("create records for %s: %w", day, err)
 			}
