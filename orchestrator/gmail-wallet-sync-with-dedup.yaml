@@ -1,0 +1,45 @@
+name: gmail-wallet-sync-with-dedup
+description: >
+  Complete wallet sync pipeline with deduplication: fetch wallet records,
+  extract & categorize Gmail transactions, sync categories to Wallet Unknown records,
+  fetch accounts, push to Wallet API, then scan for and remove duplicates.
+  Steps: wallet-fetch → gmail-extract → gmail-categorize → wallet-sync-categories →
+  wallet-fetch-accounts → wallet-sync → wallet-dedup-scan → wallet-dedup-review →
+  wallet-dedup-execute → wallet-dedup-finalize.
+
+steps:
+  - job: wallet-fetch
+    description: "Fetch current wallet records from Wallet API → records.jsonl"
+
+  - job: gmail-extract
+    description: "Fetch emails → extract transactions to transactions.csv"
+
+  - job: gmail-categorize
+    ai: deepseek
+    description: "AI-categorize extracted transactions with DeepSeek"
+
+  - job: wallet-sync-categories
+    args: ["--apply"]
+    description: "Sync Gmail categories to Wallet Unknown records (±1 day matching)"
+
+  - job: wallet-fetch-accounts
+    description: "Refresh accounts cache from Wallet API → accounts-cache.json"
+
+  - job: wallet-sync
+    description: "Push transactions to Wallet API with automatic retry on rate limits"
+
+  - job: wallet-dedup
+    args: ["scan"]
+    description: "Scan for duplicate records by MessageID (read-only, no changes)"
+
+  - job: wallet-dedup
+    args: ["review"]
+    description: "Interactive: review duplicates and collect keep/delete decisions → decisions file"
+
+  - job: wallet-dedup
+    args: ["execute"]
+    description: "Execute dedup: DELETE from Wallet API, create backup, save results"
+
+  - job: wallet-dedup
+    args: ["finalize"]
+    description: "Finalize: remove deleted records from local records.jsonl, create backup"
