@@ -91,7 +91,6 @@ func runSync(args []string) error {
 	}
 
 	fmt.Printf("Working directory: %s\n", filepath.Dir(resolvedStatePath))
-	fmt.Printf("Reading CSV: %s\n", resolvedCSVPath)
 	fmt.Printf("State file (dedup ledger): %s\n", resolvedStatePath)
 
 	// Sync accounts cache (for auto-resolution of unmapped codes)
