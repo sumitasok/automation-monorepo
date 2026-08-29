@@ -463,6 +463,9 @@ func runDedupScan(args []string) error {
 		*recordsFile = resolveDataPath("wallet/records.json", "records.json")
 	}
 
+	fmt.Printf("Working directory: %s\n", filepath.Dir(*recordsFile))
+	fmt.Printf("Reading records: %s\n\n", *recordsFile)
+
 	// Detect duplicates
 	groups, err := detectRecordDuplicates(*recordsFile, *dedupConfig, *minConfidence)
 	if err != nil {
@@ -697,6 +700,9 @@ func runDedupReview(args []string) error {
 	if *recordsFile == "" {
 		*recordsFile = resolveDataPath("wallet/records.json", "records.json")
 	}
+
+	fmt.Printf("Working directory: %s\n", filepath.Dir(*recordsFile))
+	fmt.Printf("Reading records: %s\n\n", *recordsFile)
 
 	// Detect duplicates first
 	groups, err := detectRecordDuplicates(*recordsFile, *dedupConfig, 0.5)
@@ -1080,6 +1086,10 @@ func runDedupFinalize(args []string) error {
 		*stateFile = resolveDataPath("wallet/state.json", "state.json")
 	}
 
+	fmt.Printf("Working directory: %s\n", filepath.Dir(*recordsFile))
+	fmt.Printf("Records file: %s\n", *recordsFile)
+	fmt.Printf("Results file: %s\n\n", *resultsFile)
+
 	// Load original records
 	snap, err := loadRecords(*recordsFile)
 	if err != nil {
@@ -1189,8 +1199,11 @@ func runDedupExecute(args []string) error {
 		*stateFile = resolveDataPath("wallet/state.json", "state.json")
 	}
 
+	resultsFile := strings.TrimSuffix(*recordsFile, ".json") + "-dedup-results.json"
+	fmt.Printf("Working directory: %s\n", filepath.Dir(*recordsFile))
 	fmt.Printf("Records: %s\n", *recordsFile)
 	fmt.Printf("Decisions: %s\n", *decisionFile)
+	fmt.Printf("Results will be saved to: %s\n\n", resultsFile)
 
 	// Validate inputs before proceeding
 	if err := validateRecordsFile(*recordsFile); err != nil {
