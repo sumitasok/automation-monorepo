@@ -44,6 +44,10 @@ func main() {
 		if err := runDedup(os.Args[2:]); err != nil {
 			log.Fatalf("error: %v", err)
 		}
+	case "fetch-accounts":
+		if err := runFetchAccounts(os.Args[2:]); err != nil {
+			log.Fatalf("error: %v", err)
+		}
 	case "-h", "--help", "help":
 		usage()
 	default:
@@ -181,7 +185,9 @@ func usage() {
 
 Usage:
   wallet sync [flags]
-  wallet dedup [scan|review|execute] [flags]
+  wallet fetch-accounts [flags]
+  wallet dedup [scan|review|execute|finalize] [flags]
+  wallet detect-duplicates [flags]
 
 Flags (sync):
   --csv PATH        transactions.csv to read (default ../gmail/transactions.csv)
