@@ -10,18 +10,23 @@ Run pack operations via `./auto` with these commands:
 
 ### Wallet Pack
 
-**Fetch and cache all Wallet accounts** (optional, enables auto-resolution of unmapped codes):
-```bash
-./auto run wallet-fetch-accounts
-```
-Fetches all accounts from Wallet API and caches them locally at `data/wallet/accounts-cache.json`. Indexed by ID, name, and last-4 digits for fast lookup. During sync, unmapped account codes are resolved against this cache instead of being skipped.
-
 **Sync transactions**:
 ```bash
 ./auto run wallet-sync              # Real sync (requires WALLET_API_TOKEN)
 ./auto run wallet-sync -- --dry-run # Dry-run (no token, no API calls)
 ```
-Reads `data/gmail/transactions.csv`, creates one Wallet record per transaction, deduped by `MessageID+Amount`, tagged with label `source:automation-monorepo`. Uses `config/wallet/accounts.json` for explicit account mappings, falls back to cache if available.
+Reads `data/gmail/transactions.csv`, creates one Wallet record per transaction, deduped by `MessageID+Amount`, tagged with label `source:automation-monorepo`.
+
+Account mapping:
+1. **Explicit mapping**: Uses `config/wallet/accounts.json` first (highest priority)
+2. **Auto-resolution**: Syncs and caches all Wallet accounts at `data/wallet/accounts-cache.json` (updated if > 24h old)
+3. **Fallback**: Unmapped accounts with empty code are skipped (set `_default.accountId` in accounts.json to map them)
+
+**Manual account cache refresh** (rarely needed):
+```bash
+./auto run wallet-fetch-accounts
+```
+Immediately re-fetches and updates accounts cache.
 
 **Dedup workflow** (4-phase):
 ```bash
