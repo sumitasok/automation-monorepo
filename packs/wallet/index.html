@@ -46,6 +46,19 @@
                         </div>
 
                         <div class="form-group">
+                            <label for="pathInput">Records File Path</label>
+                            <input
+                                type="text"
+                                id="pathInput"
+                                name="path"
+                                placeholder="data/wallet/records.jsonl"
+                                required
+                                aria-label="Path to records.jsonl in repo"
+                            >
+                            <small>Path in repo to records.jsonl file (e.g., records.jsonl, wallet/data/records.jsonl)</small>
+                        </div>
+
+                        <div class="form-group">
                             <label for="patInput">GitHub PAT (read-only)</label>
                             <input
                                 type="password"

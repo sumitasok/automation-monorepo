@@ -5,6 +5,7 @@ class WalletApp {
     this.patForm = document.getElementById('patForm');
     this.ownerInput = document.getElementById('ownerInput');
     this.repoInput = document.getElementById('repoInput');
+    this.pathInput = document.getElementById('pathInput');
     this.patInput = document.getElementById('patInput');
     this.authButton = document.getElementById('authButton');
     this.authError = document.getElementById('authError');
@@ -66,7 +67,8 @@ class WalletApp {
         const config = JSON.parse(stored);
         this.ownerInput.value = config.owner || 'sumitasok';
         this.repoInput.value = config.repo || 'automation-monorepo';
-        githubAPI.setRepository(config.owner, config.repo);
+        this.pathInput.value = config.path || 'data/wallet/records.jsonl';
+        githubAPI.setRepository(config.owner, config.repo, config.path);
       } catch (e) {
         // Silently fail, use defaults
         this.setDefaultRepoConfig();
@@ -79,11 +81,12 @@ class WalletApp {
   setDefaultRepoConfig() {
     this.ownerInput.value = 'sumitasok';
     this.repoInput.value = 'automation-monorepo';
-    githubAPI.setRepository('sumitasok', 'automation-monorepo');
+    this.pathInput.value = 'data/wallet/records.jsonl';
+    githubAPI.setRepository('sumitasok', 'automation-monorepo', 'data/wallet/records.jsonl');
   }
 
-  saveRepoConfig(owner, repo) {
-    localStorage.setItem('wallet_repo_config', JSON.stringify({ owner, repo }));
+  saveRepoConfig(owner, repo, path) {
+    localStorage.setItem('wallet_repo_config', JSON.stringify({ owner, repo, path }));
   }
 
   async handleAuthSubmit(e) {
@@ -91,10 +94,11 @@ class WalletApp {
 
     const owner = this.ownerInput.value.trim();
     const repo = this.repoInput.value.trim();
+    const path = this.pathInput.value.trim();
     const pat = this.patInput.value.trim();
 
-    if (!owner || !repo || !pat) {
-      this.showAuthError('Please fill in all fields (Owner, Repository, PAT)');
+    if (!owner || !repo || !path || !pat) {
+      this.showAuthError('Please fill in all fields (Owner, Repository, Path, PAT)');
       return;
     }
 
@@ -107,14 +111,14 @@ class WalletApp {
       appState.setError(null);
 
       // Configure and set PAT
-      githubAPI.setRepository(owner, repo);
+      githubAPI.setRepository(owner, repo, path);
       githubAPI.setPAT(pat);
 
       // Fetch records
       const records = await githubAPI.fetchRecords();
 
       // Store config and PAT securely
-      this.saveRepoConfig(owner, repo);
+      this.saveRepoConfig(owner, repo, path);
       setAuthCookie(pat);
 
       // Update state

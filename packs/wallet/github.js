@@ -5,10 +5,11 @@ class GitHubAPI {
     this.path = 'data/wallet/records.jsonl';
   }
 
-  // Set repository owner and name
-  setRepository(owner, repo) {
+  // Set repository owner, name, and file path
+  setRepository(owner, repo, path = 'data/wallet/records.jsonl') {
     this.owner = owner;
     this.repo = repo;
+    this.path = path;
   }
 
   // Set PAT (never log or expose)
