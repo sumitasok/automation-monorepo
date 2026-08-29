@@ -21,7 +21,60 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 **Caveats**: 
 - When running `go run . --filters-dir ./filters` directly (outside auto), falls back to local `transactions.csv` in pack directory
-- Symlink `packs/gmail/transactions.csv` can now be removed (points to ../../data/gmail/transactions.csv, which was only needed during the symlink era)
+- Symlink `packs/gmail/transactions.csv` removed (was only a workaround for the old era)
+
+---
+
+## Configuration & Data Directory Resolution
+
+### How All Auto Commands Use config.yaml
+
+The `auto` CLI framework automatically handles data directory resolution:
+
+1. **Framework reads config.yaml**:
+   ```yaml
+   # config/config.yaml (git-ignored, machine-local)
+   data_dir: /Users/sumitasok/data
+   ```
+
+2. **Framework passes AUTO_DATA_DIR to every job**:
+   ```bash
+   # Set automatically when running: ./auto run <job>
+   AUTO_DATA_DIR=/Users/sumitasok/data
+   AUTO_WORKSPACE=/Users/sumitasok/Claude/Projects/automation-monorepo
+   AUTO_PACK_CONFIG_DIR=/Users/sumitasok/Claude/Projects/automation-monorepo/config/<pack>
+   ```
+
+3. **All packs use AUTO_DATA_DIR**:
+   - **gmail**: extract, categorize, discover, serve all write to `$AUTO_DATA_DIR/gmail/transactions.csv`
+   - **wallet**: sync/fetch use `$AUTO_DATA_DIR/gmail/transactions.csv`, `$AUTO_DATA_DIR/wallet/records.jsonl`, `$AUTO_DATA_DIR/wallet/state.json`
+   - **expenses**: uses `$AUTO_DATA_DIR` for configuration files
+
+### Example Data Flows
+
+**Gmail extract** → reads emails → writes transactions:
+```bash
+$ ./auto run gmail-extract --ai=deepseek
+# AUTO_DATA_DIR injected by framework
+# Code: defaultCSVPath() checks os.Getenv("AUTO_DATA_DIR")
+# Result: Writes to /Users/sumitasok/data/gmail/transactions.csv
+```
+
+**Wallet sync** → reads transactions → syncs to API:
+```bash
+$ ./auto run wallet-sync -- --dry-run
+# AUTO_DATA_DIR injected by framework
+# Code: resolveDataPath("gmail/transactions.csv") checks AUTO_DATA_DIR
+# Result: Reads from /Users/sumitasok/data/gmail/transactions.csv
+```
+
+### What This Means
+
+✅ **Config-driven**: Data directory lives in machine-local config, not git  
+✅ **No symlinks**: No workarounds or hidden dependencies  
+✅ **Explicit**: Every pack code clearly checks AUTO_DATA_DIR  
+✅ **Portable**: Same code works with different data directories on different machines  
+✅ **Integrated**: Single source of truth (config.yaml) for the entire workspace  
 
 ---
 
