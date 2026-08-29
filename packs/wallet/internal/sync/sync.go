@@ -164,19 +164,23 @@ func (r *Runner) Run(o Options) (Result, error) {
 	sort.Strings(days)
 
 	// Push, day by day, in batches — respecting an optional overall cap.
-	for _, day := range days {
+	r.Out("processing %d transaction(s) across %d day(s)", res.Total, len(days))
+	for dayIdx, day := range days {
 		items := byDay[day]
+		r.Out("[%d/%d] %s: %d record(s)", dayIdx+1, len(days), day, len(items))
 		if o.DryRun {
-			for _, it := range items {
+			for recIdx, it := range items {
 				if o.Limit > 0 && res.Created >= o.Limit {
 					break
 				}
-				r.Out("DRY %s %+10.2f %-14s %s", day, it.rec.Amount, it.rec.PaymentType, it.txn.Merchant)
+				r.Out("  [%d/%d] DRY %s %+10.2f %-14s %s", recIdx+1, len(items), day, it.rec.Amount, it.rec.PaymentType, it.txn.Merchant)
 				res.Created++
 			}
 			continue
 		}
+		batchNum := 0
 		for start := 0; start < len(items); start += batchSize {
+			batchNum++
 			end := start + batchSize
 			if end > len(items) {
 				end = len(items)
@@ -195,6 +199,8 @@ func (r *Runner) Run(o Options) (Result, error) {
 			for i, it := range chunk {
 				recs[i] = it.rec
 			}
+			totalBatches := (len(items) + batchSize - 1) / batchSize
+			r.Out("  batch %d/%d: sending %d record(s)...", batchNum, totalBatches, len(recs))
 			results, err := r.Client.CreateRecords(recs)
 			if err != nil && len(results) == 0 {
 				return res, fmt.Errorf("create records for %s: %w", day, err)
@@ -220,29 +226,37 @@ func (r *Runner) Run(o Options) (Result, error) {
 // as created.
 func applyResults(chunk []item, results []wallet.RecordResult, st *state.State, res *Result, out func(string, ...any)) {
 	if len(results) == 0 {
-		for _, it := range chunk {
+		out("    → all %d record(s) created (200 OK, no per-item results)", len(chunk))
+		for idx, it := range chunk {
 			amount := round2(it.txn.SignedAmount())
 			day := it.txn.Date.Format("2006-01-02")
 			st.Mark(it.txn.MessageID, "", day, amount)
 			res.Created++
+			out("      [%d/%d] ✅ %s %+10.2f %s", idx+1, len(chunk), short(it.txn.MessageID), amount, it.txn.Merchant)
 		}
 		return
 	}
-	for _, rr := range results {
+	succeeded := 0
+	failed := 0
+	for resultIdx, rr := range results {
 		if rr.InputIndex < 0 || rr.InputIndex >= len(chunk) {
 			continue
 		}
 		it := chunk[rr.InputIndex]
+		amount := round2(it.txn.SignedAmount())
+		day := it.txn.Date.Format("2006-01-02")
 		if rr.Success {
-			amount := round2(it.txn.SignedAmount())
-			day := it.txn.Date.Format("2006-01-02")
 			st.Mark(it.txn.MessageID, rr.ID, day, amount)
 			res.Created++
+			succeeded++
+			out("      [%d/%d] ✅ %s %+10.2f %s → %s", resultIdx+1, len(results), short(it.txn.MessageID), amount, it.txn.Merchant, rr.ID)
 		} else {
 			res.Failed++
-			out("fail %s %s: %s (%s)", it.txn.Date.Format("2006-01-02"), short(it.txn.MessageID), rr.Error, rr.ErrorType)
+			failed++
+			out("      [%d/%d] ❌ %s %+10.2f %s: %s (%s)", resultIdx+1, len(results), short(it.txn.MessageID), amount, it.txn.Merchant, rr.Error, rr.ErrorType)
 		}
 	}
+	out("    → %d succeeded, %d failed", succeeded, failed)
 }
 
 func hasAnyAccountMapping(cfg *config.Config) bool {
