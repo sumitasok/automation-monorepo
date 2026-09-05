@@ -67,3 +67,9 @@ data/state/*.db
 # Speckit worktree/feature tracking — local-only, machine-specific
 .claude/spec-map.json
 .worktrees/
+
+# External configuration — NEVER versioned in this repo
+# Location: ~/automation-monorepo-config/ (outside this repository)
+# Contains: config/, data/, rules/ — user-local and sensitive
+# This is the Single Source of Truth for all domain runtime configuration
+# Injected to framework at startup via --config-path parameter
