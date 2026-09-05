@@ -74,7 +74,8 @@ function fetchRecords() {
   return new Promise((resolve, reject) => {
     console.log('📥 Fetching records from Wallet API...');
 
-    const url = new URL('/v1/api/records?limit=500', walletBaseUrl);
+    // Budget Bakers requires recordDate filter
+    const url = new URL('/v1/api/records?limit=500&offset=0&recordDate=gte.2000-01-01&withTotal=true', walletBaseUrl);
     const options = {
       hostname: url.hostname,
       port: url.port || 443,
@@ -92,8 +93,9 @@ function fetchRecords() {
       res.on('end', () => {
         if (res.statusCode === 200) {
           try {
-            const records = JSON.parse(data);
-            console.log(`✅ Fetched ${records.length} records`);
+            const json = JSON.parse(data);
+            const records = json.records || [];
+            console.log(`✅ Fetched ${records.length} records (total: ${json.total})`);
             resolve(records);
           } catch (e) {
             reject(new Error(`Failed to parse: ${e.message}`));
