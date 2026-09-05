@@ -43,13 +43,13 @@
 Answer each gate for THIS feature. `N/A` is a valid answer where a principle
 does not apply — but state why in one line, do not leave it blank. Any `NO`
 must appear in Complexity Tracking with the simpler alternative that was
-rejected and why. See `.specify/memory/constitution.md` v1.0.0.
+rejected and why. See `.specify/memory/constitution.md` v2.0.0.
 
 | # | Gate | Verdict |
 |---|---|---|
-| I | Does every value the pack needs (env, secrets, produced data) arrive via a `config.sample.yaml` declaration the workspace supplies — with no absolute path, workspace-relative path, or environment inspection in the pack? | |
-| II | Does the pack write **nothing** into `packs/` — every secret to `config/<pack>/`, every produced file to `data/<pack>/`, each reached through a declared symlink? | |
-| III | If this feature has a UI: is it a static artefact under `data/<pack>/`, declared in the manifest, opening correctly from disk, with no port bound and no route owned by the pack? | |
+| I | Does every value the pack needs (env, secrets, produced data, rules) arrive via a `config.sample.yaml` declaration the workspace supplies from `${CONFIG_PATH}` (`<domain>/<source>` if this is a domain pack, else flat `<pack>`) — with no absolute path, workspace-relative path, or environment inspection in the pack? | |
+| II | Does the pack write **nothing** into `packs/` or this repo — every secret/data/rule file under `${CONFIG_PATH}/{config,data,rules}/<domain>/<source>/` or `<pack>/`, each reached through a declared symlink? | |
+| III | If this feature has a UI: is it a static artefact under `${CONFIG_PATH}/data/<domain>/<source>/` (or `<pack>/`), declared in the manifest, opening correctly from disk, with no port bound and no route owned by the pack? | |
 | IV | Is every derived artefact regenerated from manifests/config on demand rather than stored, with one loader per fact and no registration step? | |
 | V | Can a new instance of anything this feature handles (source, format, rule, category) be added as data, with one implementation of each shared computation and one contract covering all variants? | |
 | VI | Is every boundary this feature relies on enforced by the sandbox, `auto doctor`, or repo access — not by documentation or convention? | |

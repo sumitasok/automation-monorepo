@@ -88,19 +88,28 @@
 ### Functional Requirements
 
 <!--
-  CONSTITUTION PROMPTS (.specify/memory/constitution.md v1.0.0) — these are
+  CONSTITUTION PROMPTS (.specify/memory/constitution.md v2.0.0) — these are
   workspace-wide constraints, so state them as requirements here rather than
   discovering them at plan time. Skip any that genuinely do not apply.
 
   - If the feature is a pack, or changes one: which values does it need
-    supplied (env, secret files, produced data files), and where does each
-    live — `config/<pack>/` or `data/<pack>/`? A pack declares; the workspace
-    supplies. Nothing personal or produced may sit in `packs/`.
+    supplied (env, secret files, produced data files, rules files), and
+    where does each live — `${CONFIG_PATH}/{config,data,rules}/<domain>/
+    <source>/` if this pack is a domain (e.g. `expense-domain`/`gmail`), or
+    flat `${CONFIG_PATH}/{config,data,rules}/<pack>/` otherwise? A pack
+    declares; the workspace supplies from `${CONFIG_PATH}` (default
+    `~/automation-monorepo-config/`). Nothing personal or produced may sit
+    in `packs/` or in this repository.
+  - If the feature adds a new source to an existing domain: it MUST be
+    addable as a declaration (source name + its `<domain>/<source>` config/
+    data/rules paths), never a new domain or a copied engine.
   - If the feature produces a user interface: it is a static artefact under
-    `data/<pack>/`, declared in the manifest, opening correctly straight from
-    disk. The pack does not serve it and owns no URL. Say so explicitly.
-  - If the feature reads another pack's data: name the owning pack, and
-    require a published versioned schema plus atomic writes on that owner.
+    `${CONFIG_PATH}/data/<domain>/<source>/` (or `<pack>/`), declared in the
+    manifest, opening correctly straight from disk. The pack does not serve
+    it and owns no URL. Say so explicitly.
+  - If the feature reads another pack's or source's data: name the owning
+    pack/source, and require a published versioned schema plus atomic
+    writes on that owner.
   - If the feature handles instances of a varying thing (a source, format,
     institution, rule): require that a new instance be addable as data, with
     one contract covering all variants and no per-instance code path.

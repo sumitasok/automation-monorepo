@@ -69,14 +69,16 @@ Examples of foundational tasks (adjust based on your project):
 - [ ] T007 Create base models/entities that all stories depend on
 - [ ] T008 Configure error handling and logging infrastructure
 
-**Constitution-driven task types** (.specify/memory/constitution.md v1.0.0).
+**Constitution-driven task types** (.specify/memory/constitution.md v2.0.0).
 When the feature involves a pack, these belong in this phase — every user story
 depends on the wiring being right, and retrofitting it later means moving files
 that already hold real data:
 
-- Declare `env:` / `files:` / `data_files:` in the pack's `config.sample.yaml`,
-  and create `data/<pack>/` with its own `.gitignore` recording which files are
-  versioned and which are machine-local (Principles I, II).
+- Declare `env:` / `files:` / `data_files:` / `rules_files:` in the pack's
+  `config.sample.yaml` (plus `sources:` if this is a domain pack), and create
+  the matching `${CONFIG_PATH}/{config,data,rules}/<domain>/<source>/` (or
+  `<pack>/`) directories under `~/automation-monorepo-config/` — never inside
+  this repo (Principles I, II).
 - Write the job manifest, including `data.reads` / `data.writes` and — if the
   feature has a UI — its declared UI artefacts (Principles I, III).
 - Publish the schema for any file another pack reads, before that pack is
