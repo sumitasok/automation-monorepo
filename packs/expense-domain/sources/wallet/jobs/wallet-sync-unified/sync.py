@@ -213,11 +213,15 @@ def fetch_wallet_records(date_from, date_to, account_id=None, dry_run=False):
     # In dry-run mode, skip API calls to avoid errors and test the flow
     if dry_run:
         return []
-    params = {"recordDate": date_from, "limit": 200}
+    # Wallet API uses PostgREST-style filters: recordDate=gte.YYYY-MM-DD&recordDate=lt.YYYY-MM-DD
+    params = {
+        "recordDate": [f"gte.{date_from}", f"lt.{date_to}"],
+        "limit": 200
+    }
     if account_id:
         params["accountId"] = account_id
     result = wallet_get("/records", params=params)
-    return result if isinstance(result, list) else result.get("data", [])
+    return result if isinstance(result, list) else result.get("records", [])
 
 
 # ── category hint mapping (merchant/category → Wallet category keyword) ──
@@ -667,11 +671,18 @@ def part_b(drive_svc, state: dict, categories: dict, labels_cache: dict,
         query_parts.append(f"createdTime > '{drive_cursor}'")
     q = " and ".join(query_parts)
 
-    resp = drive_svc.files().list(
-        q=q, fields="files(id,name,mimeType,createdTime)",
-        orderBy="createdTime"
-    ).execute()
-    files = [f for f in resp.get("files", []) if f["id"] not in processed]
+    try:
+        resp = drive_svc.files().list(
+            q=q, fields="files(id,name,mimeType,createdTime)",
+            orderBy="createdTime"
+        ).execute()
+        files = [f for f in resp.get("files", []) if f["id"] not in processed]
+    except Exception as e:
+        # Drive API not enabled or accessible - skip gracefully
+        if "accessNotConfigured" in str(e) or "403" in str(e):
+            log(f"Part B: Drive API not enabled, skipping (enable in Google Cloud Console)")
+            return 0, drive_cursor
+        raise
 
     if not files:
         log("Part B: no new Drive bill files")
