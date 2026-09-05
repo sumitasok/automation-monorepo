@@ -4,6 +4,39 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-09-05 — Clarify live migration strategy: preserve framework, BDD testing, config consolidation
+
+**Prompt summary**: User provided critical context—this is a migration of a working system with 7 completed features (specs 001-007), not greenfield restructure. Explicit requirements: preserve shared framework utilities unchanged, use BDD-driven testing with behavior documentation, consolidate config into unified directory, enforce Convention over Configuration as prime principle.
+
+**Clarifications Recorded**:
+1. **Migration strategy**: Option C (Preserve-Shared-First) — shared framework (auth, jobs, lib) completely untouched; domains restructure around stable framework APIs
+2. **Testing approach**: BDD (Behavior-Driven Development) — document existing behaviors as acceptance criteria; generate integration tests from behaviors; baseline tests pass against flat structure, then validate against new domain structure
+3. **Config consolidation**: Move config/rules from ~/data, ~/Claude/Projects/automation-monorepo/config, and packs/* into ~/automation-monorepo-config; framework accepts location as parameter and injects to domains
+4. **Architectural principle**: Convention over Configuration (prime rule) — sensible defaults for domain layout, config structure, naming; explicit config only for deviations from convention
+
+**Impact on Spec**:
+- Functional requirements expanded from 11 to 16 (added: framework preservation FR-009, config consolidation FR-010-012, BDD testing FR-013, Convention over Configuration FR-012)
+- Success criteria expanded from 8 to 11 (added: shared framework stability SC-004, BDD documentation SC-005, integration test baseline/validate SC-006, config consolidation SC-007, Convention validation SC-008)
+- Assumptions completely reframed to reflect live migration context (preserve 7 existing features, zero regressions, BDD-driven, config parameterized)
+
+**Zero-Functionality-Loss Guarantee**:
+- All 7 existing features continue working (000-007 specs)
+- Shared framework unchanged; stable APIs
+- Integration tests baseline existing behavior before migration
+- Tests validate post-migration; regressions caught immediately
+- Config consolidation enables cleaner parameterized injection without breaking existing functionality
+
+**Next Phase**:
+- `/speckit-plan` will establish task decomposition for live migration
+- BDD behavior documentation tasks (capture current feature behaviors as acceptance criteria)
+- Integration test generation tasks (write tests from documented behaviors)
+- Shared framework lock-down tasks (verify zero changes to shared/)
+- Domain restructuring tasks (move and reorganize code)
+- Config consolidation tasks (move and unify config from multiple locations)
+- Validation tasks (run tests post-migration to certify zero regressions)
+
+---
+
 ## 2026-09-05 — Clarify multi-domain architecture pattern
 
 **Prompt summary**: Clarify scope and design constraints for restructuring. User revealed the architecture must support multiple independent domains (expense, stock, trip) with reusable pattern; established data I/O boundaries and glossary requirements.
