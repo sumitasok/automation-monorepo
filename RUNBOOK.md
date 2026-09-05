@@ -4,6 +4,24 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-09-05 — Schedule the fixed wallet-sync-unified pipeline (third launchd trigger, others left running)
+
+**Prompt summary**: User asked to schedule the fixed `wallet-sync-unified/sync.py` pipeline, explicitly keeping the other two existing triggers (`com.safinances.wallet-sync`, `com.sumitasok.wallet-sync`) running. Confirmed with user: hourly, real writes (not dry-run).
+
+**Files created** (outside this repo, machine-local):
+- `~/Library/LaunchAgents/com.automation-monorepo.wallet-sync-unified.plist` — new launchd agent, `RunAtLoad: false`, fires hourly at minute :37 (offset from `com.safinances`'s :07 to reduce, not eliminate, same-minute overlap), runs `CONFIG_PATH=~/automation-monorepo-config packs/expense-domain/sources/wallet/scripts/wallet-sync.sh` with real writes (no `--dry-run`). Logs to `~/automation-monorepo-config/data/expense-domain/wallet/logs/launchd-unified.{out,err}.log`.
+
+**Steps taken**: wrote and lint-validated the plist (`plutil -lint`), `launchctl load`'d it. Verified all three agents present via `launchctl list | grep wallet-sync` — none removed, per instruction.
+
+**Outcome**: three independently-scheduled pipelines now write to the same live Wallet account: `com.safinances` (hourly :07, stale Obsidian-vault engine), `com.sumitasok` (6x/day, older Go pipeline, weaker counterparty+amount+day dedup key), and this one (hourly :37, the fixed pipeline, `gm:<message-id>` dedup key, AI-assist auto-enabled from `config/ai/deepseek.yaml`). None of the three dedup mechanisms is a true server-side upsert (see the 2026-09-05 "stale engine" entry above) — this was already a known, flagged risk before scheduling; it is not new, but it is now live on a recurring schedule rather than only during manual/dry-run testing.
+
+**Caveats**:
+- The plist points at **this git worktree's path** (`.worktrees/restructure-architecture`), not the main checkout — because that is the only checkout with these fixes (the main checkout is on a different branch, `topic/restructure-architecture`, without them). Per this project's own worktree workflow (`.worktrees/` are removed after merge), **this plist will break** the moment that worktree is removed. Before merging/cleaning up this worktree: either repoint the plist at a permanent checkout with these commits merged in, or re-run the scheduling step against the post-merge location.
+- Real writes are enabled — every hour at :37, this now actually pushes to Wallet and applies Gmail labels, same as the other two.
+- Consolidating to one pipeline (and removing the redundant two) was recommended, not done — user chose to add this as a third trigger for now rather than replace.
+
+---
+
 ## 2026-09-05 — Auto-enable --ai-assist from the workspace's configured AI profile
 
 **Prompt summary**: User asked for `--ai-assist` to turn on automatically, using whichever AI profile they'd already configured in `config/ai/`, rather than requiring the flag every run.
