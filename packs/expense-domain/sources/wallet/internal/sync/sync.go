@@ -60,6 +60,7 @@ type Options struct {
 type WalletClient interface {
 	EnsureLabel(name string) (string, error)
 	CreateRecords(records []wallet.NewRecord) ([]wallet.RecordResult, error)
+	UpsertRecords(records []wallet.NewRecord) ([]wallet.RecordResult, error)
 }
 
 // Runner holds resolved dependencies for a run.
@@ -228,12 +229,12 @@ func (r *Runner) Run(o Options) (Result, error) {
 				recs[i] = it.rec
 			}
 			totalBatches := (len(items) + batchSize - 1) / batchSize
-			r.Out("  batch %d/%d: sending %d record(s)...", batchNum, totalBatches, len(recs))
+			r.Out("  batch %d/%d: sending %d record(s) [UPSERT: merge if exists]...", batchNum, totalBatches, len(recs))
 			results, err := retryWithBackoff(r.Out, func() ([]wallet.RecordResult, error) {
-				return r.Client.CreateRecords(recs)
+				return r.Client.UpsertRecords(recs)
 			})
 			if err != nil && len(results) == 0 {
-				return res, fmt.Errorf("create records for %s: %w", day, err)
+				return res, fmt.Errorf("upsert records for %s: %w", day, err)
 			}
 			applyResults(chunk, results, st, &res, r.Out)
 			if err := st.Save(); err != nil {
