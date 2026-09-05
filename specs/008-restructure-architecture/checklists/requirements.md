@@ -33,10 +33,11 @@
 
 ## Notes
 
-- Initial 17/17 checklist items passed; clarifications strengthen coverage
-- Clarifications added: 5 critical design decisions documented in Clarifications section
-- 11 functional requirements now cover: domain structure (FR-001-004), data I/O boundaries (FR-006-007), composite domains (FR-008), glossary (FR-010), extensibility (FR-011)
-- 8 success criteria now measure: pattern reusability, data I/O enforcement, glossary creation, domain boundary clarity
+- Initial 17/17 checklist items passed; clarifications significantly strengthen coverage
+- Clarifications added: 8 critical design decisions documented in Clarifications section
+- 16 functional requirements now cover: domain structure (FR-001-004), framework preservation (FR-009), config consolidation (FR-010-012), BDD testing (FR-013), backward compatibility (FR-014), glossary (FR-015), extensibility (FR-016)
+- 11 success criteria now measure: live migration preservation, shared framework stability, BDD behavior documentation, integration test generation, config consolidation, Convention over Configuration validation, pattern reusability, domain boundary clarity
 - One user story restructured to emphasize pattern reusability across multiple domains (not expense-specific)
-- Specifications now align with Constitution Principles II (packs/ Read-Only), I (Packs Declare), and V (Configuration Over Code)
-- Ready to proceed with `/speckit-plan`
+- Specifications now align with Constitution Principles I (Packs Declare), II (packs/ Read-Only), V (Configuration Over Code), and explicitly invoke Convention over Configuration as prime framework principle
+- **Migration scope clarified**: Live migration of 7 working features; preserve shared framework utilities; BDD-driven testing; unified config consolidation
+- Ready to proceed with `/speckit-plan` to establish task decomposition for live migration with zero functionality loss

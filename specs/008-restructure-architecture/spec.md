@@ -74,9 +74,14 @@ As a system designer, I need the organization to demonstrate a scalable pattern,
 - **FR-006**: System MUST enforce data I/O boundaries: domains NEVER write data directly to the repository; all configuration, rules, and data MUST be passed as parameters during initialization
 - **FR-007**: System MUST implement all domain outputs to `data/<domain-name>/` (not inside `packs/<domain-name>/`), ensuring packs/ remains read-only per Constitution Principle II
 - **FR-008**: Composite domains (e.g., financial-planning) MUST be able to declare dependencies on other domains and consume their output data via published schemas
-- **FR-009**: System MUST maintain backward compatibility with existing orchestration scripts during migration (or provide migration path)
-- **FR-010**: System MUST create a root-level glossary documenting: domain, source, source connector, composite domain, cluster, sources pattern, reports pattern, and all architectural terms used throughout the workspace
-- **FR-011**: System MUST support adding new sources and new domains by following the established pattern without modifying code in other domains
+- **FR-009**: System MUST preserve all shared framework utilities (`shared/` with auth, jobs, lib) unchanged during migration; framework APIs remain stable and are not touched by domain restructuring
+- **FR-010**: System MUST consolidate all configuration and rules from multiple locations (~/data, config/<pack>/, packs/*) into unified ~/automation-monorepo-config directory with clear folder structure
+- **FR-011**: System MUST accept config/rules directory location as a parameter when initialized; framework passes this location to all domains so they read from injected path, never discover it
+- **FR-012**: System MUST follow Convention over Configuration as the prime architectural principle: sensible defaults for domain layout, config structure, and naming; only explicit config for deviations from convention
+- **FR-013**: System MUST document existing behaviors as acceptance criteria (BDD format) before migration; generate integration tests from behaviors; tests baseline existing functionality and validate post-migration
+- **FR-014**: System MUST maintain backward compatibility with existing orchestration scripts during migration (or provide migration path)
+- **FR-015**: System MUST create a root-level glossary documenting: domain, source, source connector, composite domain, cluster, sources pattern, reports pattern, framework utilities, and all architectural terms
+- **FR-016**: System MUST support adding new sources and new domains by following the established pattern without modifying code in other domains or shared framework
 
 ### Key Entities *(include if feature involves data)*
 
@@ -92,25 +97,32 @@ As a system designer, I need the organization to demonstrate a scalable pattern,
 
 ### Measurable Outcomes
 
-- **SC-001**: expense-domain restructuring is complete with zero broken imports or paths in existing code
-- **SC-002**: expense-domain demonstrates the pattern: sources/ with 4+ connectors (gmail, sms, imessage, wallet), reports/, and core/ — all following the domains pattern
+- **SC-001**: expense-domain restructuring is complete with zero broken imports or paths; all 7 existing features (001-007 specs) continue to function
+- **SC-002**: expense-domain demonstrates the pattern: sources/ with 4+ connectors (gmail, sms, imessage, wallet), reports/, and core/ — all following the domain pattern
 - **SC-003**: Each source connector has a documented, testable interface contract (read and write-back operations) adhering to the sources pattern
-- **SC-004**: Existing orchestration and CLI scripts continue to function without modification, or migration guide is provided and scripts are updated
-- **SC-005**: Root-level glossary is created documenting domain, source connector, composite domain, sources pattern, reports pattern, and all architectural terms
-- **SC-006**: Data I/O boundaries are enforced: zero data written to packs/<domain>/; all config/rules/data passed as parameters; outputs verified to land in data/<domain>/ only
-- **SC-007**: Documentation clearly demonstrates how to: (a) add a new source to expense-domain, (b) create stock-domain following the pattern, (c) add a composite domain depending on other domains
-- **SC-008**: Architecture makes domain boundaries and the sources/reports/core pattern immediately clear to new developers; pattern is proven reusable (documented for stock-domain, trip-domain)
+- **SC-004**: Shared framework utilities (auth, jobs, lib) remain untouched; zero changes to shared/ code; framework APIs stable
+- **SC-005**: BDD behavior documentation is created for all 7 existing features capturing acceptance criteria; integration tests generated from behaviors
+- **SC-006**: Integration tests baseline existing functionality (pass against flat structure); tests continue to pass after restructuring (pass against new domain structure); zero regressions
+- **SC-007**: Config consolidation from ~/data, config/<pack>/, packs/* into ~/automation-monorepo-config is complete; framework accepts config location as parameter and passes to domains
+- **SC-008**: Convention over Configuration is demonstrated: sensible defaults for domain layout and config structure; explicit configuration needed only for deviations from convention
+- **SC-009**: Root-level glossary is created documenting domain, source connector, composite domain, sources pattern, reports pattern, framework utilities, and all architectural terms
+- **SC-010**: Documentation clearly demonstrates how to: (a) add a new source to expense-domain, (b) create stock-domain following the pattern, (c) add a composite domain depending on other domains
+- **SC-011**: Architecture makes domain boundaries, framework preservation, and the sources/reports/core pattern immediately clear to new developers; pattern is proven reusable (documented for stock-domain, trip-domain)
 
 ## Assumptions
 
+- This is a migration of a live, working system with 7 completed features (specs 001-007); all existing functionality must be preserved
+- Shared framework utilities (auth, jobs, lib in packs/shared/) are stable and untouched; migration restructures domain code only
+- Behavior-Driven Development (BDD) will be used: behaviors are documented as acceptance criteria before migration; integration tests are generated from behaviors
+- Integration tests will be created to baseline existing functionality (passing against current flat structure) before migration begins
+- Configuration and rules scattered across ~/data, ~/Claude/Projects/automation-monorepo/config, and packs/* will be consolidated into ~/automation-monorepo-config
+- Framework will accept config/rules directory location as a parameter and inject it to domains; domains never hardcode or discover config paths
+- Convention over Configuration is the prime architectural principle; sensible defaults eliminate need for explicit configuration in most cases
 - Existing orchestration scripts and CI/CD pipelines can be updated as part of this restructuring
-- The current packs (gmail, wallet, telegram, expenses) will be reorganized into the new domain structure (expense-domain) without losing functionality
 - Write-back capabilities for all sources are optional; read operations are the primary requirement for v1
-- Configuration files and environment variables referencing old pack paths will be migrated during implementation
-- The restructuring will be done in a feature branch and merged once all tests pass
+- The restructuring will be done in a feature branch and merged once all tests pass (both baseline and post-migration tests green)
 - Future domains (stock-domain, trip-domain) will follow the same pattern once expense-domain is complete; they are not part of this feature
-- Constitution Principle II (packs/ Is Read-Only) and VII (Local-First, Least Exposure) will be enforced during implementation
-- Domains will follow Constitution Principle I (Packs Declare, the Workspace Supplies) — all config/rules/data will be injected as parameters, not discovered
+- Constitution Principles I, II, and VII will be enforced during implementation
 
 ## Clarifications
 
@@ -121,4 +133,8 @@ As a system designer, I need the organization to demonstrate a scalable pattern,
 - **Q: What should go into the shared foundation?** → **A: Hybrid: Core Abstractions + Organic Growth** — Establish sources/ pattern, domain manifest schema, composite domain dependency contract now; allow other patterns to emerge as domains are built.
 - **Q: What are the critical data I/O constraints?** → **A: Domains are read-only in repo; all config/rules/data passed as parameters; outputs → data/<domain>/; packs/ remains pristine per Constitution Principle II.**
 - **Q: Should we document architectural terminology?** → **A: Yes, create root-level glossary** documenting domain, source connector, composite domain, sources pattern, reports pattern, and all related terms for workspace clarity.
+- **Q: Migration strategy for existing working system?** → **A: Option C - Preserve-Shared-First** — Identify and freeze shared framework utilities (auth, jobs, lib) as untouchable framework core. Restructure only domain code around stable framework APIs. This is a live migration of working features; framework utilities remain stable.
+- **Q: Testing approach for migration validation?** → **A: Behavior-Driven Development (BDD)** — Document existing behaviors/features as acceptance criteria. Generate integration tests from behaviors. Run tests pre-migration to baseline, during migration to validate, post-migration to certify. Tests drive implementation, not code-first.
+- **Q: Config and data structure for migration?** → **A: Unified config location with parameterized injection** — Consolidate all config/rules from ~/data, ~/Claude/Projects/automation-monorepo/config, and packs/* into single ~/automation-monorepo-config directory. Framework accepts config location as parameter and passes to all domains. Convention over Configuration is the prime principle.
+- **Q: Architectural principle for framework design?** → **A: Convention over Configuration** — Default behaviors, sensible defaults, minimal explicit configuration needed. Only configure what deviates from convention. This principle applies to domain layout, config structure, testing, and all framework decisions.
 
