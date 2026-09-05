@@ -1,0 +1,38 @@
+# Wallet Sync Pack Manifest
+# Declares pack capabilities and dependencies
+
+pack:
+  name: "wallet-sync-unified"
+  version: "1.0.0"
+  description: "Unified wallet sync from Gmail alerts, Drive bills, and manual entries"
+  
+# Framework entry points
+jobs:
+  - name: "wallet-sync"
+    description: "Main wallet sync job (hourly via launchd)"
+    script: "scripts/wallet-sync-unified.sh"
+    schedule: "hourly"
+    
+# Configuration requirements
+config:
+  required:
+    - "config.yaml"
+    - "routing.yaml"
+    - "tag-registry.yaml"
+  optional:
+    - "email-formats/"
+    
+# Data declarations
+data:
+  output:
+    - "last-sync.json"
+    - "labels-cache.json"
+    - "logs/"
+    - "records/"
+
+# External dependencies
+dependencies:
+  - "Gmail API (MCP)"
+  - "Google Drive API (MCP)"
+  - "BudgetBakers Wallet API"
+  - "Obsidian vault"
