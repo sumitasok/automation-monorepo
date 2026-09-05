@@ -14,6 +14,7 @@ class JobStateManager extends EventEmitter {
     this.dbPath = dbPath || path.join(process.env.HOME, 'automation-monorepo-config', 'data', 'job-state.sqlite');
     this.db = null;
     this.executions = new Map(); // In-memory fallback for Phase 5
+    this.locks = new Map(); // In-memory locks: resource -> { holder, expiresAt }
     this.initialized = false;
   }
 
@@ -335,7 +336,19 @@ class JobStateManager extends EventEmitter {
    */
   async acquireLock(resourceId, holderId, ttlSeconds = 3600) {
     if (!this.db) {
-      // In-memory fallback: simple map-based lock
+      // In-memory fallback: map-based lock with TTL
+      const existingLock = this.locks.get(resourceId);
+      const now = Date.now();
+
+      // Check if lock exists and hasn't expired
+      if (existingLock && existingLock.expiresAt > now) {
+        // Lock is held
+        return false;
+      }
+
+      // Lock is free or expired - acquire it
+      const expiresAt = now + (ttlSeconds * 1000);
+      this.locks.set(resourceId, { holder: holderId, expiresAt });
       return true;
     }
 
@@ -363,7 +376,24 @@ class JobStateManager extends EventEmitter {
    * Release distributed lock
    */
   async releaseLock(resourceId, holderId) {
-    if (!this.db) return true;
+    if (!this.db) {
+      // In-memory fallback: check holder matches and remove lock
+      const lock = this.locks.get(resourceId);
+
+      if (!lock) {
+        // No lock exists
+        return true; // Idempotent: releasing non-existent lock succeeds
+      }
+
+      if (lock.holder !== holderId) {
+        // Lock is held by different holder - cannot release
+        return false;
+      }
+
+      // Same holder - release the lock
+      this.locks.delete(resourceId);
+      return true;
+    }
 
     try {
       const stmt = this.db.prepare(`
