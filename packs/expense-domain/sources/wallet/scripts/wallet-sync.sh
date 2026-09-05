@@ -56,7 +56,7 @@ echo ""
 # Run sync.py with all required parameters
 export CONFIG_PATH="$CONFIG_PATH"
 export AUTO_DATA_DIR="$DATA_DIR"
-export WALLET_API_TOKEN="$WALLET_TOKEN"
+export WALLET_AUTH_HEADER="Bearer $WALLET_TOKEN"
 
 python3 "$SCRIPT_DIR/sync.py" \
   $([ "$DRY_RUN" = "true" ] && echo "--dry-run" || echo "") \

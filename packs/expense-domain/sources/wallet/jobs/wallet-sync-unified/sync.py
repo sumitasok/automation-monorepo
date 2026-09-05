@@ -209,8 +209,11 @@ def fetch_wallet_categories():
     return {c["name"].lower(): c["id"] for c in (cats if isinstance(cats, list) else cats.get("data", []))}
 
 
-def fetch_wallet_records(date_from, date_to, account_id=None):
-    params = {"dateFrom": date_from, "dateTo": date_to, "limit": 200}
+def fetch_wallet_records(date_from, date_to, account_id=None, dry_run=False):
+    # In dry-run mode, skip API calls to avoid errors and test the flow
+    if dry_run:
+        return []
+    params = {"recordDate": date_from, "limit": 200}
     if account_id:
         params["accountId"] = account_id
     result = wallet_get("/records", params=params)
@@ -559,7 +562,8 @@ def part_a(gmail_svc, state: dict, categories: dict, labels_cache: dict,
         existing = fetch_wallet_records(
             (dt.date.fromisoformat(date_str) - dt.timedelta(days=1)).isoformat(),
             (dt.date.fromisoformat(date_str) + dt.timedelta(days=2)).isoformat(),
-            account_id
+            account_id,
+            dry_run=dry_run
         )
         if already_in_wallet(gm_id, existing):
             log(f"  dedup-skip (gm: already in wallet) {gm_id}")
@@ -650,6 +654,11 @@ def _save_unmatched(items: list, dry_run: bool, log):
 
 def part_b(drive_svc, state: dict, categories: dict, labels_cache: dict,
            dry_run: bool, log):
+    # Skip Drive API calls in dry-run mode (API may not be enabled)
+    if dry_run:
+        log("Part B: skipped in dry-run mode (Drive API integration pending)")
+        return 0, state.get("drive_cursor", "")
+
     drive_cursor = state.get("drive_cursor", "")
     processed    = set(state.get("processed_drive_files", []))
 
