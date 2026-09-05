@@ -72,6 +72,23 @@ As an operations engineer, I need the framework to manage job execution and sche
 
 ---
 
+### User Story 5 - AI-driven rule learning and self-improvement without code changes (Priority: P1)
+
+As a domain developer, I need the application to learn new rules from data using AI, store them as YAML configuration, and apply them in future runs, so that the application improves deterministically without requiring code changes—only rule updates.
+
+**Why this priority**: This enables continuous, deterministic improvement. By learning patterns from data (like Gmail learning filters from emails) and storing them as YAML rules, the application becomes self-improving while remaining rule-driven and configuration-based rather than code-driven.
+
+**Independent Test**: Can verify by running domain jobs that process data, AI learns new rules from patterns, rules are written to YAML files (~/automation-monorepo/rules/<domain>/<source>/), and future runs apply these rules.
+
+**Acceptance Scenarios**:
+
+1. **Given** a domain (e.g., expense-domain/gmail) processing data, **When** AI detects patterns worthy of rules, **Then** AI generates rules as YAML and stores in ~/automation-monorepo/rules/expense-domain/gmail/
+2. **Given** learned rules stored in YAML, **When** the domain runs future jobs, **Then** those rules are applied to new data without code changes; application behavior becomes more deterministic
+3. **Given** rules stored for multiple sources in a domain, **When** jobs run, **Then** domain-scoped rules are respected; rule hierarchy (global then domain-specific) is applied
+4. **Given** new rules learned, **When** rules conflict with existing rules, **Then** framework has conflict resolution strategy (newest wins, manual merge, explicit priority)
+
+---
+
 ### Edge Cases
 
 - What happens to existing orchestration scripts that reference the old pack paths (expenses/, gmail/, wallet/)?
@@ -94,13 +111,17 @@ As an operations engineer, I need the framework to manage job execution and sche
 - **FR-009a**: Each domain MUST declare jobs in its config with execution schedule, timeout, retry policy, and success/failure handlers; framework reads these declarations and manages execution
 - **FR-009b**: Framework MUST manage job lifecycle (schedule, execute, track status, handle failures, reschedule on restart) without external cron/launchd dependency
 - **FR-009c**: System MUST eliminate external scheduler dependency: no cron jobs, no launchd entries, no external orchestration needed; framework is self-contained
+- **FR-009d**: System MUST implement AI-driven dynamic rule learning: application analyzes data patterns (similar to Gmail filter learning) using AI, generates rules as YAML configuration, and stores in ~/automation-monorepo/rules/ respecting domain/source hierarchy
+- **FR-009e**: System MUST apply learned rules consistently: domain-scoped rules (~/automation-monorepo/rules/<domain>/<source>/) are applied by framework during job execution; future runs respect learned rules without code changes
+- **FR-009f**: System MUST maintain unified directory structure: data/, config/, and rules/ directories all respect the same domain/source nested structure (e.g., data/expense-domain/gmail/, config/expense-domain/gmail/, rules/expense-domain/gmail/)
+- **FR-009g**: System MUST have rule conflict resolution strategy: when learning generates rules that conflict with existing rules, framework resolves via explicit strategy (newest-wins, manual merge, priority-based, or user-specified)
 - **FR-010**: System MUST preserve all shared framework utilities (`shared/` with auth, jobs, lib) unchanged during migration; framework APIs remain stable and are not touched by domain restructuring
 - **FR-011**: System MUST consolidate all configuration and rules from multiple locations (~/data, config/<pack>/, packs/*) into unified ~/automation-monorepo-config directory with clear folder structure
 - **FR-012**: System MUST accept config/rules directory location as a parameter when initialized; framework passes this location to all domains so they read from injected path, never discover it
 - **FR-013**: System MUST follow Convention over Configuration as the prime architectural principle: sensible defaults for domain layout, config structure, and naming; only explicit config for deviations from convention
 - **FR-014**: System MUST document existing behaviors as acceptance criteria (BDD format) before migration; generate integration tests from behaviors; tests baseline existing functionality and validate post-migration
 - **FR-015**: System MUST maintain backward compatibility with existing orchestration scripts during migration (or provide migration path)
-- **FR-016**: System MUST create a root-level glossary documenting: domain, source, source connector, composite domain, cluster, sources pattern, reports pattern, framework utilities, job, job schedule, and all architectural terms
+- **FR-016**: System MUST create a root-level glossary documenting: domain, source, source connector, composite domain, cluster, sources pattern, reports pattern, framework utilities, job, job schedule, rule, rule learning, rule registry, and all architectural terms
 - **FR-017**: System MUST support adding new sources and new domains by following the established pattern without modifying code in other domains or shared framework
 
 ### Key Entities *(include if feature involves data)*
@@ -127,9 +148,12 @@ As an operations engineer, I need the framework to manage job execution and sche
 - **SC-008**: Convention over Configuration is demonstrated: sensible defaults for domain layout and config structure; explicit configuration needed only for deviations from convention
 - **SC-009**: Framework-managed job scheduling is implemented: jobs declared in domain config are executed by framework on schedule when framework loads; no external cron/launchd required
 - **SC-010**: Job scheduling verified: tested with multiple domains having jobs; jobs execute at configured times; framework manages lifecycle (schedule, execute, track, retry, resume)
-- **SC-011**: Root-level glossary is created documenting domain, source connector, composite domain, sources pattern, reports pattern, framework utilities, job, job schedule, and all architectural terms
-- **SC-012**: Documentation clearly demonstrates how to: (a) add a new source to expense-domain, (b) create stock-domain following the pattern, (c) add a composite domain depending on other domains, (d) declare and schedule jobs in domain config
-- **SC-013**: Architecture makes domain boundaries, framework preservation, framework-managed job scheduling, and the sources/reports/core pattern immediately clear to new developers; pattern is proven reusable (documented for stock-domain, trip-domain)
+- **SC-011**: AI-driven rule learning is implemented: application analyzes data patterns and uses AI to learn and generate rules; rules are stored as YAML in ~/automation-monorepo/rules/<domain>/<source>/
+- **SC-012**: Learned rules are applied: future domain runs apply rules stored in ~/automation-monorepo/rules/; rules are respected without code changes; application behavior becomes more deterministic with each run
+- **SC-013**: Directory structure consistency verified: data/, config/, and rules/ directories maintain identical domain/source nested structure; structure is respected across all operations
+- **SC-014**: Root-level glossary is created documenting domain, source connector, composite domain, sources pattern, reports pattern, framework utilities, job, job schedule, rule, rule learning, rule registry, and all architectural terms
+- **SC-015**: Documentation clearly demonstrates how to: (a) add a new source to expense-domain, (b) create stock-domain following the pattern, (c) add a composite domain depending on other domains, (d) declare and schedule jobs in domain config, (e) enable AI-driven rule learning for a domain
+- **SC-016**: Architecture makes domain boundaries, framework preservation, framework-managed job scheduling, AI-driven rule learning, and the sources/reports/core pattern immediately clear to new developers; pattern is proven reusable (documented for stock-domain, trip-domain)
 
 ## Assumptions
 
@@ -160,4 +184,5 @@ As an operations engineer, I need the framework to manage job execution and sche
 - **Q: Config and data structure for migration?** → **A: Unified config location with parameterized injection** — Consolidate all config/rules from ~/data, ~/Claude/Projects/automation-monorepo/config, and packs/* into single ~/automation-monorepo-config directory. Framework accepts config location as parameter and passes to all domains. Convention over Configuration is the prime principle.
 - **Q: Architectural principle for framework design?** → **A: Convention over Configuration** — Default behaviors, sensible defaults, minimal explicit configuration needed. Only configure what deviates from convention. This principle applies to domain layout, config structure, testing, and all framework decisions.
 - **Q: Framework-managed job scheduling requirement?** → **A: Framework owns job lifecycle** — Jobs declared in domain config are scheduled and executed by framework when loaded with all domains enabled. No external cron/launchd dependency. Framework manages execution, retries, failures, and lifecycle. This makes the system self-contained and deployable as a single unit.
+- **Q: AI-driven rule learning and storage mechanism?** → **A: Centralized rule registry with domain/source scoping** — Unified ~/automation-monorepo/rules/ directory holds all learned rules organized by domain and source (e.g., rules/expense-domain/gmail/). AI analyzes data patterns (like Gmail filter learning) to extract rules stored as YAML. Future runs apply learned rules. Same nested structure respected across data/, config/, and rules/ directories.
 
