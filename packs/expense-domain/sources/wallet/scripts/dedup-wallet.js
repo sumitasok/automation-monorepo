@@ -52,6 +52,19 @@ try {
     console.error(`❌ WALLET_API_TOKEN not found in ${walletConfigFile}`);
     process.exit(1);
   }
+
+  // Trim whitespace and newlines from token
+  walletToken = walletToken.trim().replace(/\s+/g, '').replace(/\n/g, '');
+
+  // Validate token format (should be 3 parts separated by dots)
+  const parts = walletToken.split('.');
+  console.log(`✅ Token loaded: ${parts.length} parts`);
+  if (parts.length !== 3) {
+    console.error(`❌ Invalid token format: expected 3 parts, got ${parts.length}`);
+    console.error(`Token length: ${walletToken.length}`);
+    console.error(`First 50 chars: ${walletToken.substring(0, 50)}`);
+    process.exit(1);
+  }
 } catch (e) {
   console.error(`❌ Failed to load wallet config: ${e.message}`);
   process.exit(1);
@@ -74,15 +87,20 @@ function fetchRecords() {
   return new Promise((resolve, reject) => {
     console.log('📥 Fetching records from Wallet API...');
 
-    // Budget Bakers requires recordDate filter
-    const url = new URL('/v1/api/records?limit=500&offset=0&recordDate=gte.2000-01-01&withTotal=true', walletBaseUrl);
+    // Construct URL properly: baseURL is https://rest.budgetbakers.com/wallet
+    // We need to append /v1/api/records to get full path
+    const path = '/v1/api/records?limit=500&offset=0&recordDate=gte.2000-01-01&withTotal=true';
+    const url = new URL(walletBaseUrl + path);
+    const fullUrl = url.toString();
+    console.log(`🔗 URL: ${fullUrl.substring(0, 100)}...`);
+
     const options = {
       hostname: url.hostname,
       port: url.port || 443,
       path: url.pathname + url.search,
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${walletToken}`,
+        'Authorization': `Bearer ${walletToken.substring(0, 20)}...`,
         'Accept': 'application/json',
       },
     };
@@ -113,7 +131,7 @@ function fetchRecords() {
 
 function deleteRecord(recordId) {
   return new Promise((resolve, reject) => {
-    const url = new URL(`/v1/api/records/${recordId}`, walletBaseUrl);
+    const url = new URL(walletBaseUrl + `/v1/api/records/${recordId}`);
     const options = {
       hostname: url.hostname,
       port: url.port || 443,
@@ -143,7 +161,7 @@ function deleteRecord(recordId) {
 
 function updateRecord(recordId, updateData) {
   return new Promise((resolve, reject) => {
-    const url = new URL(`/v1/api/records/${recordId}`, walletBaseUrl);
+    const url = new URL(walletBaseUrl + `/v1/api/records/${recordId}`);
     const payload = JSON.stringify(updateData);
 
     const options = {
