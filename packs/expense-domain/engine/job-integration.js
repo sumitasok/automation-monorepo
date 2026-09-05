@@ -6,19 +6,38 @@
 
 const JobScheduler = require('../../shared/jobs/scheduler.js');
 const ManifestSchema = require('../../shared/jobs/manifest-schema.js');
+const JobStateManager = require('../../shared/jobs/state-manager.js');
 
 class ExpenseDomainJobManager {
   constructor(engine, configPath) {
     this.engine = engine;
     this.configPath = configPath;
+
+    // Phase 5: Initialize state manager for persistence
+    this.stateManager = new JobStateManager();
+
     this.scheduler = new JobScheduler(configPath, {
       executionTimeout: 300,
       maxRetries: 3,
       backoffMultiplier: 2,
       initialDelayMs: 5000,
+      stateManager: this.stateManager, // Phase 5: Enable persistence
     });
 
     this.jobDefinitions = [];
+  }
+
+  /**
+   * Initialize state manager and scheduler
+   */
+  async initialize() {
+    try {
+      await this.stateManager.initialize();
+      console.log('✓ Job state manager initialized');
+    } catch (error) {
+      console.warn('⚠️ Failed to initialize state manager:', error.message);
+      // Continue without persistence (Phase 5 fallback)
+    }
   }
 
   /**
@@ -117,6 +136,8 @@ class ExpenseDomainJobManager {
    * Start the scheduler (begins all scheduled jobs)
    */
   async start() {
+    // Phase 5: Initialize state manager first
+    await this.initialize();
     await this.registerJobs();
     await this.scheduler.start();
     console.log('✓ Job scheduler started');
@@ -127,6 +148,10 @@ class ExpenseDomainJobManager {
    */
   async stop() {
     await this.scheduler.stop();
+    // Phase 5: Close state manager connection
+    if (this.stateManager) {
+      await this.stateManager.close();
+    }
     console.log('✓ Job scheduler stopped');
   }
 

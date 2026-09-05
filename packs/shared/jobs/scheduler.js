@@ -19,11 +19,20 @@ class JobScheduler extends EventEmitter {
       maxRetries: options.maxRetries || 3,
       backoffMultiplier: options.backoffMultiplier || 2,
       initialDelayMs: options.initialDelayMs || 5000,
+      stateManager: options.stateManager || null, // Phase 5: persistence layer
       ...options,
     };
 
     this.timers = new Map(); // job-id -> timeout/interval handles
     this.isRunning = false;
+    this.stateManager = this.options.stateManager;
+  }
+
+  /**
+   * Set state manager for persistence (Phase 5)
+   */
+  setStateManager(stateManager) {
+    this.stateManager = stateManager;
   }
 
   /**
@@ -52,6 +61,12 @@ class JobScheduler extends EventEmitter {
     };
 
     this.jobs.set(jobId, job);
+
+    // Phase 5: Persist job registration to state manager
+    if (this.stateManager) {
+      this.stateManager.recordJobRegistration(jobId, job);
+    }
+
     this.emit('job:registered', { jobId, job });
 
     if (this.isRunning && job.enabled) {
@@ -263,6 +278,11 @@ class JobScheduler extends EventEmitter {
 
     this.executions.set(executionId, execution);
 
+    // Phase 5: Persist execution start to state manager
+    if (this.stateManager) {
+      this.stateManager.recordExecutionStart(executionId, jobId, execution);
+    }
+
     this.emit('execution:started', { executionId, jobId });
 
     try {
@@ -295,6 +315,11 @@ class JobScheduler extends EventEmitter {
             });
           }
 
+          // Phase 5: Persist execution completion to state manager
+          if (this.stateManager) {
+            this.stateManager.recordExecutionComplete(executionId, jobId, execution);
+          }
+
           this.emit('execution:completed', { executionId, jobId, status: 'success' });
           return executionId;
         } catch (err) {
@@ -324,6 +349,11 @@ class JobScheduler extends EventEmitter {
       // All retries failed
       execution.status = 'failed';
       execution.endTime = new Date();
+
+      // Phase 5: Persist execution failure to state manager
+      if (this.stateManager) {
+        this.stateManager.recordExecutionComplete(executionId, jobId, execution);
+      }
 
       if (job.handlers?.onFailure) {
         await job.handlers.onFailure({

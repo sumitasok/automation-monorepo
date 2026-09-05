@@ -114,6 +114,9 @@ class ExpenseServer {
       } else if (pathname.match(/^\/api\/expense-domain\/jobs\/[^/]+\/history$/) && req.method === 'GET') {
         const jobId = pathname.split('/')[4];
         await this._handleJobHistory(req, res, jobId, query);
+      } else if (pathname.match(/^\/api\/expense-domain\/jobs\/[^/]+\/stats$/) && req.method === 'GET') {
+        const jobId = pathname.split('/')[4];
+        await this._handleJobStats(req, res, jobId);
       } else if (pathname === '/health') {
         this._sendJson(res, 200, { status: 'ok', domain: 'expense-domain' });
       } else {
@@ -217,6 +220,16 @@ class ExpenseServer {
   async _handleJobHistory(req, res, jobId, query) {
     const history = this.jobManager.getExecutionHistory({ jobId });
     this._sendJson(res, 200, history);
+  }
+
+  async _handleJobStats(req, res, jobId) {
+    // Phase 5: Get job execution statistics from state manager
+    if (this.jobManager && this.jobManager.stateManager) {
+      const stats = this.jobManager.stateManager.getExecutionStats(jobId);
+      this._sendJson(res, 200, stats);
+    } else {
+      this._sendError(res, 503, 'Job state manager not available');
+    }
   }
 
   // ============ Utilities ============
