@@ -1,18 +1,20 @@
-// Package main implements wallet record deduplication.
+// Package main implements wallet record deduplication via MERGE (not delete).
 //
-// The dedup subcommand identifies, reviews, and removes duplicate transaction records.
-// IMPORTANT: All operations happen on a working copy in memory. records.json is never
-// modified until the final atomic write after user confirmation and verification.
+// Strategy: For duplicate pairs (same counterParty, amount, date), merge the records:
+// - KEEP: automation record (source:automation-monorepo label)
+// - MERGE: manual record's data (better descriptions, categories, labels)
+// - UPDATE: kept record via PATCH with merged data
+// - RESULT: single merged record in wallet, no deletion
 //
 // Workflow:
-//  1. scan: Load records.json → create working copy → detect duplicates → report findings
-//  2. review: Load working copy state → collect user decisions → save to decisions.json
-//  3. execute: Load working copy → apply decisions → backup records.json → atomic write
+//  1. scan: Load records.json → detect duplicates → report findings
+//  2. review: Show duplicates → collect user merge decisions → save decisions.json
+//  3. execute: Load decisions → merge records → PATCH to Wallet API → verify
 //
 // Three operations are supported:
-//   - scan: Identify duplicates without touching records.json
-//   - review: Collect user decisions on which records to keep/delete
-//   - execute: Apply decisions atomically (backup before write, verify after)
+//   - scan: Identify duplicates without touching anything
+//   - review: Collect user merge decisions
+//   - execute: Apply merges via PATCH (no deletion)
 package main
 
 import (

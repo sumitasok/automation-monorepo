@@ -58,6 +58,15 @@ type NewRecord struct {
 }
 
 // do performs a request and returns status + body, handling auth + JSON.
+// doQuery is like do() but appends query parameters to the path
+func (c *Client) doQuery(method, path string, query url.Values, body any, out any) (int, error) {
+	fullPath := path
+	if query != nil && len(query) > 0 {
+		fullPath = path + "?" + query.Encode()
+	}
+	return c.do(method, fullPath, body, out)
+}
+
 func (c *Client) do(method, path string, body any, out any) (int, error) {
 	var rdr io.Reader
 	if body != nil {
@@ -328,6 +337,176 @@ func (c *Client) CreateRecords(records []NewRecord) ([]RecordResult, error) {
 	// Some responses may return a bare array; if Results is empty but status ok,
 	// synthesise success results so callers can record IDs when present.
 	return out.Results, nil
+}
+
+// UpsertRecords creates or updates records, preventing duplicates.
+// If a record with matching (counterParty, recordDate, amount) already exists, it updates that record by merging data.
+// Otherwise it creates a new one.
+// Returns per-record results showing success/failure for each input record.
+func (c *Client) UpsertRecords(records []NewRecord) ([]RecordResult, error) {
+	if len(records) == 0 {
+		return nil, nil
+	}
+	if len(records) > 20 {
+		return nil, fmt.Errorf("batch too large: %d (max 20)", len(records))
+	}
+
+	var results []RecordResult
+	for inputIdx, newRec := range records {
+		// Check if a record with same (counterParty, date, amount) already exists
+		query := url.Values{}
+		// Filter by amount
+		amountStr := fmt.Sprintf("%.2f", newRec.Amount)
+		query.Set("amount", fmt.Sprintf("eq.%s", amountStr))
+
+		// Filter by date (exact day match)
+		if newRec.RecordDate != "" {
+			dateOnly := newRec.RecordDate[:10] // Extract YYYY-MM-DD
+			query.Set("recordDate", fmt.Sprintf("gte.%s", dateOnly))
+			nextDay := addDay(dateOnly)
+			query.Set("recordDate", fmt.Sprintf("lt.%s", nextDay))
+		}
+
+		// Fetch existing records matching criteria
+		var fetchRes struct {
+			Records []Record `json:"records"`
+			Total   int      `json:"total"`
+		}
+		_, err := c.doQuery("GET", "/v1/api/records", query, nil, &fetchRes)
+		if err != nil {
+			// If fetch fails, treat as no existing match found, proceed to create
+		}
+
+		// Look for exact match on counterParty and amount
+		var existingMatch Record
+		matchFound := false
+		for _, rec := range fetchRes.Records {
+			if getRecordString(rec, "counterParty") == newRec.CounterParty &&
+				getRecordFloat(rec, "amount", "value") == newRec.Amount {
+				existingMatch = rec
+				matchFound = true
+				break
+			}
+		}
+
+		if matchFound {
+			// Update existing record (merge new data into it)
+			recordID := getRecordString(existingMatch, "id")
+			patchReq := map[string]interface{}{}
+
+			// Merge note if provided
+			if newRec.Note != "" {
+				patchReq["note"] = newRec.Note
+			}
+
+			// Merge labels (combine without duplicates)
+			if len(newRec.LabelIDs) > 0 {
+				existingLabels := getRecordStringSlice(existingMatch, "labelIds")
+				mergedLabels := append(existingLabels, newRec.LabelIDs...)
+				seen := make(map[string]bool)
+				var uniqueLabels []string
+				for _, lbl := range mergedLabels {
+					if !seen[lbl] {
+						seen[lbl] = true
+						uniqueLabels = append(uniqueLabels, lbl)
+					}
+				}
+				patchReq["labelIds"] = uniqueLabels
+			}
+
+			// Update category if provided
+			if newRec.CategoryID != "" {
+				patchReq["categoryId"] = newRec.CategoryID
+			}
+
+			status, err := c.do("PATCH", "/v1/api/records/"+url.QueryEscape(recordID), patchReq, nil)
+			result := RecordResult{
+				InputIndex: inputIdx,
+				ID:         recordID,
+				Success:    status == http.StatusOK || status == http.StatusNoContent,
+			}
+			if err != nil {
+				result.Error = err.Error()
+			}
+			results = append(results, result)
+		} else {
+			// Create new record
+			var createRes struct {
+				Results []RecordResult `json:"results"`
+			}
+			status, err := c.do("POST", "/v1/api/records", []NewRecord{newRec}, &createRes)
+			if err != nil {
+				results = append(results, RecordResult{
+					InputIndex: inputIdx,
+					Success:    false,
+					Error:      err.Error(),
+				})
+				continue
+			}
+			if len(createRes.Results) > 0 {
+				createRes.Results[0].InputIndex = inputIdx
+				results = append(results, createRes.Results[0])
+			} else if status == http.StatusOK {
+				results = append(results, RecordResult{
+					InputIndex: inputIdx,
+					Success:    true,
+				})
+			} else {
+				results = append(results, RecordResult{
+					InputIndex: inputIdx,
+					Success:    false,
+					Error:      fmt.Sprintf("HTTP %d", status),
+				})
+			}
+		}
+	}
+
+	return results, nil
+}
+
+// Helper functions to extract values from Record maps
+func getRecordString(rec Record, key string) string {
+	if v, ok := rec[key].(string); ok {
+		return v
+	}
+	return ""
+}
+
+func getRecordFloat(rec Record, keys ...string) float64 {
+	var current interface{} = rec
+	for _, key := range keys {
+		if m, ok := current.(map[string]interface{}); ok {
+			current = m[key]
+		} else {
+			return 0
+		}
+	}
+	if v, ok := current.(float64); ok {
+		return v
+	}
+	return 0
+}
+
+func getRecordStringSlice(rec Record, key string) []string {
+	if v, ok := rec[key].([]string); ok {
+		return v
+	}
+	if v, ok := rec[key].([]interface{}); ok {
+		result := make([]string, len(v))
+		for i, item := range v {
+			if s, ok := item.(string); ok {
+				result[i] = s
+			}
+		}
+		return result
+	}
+	return []string{}
+}
+
+// addDay adds one day to a date string (YYYY-MM-DD format)
+func addDay(dateStr string) string {
+	t, _ := time.Parse("2006-01-02", dateStr)
+	return t.AddDate(0, 0, 1).Format("2006-01-02")
 }
 
 // DeleteResult represents the result of a single DELETE operation.
