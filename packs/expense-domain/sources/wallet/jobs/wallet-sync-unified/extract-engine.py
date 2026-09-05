@@ -34,14 +34,17 @@ Output per document (JSON):
 """
 import argparse
 import datetime as dt
+import hashlib
 import html
 import html.parser
 import json
 import os
 import pathlib
 import re
+import subprocess
 import sys
 
+import requests
 import yaml
 
 BASE = pathlib.Path(__file__).resolve().parent
@@ -231,7 +234,7 @@ def route(record, routes):
 # --------------------------------------------------------------------------
 # Pipeline
 # --------------------------------------------------------------------------
-def process(doc, fmts=None, routes=None):
+def process(doc, fmts=None, routes=None, ai_assist=False):
     fmts = fmts if fmts is not None else load_formats()
     routes = routes if routes is not None else load_routing()
     norm_text = normalize_body(doc.get("body", ""))
@@ -249,8 +252,6 @@ def process(doc, fmts=None, routes=None):
             }
         record, err = extract(fmt, doc, norm_text)
         if record is None:
-            # match block hit but extraction failed -> surface loudly,
-            # the format file probably needs updating for a layout change
             return {
                 "matched": False,
                 "action": "error",
@@ -267,7 +268,7 @@ def process(doc, fmts=None, routes=None):
             "record": route(record, routes),
         }
 
-    return {
+    result = {
         "matched": False,
         "action": "unmatched",
         "source_id": doc.get("id"),
@@ -275,6 +276,19 @@ def process(doc, fmts=None, routes=None):
         "subject": doc.get("subject"),
         "unmatched_excerpt": norm_text[:600],
     }
+
+    if ai_assist:
+        suggestion = suggest_pattern_via_ai(doc, norm_text)
+        if suggestion:
+            result["ai_suggestion"] = suggestion
+            if suggestion.get("success"):
+                new_file = create_format_file_from_suggestion(
+                    suggestion, doc.get("sender", ""), doc.get("subject", "")
+                )
+                if new_file:
+                    result["ai_created_format_file"] = new_file
+
+    return result
 
 
 # --------------------------------------------------------------------------
@@ -312,24 +326,247 @@ def _dig(obj, dotted):
 
 
 # --------------------------------------------------------------------------
+# AI-assisted pattern learning
+# --------------------------------------------------------------------------
+def get_ai_provider():
+    """Return (provider, model, api_key, api_base) or (None, None, None, None) if not configured."""
+    provider = os.environ.get("AI_PROVIDER", "").lower()
+    if not provider:
+        return None, None, None, None
+
+    if provider == "deepseek":
+        api_key = os.environ.get("DEEPSEEK_API_KEY")
+        model = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
+        api_base = os.environ.get("DEEPSEEK_API_BASE", "https://api.deepseek.com")
+        return provider, model, api_key, api_base
+    elif provider in ("claude", "anthropic"):
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        model = os.environ.get("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022")
+        return provider, model, api_key, None
+
+    return None, None, None, None
+
+
+def suggest_pattern_via_ai(doc: dict, norm_text: str) -> dict | None:
+    """Call AI provider to suggest a regex pattern for an unmatched email.
+
+    Returns: {
+        "success": bool,
+        "suggested_pattern": str (regex),
+        "suggested_fields": dict (field_name -> capture_group_name),
+        "format_name": str (slug),
+        "reasoning": str,
+        "error": str (if failed)
+    }
+    """
+    provider, model, api_key, api_base = get_ai_provider()
+    if not provider or not api_key:
+        return None
+
+    sender = doc.get("sender", "")
+    subject = doc.get("subject", "")
+
+    prompt = f"""Analyze this unmatched email and suggest a SINGLE regex pattern with named capture groups.
+
+Email metadata:
+- Sender: {sender}
+- Subject: {subject}
+
+Email body (first 1000 chars):
+{norm_text[:1000]}
+
+Your task:
+1. Identify what kind of transaction this is
+2. Create ONE complete regex pattern with NAMED CAPTURE GROUPS that extracts all transaction fields
+3. Use named groups like (?P<amount>...), (?P<date>...), (?P<merchant>...), (?P<card_last4>...), (?P<reference>...)
+
+Return ONLY a JSON object:
+{{
+  "format_name": "slug-name-from-sender-subject",
+  "body_pattern": "complete regex with (?P<field>...) named groups",
+  "reasoning": "brief explanation"
+}}
+
+Example body_pattern:
+"Your payment of [₹$]*\\s*(?P<amount>[\\d,]+(?:\\.\\d{{2}})?)[\\s\\w]+ on (?P<date>\\d{{2}}-[A-Z]{{3}}-\\d{{2}})"
+
+Important:
+- Use (?P<name>...) for named capture groups only, no other groups
+- Include optional patterns like [₹$]* for currency symbols
+- Match the EXACT sequence as it appears in the email
+- Use (?:...) for non-capturing groups
+- Make patterns permissive to handle whitespace variations
+- Include only fields that are present"""
+
+    try:
+        if provider == "deepseek":
+            return _call_deepseek_api(model, api_key, api_base, prompt)
+        elif provider == "claude":
+            return _call_claude_api(model, api_key, prompt)
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "suggested_pattern": None,
+            "format_name": None
+        }
+
+    return None
+
+
+def _call_deepseek_api(model: str, api_key: str, api_base: str, prompt: str) -> dict:
+    """Call DeepSeek API for pattern suggestion."""
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.3,
+    }
+
+    resp = requests.post(f"{api_base}/v1/chat/completions", json=payload, headers=headers, timeout=30)
+    resp.raise_for_status()
+
+    data = resp.json()
+    content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+
+    try:
+        # Extract JSON from response (might have surrounding text)
+        json_match = re.search(r'\{.*\}', content, re.DOTALL)
+        if json_match:
+            suggestion = json.loads(json_match.group(0))
+            suggestion["success"] = True
+            return suggestion
+    except (json.JSONDecodeError, AttributeError):
+        pass
+
+    return {
+        "success": False,
+        "error": f"Could not parse AI response: {content[:200]}",
+        "suggested_pattern": None,
+        "format_name": None
+    }
+
+
+def _call_claude_api(model: str, api_key: str, prompt: str) -> dict:
+    """Call Claude API for pattern suggestion."""
+    import requests
+
+    headers = {
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json"
+    }
+
+    payload = {
+        "model": model,
+        "max_tokens": 1024,
+        "messages": [{"role": "user", "content": prompt}]
+    }
+
+    resp = requests.post("https://api.anthropic.com/v1/messages", json=payload, headers=headers, timeout=30)
+    resp.raise_for_status()
+
+    data = resp.json()
+    content = data.get("content", [{}])[0].get("text", "")
+
+    try:
+        json_match = re.search(r'\{.*\}', content, re.DOTALL)
+        if json_match:
+            suggestion = json.loads(json_match.group(0))
+            suggestion["success"] = True
+            return suggestion
+    except (json.JSONDecodeError, AttributeError):
+        pass
+
+    return {
+        "success": False,
+        "error": f"Could not parse AI response: {content[:200]}",
+        "suggested_pattern": None,
+        "format_name": None
+    }
+
+
+def create_format_file_from_suggestion(suggestion: dict, sender: str, subject: str) -> str | None:
+    """Create a new format YAML file from an AI suggestion.
+
+    Returns: path to created file, or None if failed.
+    """
+    if not suggestion.get("success") or not suggestion.get("format_name"):
+        return None
+
+    format_name = suggestion["format_name"]
+    body_pattern = suggestion.get("body_pattern", "")
+    reasoning = suggestion.get("reasoning", "")
+
+    # Fallback: if body_pattern not provided, try to reconstruct from fields
+    if not body_pattern:
+        fields = suggestion.get("fields", {})
+        if not fields:
+            return None
+        # This is a simple concatenation; ideally the AI provides body_pattern
+        body_pattern = " ".join(fields.values())
+
+    # Create YAML content with body pattern
+    yaml_content = f"""# {reasoning}
+# Generated by AI pattern suggestion
+---
+name: {format_name}
+source: gmail
+priority: 90
+match:
+  sender: {re.escape(sender.split('+')[0])}
+  subject: {subject.split()[0] if subject else 'transaction'}
+action: extract
+fields:
+  body: >-
+    {body_pattern}
+transforms:
+  amount: decimal
+  date:
+    type: date
+    formats: ["%d-%m-%y", "%d-%m-%Y", "%Y-%m-%d", "%d-%b-%y"]
+  merchant: strip
+set:
+  currency: INR
+  direction: debit
+"""
+
+    # Write to config directory
+    output_file = FORMATS_DIR / f"email.{format_name}.yaml"
+    try:
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_text(yaml_content)
+        return str(output_file)
+    except Exception as e:
+        print(f"Error writing format file: {e}", file=sys.stderr)
+        return None
+
+
+# --------------------------------------------------------------------------
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--json", help="single document as a JSON string")
     ap.add_argument("--file", help="JSONL file, one document per line")
     ap.add_argument("--test", action="store_true", help="run regression tests")
+    ap.add_argument("--ai-assist", action="store_true",
+                    help="enable AI-powered pattern suggestions for unmatched emails (requires AI_PROVIDER env var)")
     args = ap.parse_args()
 
     if args.test:
         sys.exit(run_tests())
     if args.json:
-        print(json.dumps(process(json.loads(args.json)), indent=2))
+        print(json.dumps(process(json.loads(args.json), ai_assist=args.ai_assist), indent=2))
         return
     if args.file:
         fmts, routes = load_formats(), load_routing()
         for line in open(args.file):
             line = line.strip()
             if line:
-                print(json.dumps(process(json.loads(line), fmts, routes)))
+                print(json.dumps(process(json.loads(line), fmts, routes, ai_assist=args.ai_assist)))
         return
     ap.print_help()
 
