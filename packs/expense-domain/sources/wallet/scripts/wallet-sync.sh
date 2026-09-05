@@ -6,9 +6,21 @@ set -euo pipefail
 
 # Configuration
 CONFIG_PATH="${CONFIG_PATH:-$HOME/automation-monorepo-config}"
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../../.." && pwd)"
 SCRIPT_DIR="$REPO_ROOT/packs/expense-domain/sources/wallet/jobs/wallet-sync-unified"
 DATA_DIR="$CONFIG_PATH/data/expense-domain/wallet"
+
+# Parse flags
+DRY_RUN=false
+SINCE=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dry-run) DRY_RUN=true; shift ;;
+    --since) SINCE="$2"; shift 2 ;;
+    --config-path) CONFIG_PATH="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
 
 # Verify config exists
 if [ ! -f "$CONFIG_PATH/config/expense-domain/wallet/config.yaml" ]; then
@@ -20,7 +32,7 @@ fi
 mkdir -p "$DATA_DIR/logs"
 
 # Setup Python environment
-export PYTHONPATH="$SCRIPT_DIR:$PYTHONPATH"
+export PYTHONPATH="$SCRIPT_DIR:${PYTHONPATH:-}"
 
 # Extract Wallet API token from config
 WALLET_TOKEN=$(grep "api_token:" "$CONFIG_PATH/config/expense-domain/wallet/config.yaml" | cut -d'"' -f2)
@@ -38,6 +50,7 @@ echo "════════════════════════�
 echo ""
 echo "📁 Config: $CONFIG_PATH"
 echo "📊 Mode: $([ "$DRY_RUN" = "true" ] && echo "DRY-RUN (no writes)" || echo "NORMAL (writes enabled)")"
+echo "🐍 Script: $SCRIPT_DIR/sync.py"
 echo ""
 
 # Run sync.py with all required parameters
@@ -46,9 +59,8 @@ export AUTO_DATA_DIR="$DATA_DIR"
 export WALLET_API_TOKEN="$WALLET_TOKEN"
 
 python3 "$SCRIPT_DIR/sync.py" \
-  --config-path "$CONFIG_PATH" \
-  $([ "${DRY_RUN:-false}" = "true" ] && echo "--dry-run" || echo "") \
-  $([ "${SINCE:-}" != "" ] && echo "--since $SINCE" || echo "") \
+  $([ "$DRY_RUN" = "true" ] && echo "--dry-run" || echo "") \
+  $([ -n "$SINCE" ] && echo "--since $SINCE" || echo "") \
   2>&1 | tee -a "$LOG_FILE"
 
 EXIT_CODE=${PIPESTATUS[0]}

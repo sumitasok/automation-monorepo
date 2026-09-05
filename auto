@@ -58,8 +58,11 @@ for domain in wallet gmail; do
   DOMAIN_CONFIG="$CONFIG_PATH/config/$domain/config.yaml"
   if [ -f "$DOMAIN_CONFIG" ]; then
     if grep -q "API_TOKEN:" "$DOMAIN_CONFIG" 2>/dev/null; then
-      TOKEN_VAR="${domain^^}_API_TOKEN"
-      export $TOKEN_VAR=$(grep "${domain^^}_API_TOKEN:" "$DOMAIN_CONFIG" | cut -d'"' -f2)
+      # Convert domain to uppercase (portable: works in sh/zsh/bash)
+      DOMAIN_UPPER=$(echo "$domain" | tr '[:lower:]' '[:upper:]')
+      TOKEN_VAR="${DOMAIN_UPPER}_API_TOKEN"
+      TOKEN_VALUE=$(grep "${TOKEN_VAR}:" "$DOMAIN_CONFIG" | cut -d'"' -f2)
+      eval "export ${TOKEN_VAR}='${TOKEN_VALUE}'"
     fi
   fi
 done
