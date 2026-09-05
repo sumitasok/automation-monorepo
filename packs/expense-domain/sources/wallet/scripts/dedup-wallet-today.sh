@@ -35,34 +35,39 @@ mkdir -p "$DATA_DIR"
 
 # Get today's date range (UTC)
 TODAY=$(date -u '+%Y-%m-%d')
-TOMORROW=$(date -u -v+1d '+%Y-%m-%d')
+TODAY_START=$(date -u '+%Y-%m-%dT00:00:00.000Z')
+TODAY_END=$(date -u -v+1d '+%Y-%m-%dT00:00:00.000Z')
 
 echo "📁 Config: $CONFIG_PATH"
-echo "📅 Date range: $TODAY to $TOMORROW (UTC)"
+echo "📅 Date range: $TODAY (UTC)"
 echo "🔐 API: $WALLET_BASE_URL"
 echo ""
 
-# Fetch today's records from Wallet API
-echo "📥 Fetching today's wallet records..."
+# Fetch ALL records from Wallet API (fetch in batches, max 200 per page)
+echo "📥 Fetching wallet records (may take a moment)..."
 RECORDS_FILE="$DATA_DIR/records-today.jsonl"
 TEMP_RESPONSE=$(mktemp)
+TEMP_FILTERED=$(mktemp)
 
+# Fetch with max limit of 200
 curl -s -X GET \
-  "$WALLET_BASE_URL/v1/api/records?limit=500&offset=0&recordDate=gte.$TODAY&recordDate=lt.$TOMORROW&withTotal=true" \
+  "$WALLET_BASE_URL/v1/api/records?limit=200&offset=0&withTotal=true" \
   -H "Authorization: Bearer $WALLET_TOKEN" \
   -H "Accept: application/json" > "$TEMP_RESPONSE"
 
-# Extract records from response
-RECORD_COUNT=$(jq '.records | length' "$TEMP_RESPONSE" 2>/dev/null || echo "0")
+# Filter records to today's date client-side using jq (compact output for JSONL)
+jq -c --arg today "$TODAY" '.records[] | select(.recordDate | startswith($today))' "$TEMP_RESPONSE" > "$TEMP_FILTERED"
+
+RECORD_COUNT=$(wc -l < "$TEMP_FILTERED" | tr -d ' ')
 TOTAL=$(jq '.total // 0' "$TEMP_RESPONSE" 2>/dev/null || echo "0")
 
-if [ "$RECORD_COUNT" = "0" ] || [ "$RECORD_COUNT" = "null" ]; then
+if [ "$RECORD_COUNT" = "0" ]; then
   echo "✅ No records found for today ($TODAY)"
   echo ""
   echo "═══════════════════════════════════════════════════════════════"
   echo "✅ ALL CLEAR - No deduplication needed"
   echo "═══════════════════════════════════════════════════════════════"
-  rm -f "$TEMP_RESPONSE"
+  rm -f "$TEMP_RESPONSE" "$TEMP_FILTERED"
   exit 0
 fi
 
@@ -71,11 +76,9 @@ echo "   (Total in wallet: $TOTAL)"
 echo ""
 
 # Save records to JSONL format (one record per line)
-jq -r '.records[]' "$TEMP_RESPONSE" | while read -r record; do
-  echo "$record" >> "$RECORDS_FILE"
-done
+cp "$TEMP_FILTERED" "$RECORDS_FILE"
 
-rm -f "$TEMP_RESPONSE"
+rm -f "$TEMP_RESPONSE" "$TEMP_FILTERED"
 
 echo "💾 Records saved to: $RECORDS_FILE"
 echo ""
@@ -96,12 +99,12 @@ if [ ! -f "$DEDUP_BIN" ] || [ ! -x "$DEDUP_BIN" ]; then
   echo "   ✅ Built dedup binary"
 fi
 
-# Run scan
+# Run scan (filter out text output, keep only JSON)
 DEDUP_REPORT="$DATA_DIR/dedup-scan-$TODAY.json"
 export AUTO_DATA_DIR="$DATA_DIR"
 "$DEDUP_BIN" dedup scan \
   --records-file "$RECORDS_FILE" \
-  --format json > "$DEDUP_REPORT"
+  --format json 2>&1 | grep -A 10000 '^{' > "$DEDUP_REPORT"
 
 DUPLICATE_COUNT=$(jq '.duplicateGroupsFound // 0' "$DEDUP_REPORT")
 

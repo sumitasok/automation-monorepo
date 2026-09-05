@@ -289,6 +289,23 @@ func matchKey(rec1, rec2 wallet.Record, config *DedupConfig) bool {
 		// Normalize for comparison
 		s1 := fmt.Sprintf("%v", val1)
 		s2 := fmt.Sprintf("%v", val2)
+
+		// Case-insensitive comparison for counterParty field
+		if key == "counterParty" {
+			s1 = strings.ToLower(s1)
+			s2 = strings.ToLower(s2)
+		}
+
+		// For recordDate, compare only the date part (YYYY-MM-DD), ignore time
+		if key == "recordDate" {
+			if len(s1) > 10 {
+				s1 = s1[:10]
+			}
+			if len(s2) > 10 {
+				s2 = s2[:10]
+			}
+		}
+
 		if s1 != s2 {
 			return false
 		}
@@ -360,14 +377,26 @@ func findDuplicateGroups(records []wallet.Record, config *DedupConfig) []Duplica
 
 	// Group records by dedup key
 	for i, rec := range records {
-		// Build a key string from primary key values
+		// Build a key string from primary key values (apply same normalizations as matchKey)
 		var keyParts []string
 		for _, keyField := range config.PrimaryKeys {
 			val, ok := getFieldValue(rec, keyField)
 			if !ok || val == nil {
 				keyParts = append(keyParts, "")
 			} else {
-				keyParts = append(keyParts, fmt.Sprintf("%v", val))
+				s := fmt.Sprintf("%v", val)
+
+				// Apply same normalizations as matchKey for consistent grouping
+				if keyField == "counterParty" {
+					s = strings.ToLower(s)
+				}
+				if keyField == "recordDate" {
+					if len(s) > 10 {
+						s = s[:10]
+					}
+				}
+
+				keyParts = append(keyParts, s)
 			}
 		}
 		key := groupKey(strings.Join(keyParts, " | "))
