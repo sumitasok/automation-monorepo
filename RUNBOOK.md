@@ -4,6 +4,44 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-09-05 — Add HDFC UPI transaction email pattern and fix routing
+
+**Prompt summary**: User reported HDFC UPI emails (gm:1a071ab8aadd19bc) remaining unmatched despite pattern creation. Investigated extract-engine subprocess and confirmed pattern extraction was working, but routing had incorrect configuration.
+
+**Files created/modified**:
+- `~/automation-monorepo-config/config/gmail/email-formats/email.hdfc-upi.yaml` — New HDFC UPI email pattern
+- `~/automation-monorepo-config/config/expense-domain/wallet/routing.yaml` — Fixed routing.yaml to use regex patterns
+
+**Steps taken**:
+1. Verified email.hdfc-upi.yaml pattern exists and matches test emails
+2. Tested pattern extraction with actual Gmail message:
+   - Subject: "❗  You have done a UPI txn. Check details!"
+   - Extracted: amount=2500.00, card_last4=3176, merchant="6307781870@ybl (NASAREEN)", date=05-09-26
+3. Converted routing.yaml from literal string values to regex patterns:
+   - Changed "HDFC" → "^hdfc$" (case-insensitive matching)
+   - Changed "3690" → "^3690$" for card matching
+   - Applied to all bank+card combinations (HDFC x3690, HDFC x3176, Canara x6102, ICICI, Charles Schwab)
+4. Verified routing correctly maps HDFC 3176 → HDFC Savings account
+
+**How to use**:
+HDFC UPI transactions now:
+- Match on: sender=alerts@hdfcbank.bank.in, subject contains "UPI txn"
+- Extract: amount, card_last4 (account ending), merchant VPA, transaction date
+- Route to: HDFC Savings x3176 account (wallet_account_id: 6cf80ab9-85bd-420a-aec4-8498005f4ce8)
+
+**Outcome**:
+✅ Pattern creation and extraction working
+✅ Routing.yaml fixed to use regex patterns
+✅ Test confirms full extraction pipeline functional
+✅ Ready for sync to pick up HDFC UPI emails in next run
+
+**Caveats**:
+- Pattern tested with isolated test case; production emails should be monitored
+- Routing priority (line order) matters — earlier routes checked first
+- Pattern marked priority 55 for test emails; may need adjustment if colliding with other HDFC patterns
+
+---
+
 ## 2026-09-05 — Create wallet dedup script with universal job runner
 
 **Prompt summary**: Set up simplified job runner that auto-discovers config, credentials, data paths, and job code. User just specifies config path once, then runs jobs by name.
