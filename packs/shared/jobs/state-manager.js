@@ -170,7 +170,7 @@ class JobStateManager extends EventEmitter {
       id: executionId,
       job_id: jobId,
       status: 'running',
-      started_at: execution.startTime || new Date(),
+      started_at: execution.startTime instanceof Date ? execution.startTime.toISOString() : (execution.startTime || new Date().toISOString()),
       context: JSON.stringify(execution.context || {}),
     };
 
@@ -201,10 +201,11 @@ class JobStateManager extends EventEmitter {
    * Record execution completion
    */
   recordExecutionComplete(executionId, jobId, execution) {
+    const endTime = execution.endTime || new Date();
     const record = {
       id: executionId,
       status: execution.status || 'completed',
-      ended_at: execution.endTime || new Date(),
+      ended_at: endTime instanceof Date ? endTime.toISOString() : endTime,
       attempts: execution.attempts || 1,
       last_error: execution.lastError?.message,
       result: execution.results ? JSON.stringify(execution.results) : null,
