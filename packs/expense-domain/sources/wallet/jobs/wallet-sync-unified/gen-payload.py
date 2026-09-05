@@ -71,7 +71,9 @@ sb_recs=[
  sb("2026-08-13",-214,"RKIT",None,"19ff99c0ee004c78",[]),
  sb("2026-08-14",-284,"Srinivas",None,"19ffead969aa659b",[]),
 ]
-p="/Users/sumitasok/Library/Mobile Documents/iCloud~md~obsidian/Documents/sa.finances/_db/wallet-sync/_run_payload.json"
+import os, pathlib
+_config_path = pathlib.Path(os.environ.get("CONFIG_PATH", pathlib.Path.home() / "automation-monorepo-config"))
+p = str(_config_path / "data" / "expense-domain" / "wallet" / "_run_payload.json")
 json.dump({"cc1":cc_recs[:14],"cc2":cc_recs[14:],"sb":sb_recs},open(p,"w"))
 print("counts cc",len(cc_recs),"sb",len(sb_recs))
 PYEOF_MARKER = None

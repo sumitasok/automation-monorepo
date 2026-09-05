@@ -18,15 +18,20 @@ FIRST-TIME SETUP
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 1.  Google Cloud Console → APIs & Services → Credentials
     → Create OAuth 2.0 Client ID (Desktop app)
-    → Download JSON → save as  ~/.config/sa-finances/gmail-credentials.json
+    → Download JSON → save as  $CONFIG_PATH/config/expense-domain/gmail/credentials.json
+    (default CONFIG_PATH: ~/automation-monorepo-config; same store the rest
+    of this workspace's gmail jobs use — one OAuth grant, not a second one)
 
 2.  Run:  python3 sync.py --auth
     Opens browser, completes consent, writes token to
-    ~/.config/sa-finances/gmail-token.json
+    $CONFIG_PATH/config/expense-domain/gmail/token.json
 
 3.  Set wallet token:
     export WALLET_AUTH_HEADER="Bearer <your-budgetbakers-token>"
     (or add to ~/.zshrc / a .env file and source it before running)
+    Normally injected via config/expense-domain/wallet/config.yaml by
+    scripts/wallet-sync.sh — see that script for the single-command entry
+    point.
 
 4.  Normal run:
     python3 sync.py
@@ -39,6 +44,14 @@ USAGE
     python3 sync.py --since 2026-06-01       # override cursor (backfill)
     python3 sync.py --auth                   # redo OAuth consent flow
     python3 sync.py --test-engine            # run engine.py regression tests
+    python3 sync.py --ai-assist              # for emails matching no known
+                                              # format, ask AI to suggest one,
+                                              # save it, and retry within this
+                                              # same run (costs API calls)
+
+Optional env vars:
+    SA_VAULT      set to an Obsidian vault path to enable write-back of a
+                  human-readable monthly expense log (unset = disabled)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 WHAT THIS DOES (mirrors Wallet Sync Runbook.md)
@@ -73,26 +86,44 @@ def _require(pkg, install_name=None):
                  f"  pip install {name} --break-system-packages")
 
 # ── paths ─────────────────────────────────────────────────────────────────
+#
+# Everything this script reads or writes lives under CONFIG_PATH (default
+# ~/automation-monorepo-config) or right next to this script — never a
+# hardcoded personal path. The one deliberate exception is the Obsidian
+# write-back (a real, opt-in feature — see spec 010): it only activates when
+# SA_VAULT is explicitly set, so an unconfigured run never touches a personal
+# iCloud vault.
 
-VAULT = pathlib.Path(
-    os.environ.get("SA_VAULT",
-        "/Users/sumitasok/Library/Mobile Documents/iCloud~md~obsidian/Documents/sa.finances")
-)
-DB           = VAULT / "_db"
-EXTRACT_DIR  = DB / "extract"
-ENGINE       = EXTRACT_DIR / "engine.py"
-SYNC_DIR     = DB / "wallet-sync"
-LAST_SYNC    = SYNC_DIR / "last-sync.json"
-LOG_DIR      = SYNC_DIR / "logs"
-
-# External configuration paths
+# External configuration/data root (constitution: config/data/rules live here)
 CONFIG_PATH = pathlib.Path(os.environ.get("CONFIG_PATH", pathlib.Path.home() / "automation-monorepo-config"))
 EXT_CONFIG_DIR = CONFIG_PATH / "config" / "expense-domain" / "wallet"
 LABELS_CACHE = EXT_CONFIG_DIR / "labels-cache.json"
 
-CONFIG_DIR   = pathlib.Path.home() / ".config" / "sa-finances"
-CREDS_FILE   = CONFIG_DIR / "gmail-credentials.json"
-TOKEN_FILE   = CONFIG_DIR / "gmail-token.json"
+# The extraction engine and its formats/routing live in this repo, migrated
+# alongside sync.py — never in the Obsidian vault (that copy is stale).
+EXTRACT_DIR  = pathlib.Path(__file__).resolve().parent
+ENGINE       = EXTRACT_DIR / "extract-engine.py"
+
+# Sync state/logs/unmatched-log: this pack's own produced data, under
+# CONFIG_PATH/data/expense-domain/wallet/ (AUTO_DATA_DIR, when the framework
+# injects it, points at the same place).
+SYNC_DIR     = pathlib.Path(os.environ.get(
+    "AUTO_DATA_DIR", str(CONFIG_PATH / "data" / "expense-domain" / "wallet")
+))
+LAST_SYNC    = SYNC_DIR / "last-sync.json"
+LOG_DIR      = SYNC_DIR / "logs"
+
+# Obsidian write-back: opt-in only. Unset SA_VAULT (the default) disables it
+# rather than silently defaulting to one person's iCloud vault path.
+_sa_vault = os.environ.get("SA_VAULT", "")
+VAULT = pathlib.Path(_sa_vault) if _sa_vault else None
+
+# Gmail OAuth credentials: gmail is a source of expense-domain, addressed
+# config/<domain>/<source>/ like every other source (config/expense-domain/
+# wallet/ follows the same pattern) — not a separate, disconnected store.
+CONFIG_DIR   = CONFIG_PATH / "config" / "expense-domain" / "gmail"
+CREDS_FILE   = CONFIG_DIR / "credentials.json"
+TOKEN_FILE   = CONFIG_DIR / "token.json"
 
 WALLET_BASE  = "https://rest.budgetbakers.com/wallet/v1/api"
 GMAIL_SCOPES = [
@@ -393,8 +424,8 @@ def apply_claude_read_label(service, thread_id: str, dry_run=False):
 # ENGINE.PY  (AI-free extraction)
 # ══════════════════════════════════════════════════════════════════════════
 
-def run_engine(envelopes: list[dict], log) -> list[dict]:
-    """Feed envelopes through engine.py, return result dicts."""
+def run_engine(envelopes: list[dict], log, ai_assist: bool = False) -> list[dict]:
+    """Feed envelopes through extract-engine.py, return result dicts."""
     if not envelopes:
         return []
     with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
@@ -404,8 +435,11 @@ def run_engine(envelopes: list[dict], log) -> list[dict]:
     try:
         # Pass CONFIG_PATH to engine subprocess
         env = os.environ.copy()
+        cmd = [sys.executable, str(ENGINE), "--file", tmp]
+        if ai_assist:
+            cmd.append("--ai-assist")
         result = subprocess.run(
-            [sys.executable, str(ENGINE), "--file", tmp],
+            cmd,
             capture_output=True, text=True, check=True,
             cwd=str(EXTRACT_DIR),
             env=env
@@ -506,7 +540,7 @@ def append_expense_row(log_path: pathlib.Path, record: dict, gm_id: str,
 # ══════════════════════════════════════════════════════════════════════════
 
 def part_a(gmail_svc, state: dict, categories: dict, labels_cache: dict,
-           dry_run: bool, log):
+           dry_run: bool, log, ai_assist: bool = False):
     since = state.get("last_email_timestamp") or (
         dt.datetime.utcnow() - dt.timedelta(days=DEFAULT_LOOKBACK_DAYS)
     ).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -532,7 +566,23 @@ def part_a(gmail_svc, state: dict, categories: dict, labels_cache: dict,
             envelopes.append(env)
             thread_map[msg["id"]] = t["thread_id"]
 
-    results = run_engine(envelopes, log)
+    results = run_engine(envelopes, log, ai_assist=ai_assist)
+
+    if ai_assist:
+        # Any result the engine couldn't match may now have an AI-suggested
+        # format file written to disk (process() learns but doesn't retry
+        # within the same pass — see extract-engine.py). Re-run just those
+        # envelopes once, without --ai-assist, so a genuinely new format is
+        # applied in this same command instead of only "next run".
+        learned_ids = {
+            r["source_id"] for r in results
+            if r.get("action") in ("unmatched", "error") and r.get("ai_created_format_file")
+        }
+        if learned_ids:
+            log(f"  ai-assist: learned {len(learned_ids)} new format(s), retrying")
+            retry_envelopes = [e for e in envelopes if e["id"] in learned_ids]
+            retried = {r["source_id"]: r for r in run_engine(retry_envelopes, log)}
+            results = [retried.get(r.get("source_id"), r) for r in results]
 
     pushed = 0
     unmatched_log = []
@@ -616,10 +666,11 @@ def part_a(gmail_svc, state: dict, categories: dict, labels_cache: dict,
         wallet_post("/records", {"records": [payload]}, dry_run=dry_run)
         log(f"  pushed {gm_id} {merchant} ₹{amount} → account {account_id}")
 
-        # Obsidian write-back
-        log_path = expense_log_path(date_str)
-        if not log_row_exists(log_path, gm_id):
-            append_expense_row(log_path, rec, gm_id, dry_run=dry_run)
+        # Obsidian write-back (opt-in — see SA_VAULT above)
+        if VAULT:
+            log_path = expense_log_path(date_str)
+            if not log_row_exists(log_path, gm_id):
+                append_expense_row(log_path, rec, gm_id, dry_run=dry_run)
 
         _mark_processed(gmail_svc, thread_map.get(gm_id,""), dry_run)
         pushed += 1
@@ -651,7 +702,8 @@ def _payment_type(instrument: str) -> str:
 def _save_unmatched(items: list, dry_run: bool, log):
     path = SYNC_DIR / "unmatched.jsonl"
     log(f"  {len(items)} unmatched/error → {path}")
-    log("  ⚠  Codify each one in _db/extract/formats/email.<bank>.yaml, then re-run.")
+    log(f"  ⚠  Codify each one in {CONFIG_PATH}/config/expense-domain/gmail/email-formats/email.<bank>.yaml"
+        f" (or re-run with --ai-assist), then re-run.")
     if dry_run:
         for i in items:
             print(json.dumps(i, indent=2)[:400])
@@ -889,6 +941,9 @@ def main():
     ap.add_argument("--since",    help="override cursor, e.g. 2026-06-01")
     ap.add_argument("--auth",     action="store_true", help="redo Google OAuth consent")
     ap.add_argument("--test-engine", action="store_true", help="run engine.py --test and exit")
+    ap.add_argument("--ai-assist", action="store_true",
+                     help="for emails matching no known format, ask AI_PROVIDER to suggest one, "
+                          "save it, and retry within this same run (costs API calls; off by default)")
     args = ap.parse_args()
 
     if args.test_engine:
@@ -919,7 +974,7 @@ def main():
     # ── Part A ────────────────────────────────────────────────────────────
     log("\n── Part A: Gmail bank alerts ────────────────────────────────────")
     a_pushed, new_ts = part_a(gmail_svc, state, categories, labels_cache,
-                               args.dry_run, log)
+                               args.dry_run, log, ai_assist=args.ai_assist)
     log(f"Part A done: {a_pushed} records pushed")
 
     # ── Part B ────────────────────────────────────────────────────────────

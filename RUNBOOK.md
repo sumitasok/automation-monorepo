@@ -4,6 +4,39 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-09-05 — Fix wallet-sync-unified: stale engine path, dual Gmail credential stores, domain/source config layout
+
+**Prompt summary**: User asked to audit the Obsidian→repo wallet-sync migration (spec 010) and make it actually runnable end-to-end (gmail scan/discover → extract → predict category/labels/description → update wallet).
+
+**Root cause found**: `sync.py`'s path constants (`VAULT`, `EXTRACT_DIR`, `ENGINE`) still defaulted to the Obsidian vault, so every run shelled out to the **stale** `_db/extract/engine.py` copy there instead of the migrated `extract-engine.py` next to it. Every format fix added to `${CONFIG_PATH}` this session (HDFC UPI, etc.) was silently invisible to real runs — confirmed live: the same HDFC UPI email that the RUNBOOK claimed was fixed earlier today still came back `UNMATCHED` in a fresh dry-run, until the path was corrected.
+
+**Files modified** (this repo):
+- `packs/expense-domain/sources/wallet/jobs/wallet-sync-unified/sync.py` — `ENGINE`/`EXTRACT_DIR` now resolve next to the script (not the Obsidian vault); `SYNC_DIR`/`LAST_SYNC`/`LOG_DIR` now under `${CONFIG_PATH}/data/expense-domain/wallet/` (respecting `AUTO_DATA_DIR` when the framework injects it); Obsidian write-back (`VAULT`) is now opt-in via `SA_VAULT`, guarded at both call sites, instead of defaulting to a hardcoded personal iCloud path; Gmail credentials now read from `${CONFIG_PATH}/config/expense-domain/gmail/` (domain/source addressing, matching `wallet`'s own layout) instead of a third, disconnected `~/.config/sa-finances/` store; added `--ai-assist` flag threaded through `run_engine()`/`part_a()` with an immediate same-run retry for any envelope that got a newly AI-learned format.
+- `packs/expense-domain/sources/wallet/jobs/wallet-sync-unified/extract-engine.py` — `FORMATS_DIR` moved to `${CONFIG_PATH}/config/expense-domain/gmail/email-formats/` (domain/source addressing).
+- `packs/expense-domain/sources/wallet/jobs/wallet-sync-unified/gen-payload.py` — removed hardcoded Obsidian output path (one-off historical backfill script, not on the live pipeline path).
+- `packs/expense-domain/sources/wallet/scripts/wallet-sync.sh` — passes through `--ai-assist`; fixed a stale filename reference in the header comment.
+
+**Files reorganized** (external, `~/automation-monorepo-config/`, not versioned in this repo):
+- `config/gmail/` → `config/expense-domain/gmail/` (credentials.json, token.json + backups, email-formats/), so gmail (a source of expense-domain) is addressed the same way as wallet already was. Repointed `config/expense-domain/wallet/email-formats` symlink accordingly.
+- Consolidated Gmail OAuth onto one token (the one with the correct, full scope set, previously duplicated into a untracked `~/.config/sa-finances/` store by `sync.py`'s old defaults).
+- `config/expense-domain/gmail/email-formats/email.skip-rules.yaml` — added `icici-monthly-estatement` and `axis-fraud-awareness` skip rules for two genuinely non-transactional emails surfaced during verification.
+
+**Verification**: ran `packs/expense-domain/sources/wallet/scripts/wallet-sync.sh --dry-run --since 2026-09-01` against live Gmail/Wallet (read-only — `wallet_post`/`wallet_patch`/Gmail label-apply all confirmed no-op under `--dry-run`). Result: 20 real emails processed, 17 correctly extracted/routed/pushed (dry-run), 2 correctly skipped via new rules, 1 new genuine unmatched (an Indian Bank newsletter) surfaced cleanly for future codification.
+
+**Critical finding, not fixed here — needs a decision**: three independent sync pipelines are live for the same Wallet account:
+1. `com.safinances.wallet-sync` (launchd, hourly at :07) → the *original* Obsidian-vault `_db/wallet-sync/run-sync.sh` (the stale copy above).
+2. `com.sumitasok.wallet-sync` (launchd, 6×/day) → main checkout's `./auto orchestrate gmail-wallet-sync` → the older Go-based `gmail-extract`/`wallet-sync` pipeline (`internal/wallet/wallet.go`'s `UpsertRecords`, weaker counterparty+amount+day dedup key).
+3. This session's fixed `wallet-sync-unified/sync.py` — not scheduled anywhere yet.
+This is exactly the "two competing triggers" problem spec 010 set out to resolve; only the code migration happened, not the trigger consolidation. Neither dedup implementation is a true server-side upsert (Wallet API has no idempotency-key/unique-constraint support), so concurrent overlapping runs carry a real, non-theoretical duplicate-write race. Recommend: pick one pipeline (this one), disable the other two launchd agents, and add a run-lock before scheduling it.
+
+**Caveats**:
+- Old `~/.config/sa-finances/gmail-{credentials,token}.json` left in place (not deleted) — now unused by this pipeline, safe to remove once confirmed nothing else reads it.
+- Old `config/gmail/` (flat) left in place at `~/automation-monorepo-config/config/gmail/` pending confirmation nothing else references it, then safe to delete.
+- Part B (Drive Bills Inbox) and AI-based categories/description via a separate DeepSeek pass remain out of scope of this fix — flagged, not touched.
+- `--ai-assist` is opt-in (costs API calls per unmatched email) — off by default, per this workspace's existing convention.
+
+---
+
 ## 2026-09-05 — Add AI-assisted pattern learning to extract-engine
 
 **Prompt summary**: User requested AI-powered pattern learning for unmatched emails using available DeepSeek/Claude APIs. When an email doesn't match any format, system should auto-suggest patterns and create format files.

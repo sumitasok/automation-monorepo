@@ -1,6 +1,9 @@
 #!/bin/bash
 # Unified Wallet Sync - Main Orchestrator
-# Single entry point: CONFIG_PATH=~/automation-monorepo-config ./scripts/wallet-sync-unified.sh
+# Single entry point: gmail scan/discover -> extract -> categorize/label/describe -> wallet push
+#   CONFIG_PATH=~/automation-monorepo-config ./scripts/wallet-sync.sh [--dry-run] [--since YYYY-MM-DD] [--ai-assist]
+# --ai-assist: for emails matching no known format, ask AI to suggest and save
+#   a new one, then retry within this same run (costs API calls; off by default).
 
 set -euo pipefail
 
@@ -13,11 +16,13 @@ DATA_DIR="$CONFIG_PATH/data/expense-domain/wallet"
 # Parse flags
 DRY_RUN=false
 SINCE=""
+AI_ASSIST=false
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY_RUN=true; shift ;;
     --since) SINCE="$2"; shift 2 ;;
     --config-path) CONFIG_PATH="$2"; shift 2 ;;
+    --ai-assist) AI_ASSIST=true; shift ;;
     *) shift ;;
   esac
 done
@@ -61,6 +66,7 @@ export WALLET_AUTH_HEADER="Bearer $WALLET_TOKEN"
 python3 "$SCRIPT_DIR/sync.py" \
   $([ "$DRY_RUN" = "true" ] && echo "--dry-run" || echo "") \
   $([ -n "$SINCE" ] && echo "--since $SINCE" || echo "") \
+  $([ "$AI_ASSIST" = "true" ] && echo "--ai-assist" || echo "") \
   2>&1 | tee -a "$LOG_FILE"
 
 EXIT_CODE=${PIPESTATUS[0]}

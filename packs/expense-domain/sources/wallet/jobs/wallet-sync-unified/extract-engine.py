@@ -50,8 +50,10 @@ import yaml
 BASE = pathlib.Path(__file__).resolve().parent
 # Read format files from external config if CONFIG_PATH is set
 CONFIG_PATH = pathlib.Path(os.environ.get("CONFIG_PATH", pathlib.Path.home() / "automation-monorepo-config"))
-# Email format patterns now in config/gmail/ (reusable by multiple domains)
-FORMATS_DIR = CONFIG_PATH / "config" / "gmail" / "email-formats"
+# Email format patterns live under the gmail source of expense-domain
+# (config/<domain>/<source>/ — the domain/source addressing convention;
+# config/expense-domain/wallet/email-formats symlinks here for reuse).
+FORMATS_DIR = CONFIG_PATH / "config" / "expense-domain" / "gmail" / "email-formats"
 ROUTING_FILE = CONFIG_PATH / "config" / "expense-domain" / "wallet" / "routing.yaml"
 
 # Fallback to local formats if external config doesn't exist
