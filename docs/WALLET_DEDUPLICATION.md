@@ -52,21 +52,46 @@ Record A (automation): $45.50 Starbucks 2026-09-01 ✓ source:automation-monorep
 Record B (manual):    $45.50 Starbucks 2026-09-01 ✗ no source label
 ```
 
-### 3. Deduplication Rules
+### 3. Intelligent Deduplication & Merging
 
-When duplicates are found:
+When duplicates are found, we take the **best of both** records:
 
-1. **Keep**: Record with `source:automation-monorepo` label
-2. **Remove**: Record without source label (manual entry)
-3. **Verify**: Correct categorization is preserved in kept record
-4. **Report**: Generate audit report of removed duplicates
+**Deduplication Rules:**
+1. **Base**: Keep automation record (authoritative)
+2. **Category**: Use from automation (AI-categorized, correct)
+3. **Description**: Use from manual (usually more detailed)
+4. **Tags/Labels**: Merge all from both records (comprehensive)
+5. **Audit**: Track merge metadata for traceability
+
+**Example - Before & After:**
+```
+BEFORE:
+├─ Automation: "Coffee" + Category=Meals & Dining + Labels=[source:automation-monorepo]
+└─ Manual: "Morning espresso with Sarah at downtown Starbucks" + Labels=[business, colleague]
+
+AFTER (Merged):
+└─ "Morning espresso with Sarah at downtown Starbucks"
+   + Category=Meals & Dining ✓ (from automation)
+   + Labels=[source:automation-monorepo, business, colleague] (combined)
+   + Merge metadata tracking what was merged
+```
 
 **Logic:**
 ```
-IF record has "source:automation-monorepo" label
-  THEN keep (automation is authoritative)
-ELSE
-  THEN remove (manual entry is duplicate)
+FOR each duplicate pair:
+  automation_record = record WITH "source:automation-monorepo"
+  manual_record = record WITHOUT source label
+  
+  merged = {
+    id: automation_record.id,
+    category: automation_record.category,           # AI-categorized
+    description: manual_record.description,         # Better detail
+    labels: [automation + manual labels],           # All tags
+    _merged_attributes: { audit trail }            # Track changes
+  }
+  
+  KEEP merged record
+  REMOVE manual_record (no data lost, merged in)
 ```
 
 ## Implementation
