@@ -262,6 +262,7 @@ def process(doc, fmts=None, routes=None):
             "matched": True,
             "format": fmt["name"],
             "action": "extract",
+            "source_id": doc.get("id"),
             "record": route(record, routes),
         }
 

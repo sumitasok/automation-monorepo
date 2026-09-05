@@ -83,8 +83,12 @@ EXTRACT_DIR  = DB / "extract"
 ENGINE       = EXTRACT_DIR / "engine.py"
 SYNC_DIR     = DB / "wallet-sync"
 LAST_SYNC    = SYNC_DIR / "last-sync.json"
-LABELS_CACHE = SYNC_DIR / "labels-cache.json"
 LOG_DIR      = SYNC_DIR / "logs"
+
+# External configuration paths
+CONFIG_PATH = pathlib.Path(os.environ.get("CONFIG_PATH", pathlib.Path.home() / "automation-monorepo-config"))
+EXT_CONFIG_DIR = CONFIG_PATH / "config" / "expense-domain" / "wallet"
+LABELS_CACHE = EXT_CONFIG_DIR / "labels-cache.json"
 
 CONFIG_DIR   = pathlib.Path.home() / ".config" / "sa-finances"
 CREDS_FILE   = CONFIG_DIR / "gmail-credentials.json"
