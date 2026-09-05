@@ -4,6 +4,7 @@
   "description": "Multi-domain automation framework with configuration-driven job scheduling",
   "main": "packs/shared/lib/index.js",
   "scripts": {
+    "start": "node start.js",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage"
