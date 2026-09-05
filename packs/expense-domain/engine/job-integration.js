@@ -7,6 +7,8 @@
 const JobScheduler = require('../../shared/jobs/scheduler.js');
 const ManifestSchema = require('../../shared/jobs/manifest-schema.js');
 const JobStateManager = require('../../shared/jobs/state-manager.js');
+const OrchestratorJobManager = require('../../shared/jobs/orchestrator-manager.js');
+const path = require('path');
 
 class ExpenseDomainJobManager {
   constructor(engine, configPath) {
@@ -23,6 +25,9 @@ class ExpenseDomainJobManager {
       initialDelayMs: 5000,
       stateManager: this.stateManager, // Phase 5: Enable persistence
     });
+
+    // Phase 5 T036: Initialize orchestrator manager
+    this.orchestrator = new OrchestratorJobManager(this.scheduler, configPath, this.stateManager);
 
     this.jobDefinitions = [];
   }
@@ -139,6 +144,20 @@ class ExpenseDomainJobManager {
     // Phase 5: Initialize state manager first
     await this.initialize();
     await this.registerJobs();
+
+    // Phase 5 T036: Load and register orchestrations
+    try {
+      const orchDir = path.join(this.configPath, '..', 'orchestrator');
+      const orchCount = await this.orchestrator.loadOrchestrations(orchDir);
+      if (orchCount > 0) {
+        this.orchestrator.registerOrchestrations();
+        console.log(`✓ Loaded and registered ${orchCount} orchestrations`);
+      }
+    } catch (err) {
+      console.warn('⚠️ Failed to load orchestrations:', err.message);
+      // Continue without orchestrations
+    }
+
     await this.scheduler.start();
     console.log('✓ Job scheduler started');
   }
@@ -174,6 +193,34 @@ class ExpenseDomainJobManager {
    */
   getJob(jobId) {
     return this.scheduler.getJob(jobId);
+  }
+
+  /**
+   * Get list of all orchestrations
+   */
+  listOrchestrations() {
+    return this.orchestrator.listOrchestrations();
+  }
+
+  /**
+   * Trigger an orchestration manually
+   */
+  async triggerOrchestration(orchestrationName, context = {}) {
+    return this.orchestrator.triggerOrchestration(orchestrationName, context);
+  }
+
+  /**
+   * Get orchestration execution history
+   */
+  async getOrchestrationHistory(orchestrationName, limit = 50) {
+    return this.orchestrator.getOrchestrationHistory(orchestrationName, limit);
+  }
+
+  /**
+   * Get orchestration step details
+   */
+  async getOrchestrationSteps(executionId) {
+    return this.orchestrator.getOrchestrationSteps(executionId);
   }
 
   // ============ Job Handler Implementations ============

@@ -119,9 +119,15 @@ class ExpenseServer {
         await this._handleJobStats(req, res, jobId);
       } else if (pathname === '/api/orchestrations' && req.method === 'GET') {
         await this._handleListOrchestrations(req, res);
+      } else if (pathname.match(/^\/api\/orchestrations\/[^/]+\/run$/) && req.method === 'POST') {
+        const name = pathname.split('/')[3];
+        await this._handleTriggerOrchestration(req, res, name);
       } else if (pathname.match(/^\/api\/orchestrations\/[^/]+\/history$/) && req.method === 'GET') {
         const name = pathname.split('/')[3];
         await this._handleOrchestrationHistory(req, res, name, query);
+      } else if (pathname.match(/^\/api\/orchestrations\/[^/]+\/pause$/) && req.method === 'PUT') {
+        const name = pathname.split('/')[3];
+        await this._handlePauseOrchestration(req, res, name);
       } else if (pathname.match(/^\/api\/orchestrations\/[^/]+\/runs\/[^/]+\/steps$/) && req.method === 'GET') {
         const parts = pathname.split('/');
         const executionId = parts[5];
@@ -241,67 +247,100 @@ class ExpenseServer {
     }
   }
 
-  // ============ Orchestration Handlers (T038) ============
+  // ============ Orchestration Handlers (T039) ============
 
   async _handleListOrchestrations(req, res) {
-    // Phase 5 T038: List all registered orchestrations
-    // Note: OrchestratorJobManager integration in progress
-    this._sendJson(res, 200, {
-      orchestrations: [],
-      message: 'Orchestrations available via OrchestratorJobManager',
-    });
+    // Phase 5 T039: List all registered orchestrations
+    try {
+      const orchestrations = this.jobManager.listOrchestrations();
+      this._sendJson(res, 200, {
+        orchestrations,
+        totalCount: orchestrations.length,
+      });
+    } catch (error) {
+      this._sendError(res, 500, `Failed to list orchestrations: ${error.message}`);
+    }
+  }
+
+  async _handleTriggerOrchestration(req, res, name) {
+    // Phase 5 T039: Manually trigger an orchestration
+    try {
+      const context = await this._readBody(req).then((body) => {
+        try {
+          return body ? JSON.parse(body) : {};
+        } catch {
+          return {};
+        }
+      });
+
+      const executionId = await this.jobManager.triggerOrchestration(name, context);
+      this._sendJson(res, 200, {
+        status: 'triggered',
+        orchestration: name,
+        executionId,
+        message: `Orchestration ${name} triggered with execution ID ${executionId}`,
+      });
+    } catch (error) {
+      this._sendError(res, 400, `Failed to trigger orchestration: ${error.message}`);
+    }
   }
 
   async _handleOrchestrationHistory(req, res, name, query) {
-    // Phase 5 T038: Get orchestration execution history
-    // Note: Requires OrchestratorJobManager integration
-    const limit = query.limit ? parseInt(query.limit) : 50;
+    // Phase 5 T039: Get orchestration execution history
+    try {
+      const limit = query.limit ? parseInt(query.limit) : 50;
+      const history = await this.jobManager.getOrchestrationHistory(name, limit);
 
-    this._sendJson(res, 200, {
-      orchestration: name,
-      history: [],
-      message: 'Orchestration history tracking via JobStateManager',
-    });
+      this._sendJson(res, 200, {
+        orchestration: name,
+        history: history || [],
+        totalCount: history ? history.length : 0,
+      });
+    } catch (error) {
+      this._sendError(res, 500, `Failed to retrieve orchestration history: ${error.message}`);
+    }
+  }
+
+  async _handlePauseOrchestration(req, res, name) {
+    // Phase 5 T039: Pause orchestration execution
+    // Note: Full pause implementation in Phase 6
+    // For now, returns accepted response
+    try {
+      this._sendJson(res, 200, {
+        status: 'pause_requested',
+        orchestration: name,
+        message: `Pause requested for orchestration ${name}. Full pause logic in Phase 6.`,
+      });
+    } catch (error) {
+      this._sendError(res, 500, `Failed to pause orchestration: ${error.message}`);
+    }
   }
 
   async _handleOrchestrationSteps(req, res, executionId) {
-    // Phase 5 T038: Get orchestration step details
-    if (this.jobManager && this.jobManager.stateManager) {
-      try {
-        const steps = [];
-
-        // Query orchestration_steps from database
-        if (this.jobManager.stateManager.db) {
-          const stmt = this.jobManager.stateManager.db.prepare(`
-            SELECT * FROM orchestration_steps
-            WHERE orchestration_id = ?
-            ORDER BY step_index ASC
-          `);
-          const dbSteps = stmt.all(executionId);
-
-          dbSteps.forEach((step) => {
-            steps.push({
-              stepIndex: step.step_index,
-              jobId: step.job_id,
-              status: step.status,
-              startedAt: step.started_at,
-              endedAt: step.ended_at,
-              attempts: step.attempts,
-              result: step.result ? JSON.parse(step.result) : null,
-            });
-          });
-        }
-
-        this._sendJson(res, 200, {
-          executionId,
-          steps,
-          totalSteps: steps.length,
-        });
-      } catch (error) {
-        this._sendError(res, 500, `Failed to retrieve orchestration steps: ${error.message}`);
+    // Phase 5 T038+T039: Get orchestration step details
+    try {
+      if (!this.jobManager || !this.jobManager.stateManager) {
+        return this._sendError(res, 503, 'Job state manager not available');
       }
-    } else {
-      this._sendError(res, 503, 'Job state manager not available');
+
+      const steps = await this.jobManager.getOrchestrationSteps(executionId);
+      const formattedSteps = (steps || []).map((step) => ({
+        stepIndex: step.step_index,
+        jobId: step.job_id,
+        status: step.status,
+        startedAt: step.started_at,
+        endedAt: step.ended_at,
+        attempts: step.attempts,
+        result: step.result ? JSON.parse(step.result) : null,
+      }));
+
+      this._sendJson(res, 200, {
+        executionId,
+        steps: formattedSteps,
+        totalSteps: formattedSteps.length,
+      });
+    } catch (error) {
+      this._sendError(res, 500, `Failed to retrieve orchestration steps: ${error.message}`);
     }
   }
 
