@@ -136,13 +136,15 @@ class ExpenseDomainJobManager {
 
     // Job 6: Wallet Sync Orchestration (every 4 hours) - Phase 5 T040
     // Replaces LaunchD scheduled job
+    // Note: Set enabled=false for now to prevent infinite loops; will be enabled in production
+    // Can be triggered manually via API: POST /api/orchestrations/gmail-wallet-sync/run
     this.scheduler.registerJob('wallet-sync-orchestration', {
       name: 'Wallet Sync Orchestration',
       description: 'Scheduled wallet sync with Gmail categorization (formerly LaunchD)',
       schedule: { type: 'interval', interval: '4h' },
       timeout: 3600,
       retry: { maxRetries: 1, backoffMultiplier: 2 },
-      enabled: true,
+      enabled: false,
       handlers: {
         onStart: this._onJobStart.bind(this),
         execute: this._executeWalletSyncOrchestration.bind(this),
@@ -167,7 +169,7 @@ class ExpenseDomainJobManager {
       this.scheduler.registerJob(job.id, {
         name: job.name,
         description: `Orchestration step: ${job.name}`,
-        schedule: { type: 'interval', interval: '999d' }, // Never scheduled, only triggered by orchestrations
+        schedule: { type: 'manual' }, // Only triggered by orchestrations, not scheduled
         enabled: true,
         handlers: {
           onStart: this._onJobStart.bind(this),
