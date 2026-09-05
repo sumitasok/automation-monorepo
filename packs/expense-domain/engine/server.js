@@ -6,12 +6,14 @@
 const http = require('http');
 const url = require('url');
 const ExpenseEngine = require('./api.js');
+const ExpenseDomainJobManager = require('./job-integration.js');
 
 class ExpenseServer {
   constructor(configPath, port = 3100) {
     this.configPath = configPath;
     this.port = port;
     this.engine = new ExpenseEngine(configPath);
+    this.jobManager = null;
     this.server = null;
   }
 
@@ -22,6 +24,10 @@ class ExpenseServer {
     // Initialize engine
     await this.engine.initialize();
     await this.engine.start();
+
+    // Initialize job manager
+    this.jobManager = new ExpenseDomainJobManager(this.engine, this.configPath);
+    await this.jobManager.start();
 
     // Create HTTP server
     this.server = http.createServer((req, res) => {
@@ -41,6 +47,9 @@ class ExpenseServer {
    * Stop the server
    */
   async stop() {
+    if (this.jobManager) {
+      await this.jobManager.stop();
+    }
     if (this.server) {
       return new Promise((resolve) => {
         this.server.close(resolve);
@@ -97,6 +106,14 @@ class ExpenseServer {
       } else if (pathname.match(/^\/api\/expense-domain\/sources\/[^/]+\/write-back$/)) {
         const source = pathname.split('/')[4];
         await this._handleWriteBack(req, res, source);
+      } else if (pathname === '/api/expense-domain/jobs' && req.method === 'GET') {
+        await this._handleGetJobs(req, res, query);
+      } else if (pathname.match(/^\/api\/expense-domain\/jobs\/[^/]+\/trigger$/) && req.method === 'POST') {
+        const jobId = pathname.split('/')[4];
+        await this._handleTriggerJob(req, res, jobId);
+      } else if (pathname.match(/^\/api\/expense-domain\/jobs\/[^/]+\/history$/) && req.method === 'GET') {
+        const jobId = pathname.split('/')[4];
+        await this._handleJobHistory(req, res, jobId, query);
       } else if (pathname === '/health') {
         this._sendJson(res, 200, { status: 'ok', domain: 'expense-domain' });
       } else {
@@ -171,6 +188,35 @@ class ExpenseServer {
     const data = JSON.parse(body);
     const result = await this.engine.writeBackToSource(source, data);
     this._sendJson(res, 200, result);
+  }
+
+  async _handleGetJobs(req, res, query) {
+    const jobs = this.jobManager.jobManager.jobs ?
+      Array.from(this.jobManager.jobManager.jobs.values()) : [];
+    const jobDetails = jobs.map((job) => ({
+      id: job.id,
+      name: job.name,
+      description: job.description,
+      schedule: job.schedule,
+      enabled: job.enabled,
+      timeout: job.timeout,
+    }));
+    this._sendJson(res, 200, jobDetails);
+  }
+
+  async _handleTriggerJob(req, res, jobId) {
+    const executionId = await this.jobManager.triggerJob(jobId, {});
+    this._sendJson(res, 200, {
+      status: 'triggered',
+      jobId,
+      executionId,
+      message: `Job ${jobId} triggered with execution ID ${executionId}`,
+    });
+  }
+
+  async _handleJobHistory(req, res, jobId, query) {
+    const history = this.jobManager.getExecutionHistory({ jobId });
+    this._sendJson(res, 200, history);
   }
 
   // ============ Utilities ============

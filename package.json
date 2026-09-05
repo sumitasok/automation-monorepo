@@ -1,0 +1,37 @@
+{
+  "name": "automation-monorepo",
+  "version": "1.0.0",
+  "description": "Multi-domain automation framework with configuration-driven job scheduling",
+  "main": "packs/shared/lib/index.js",
+  "scripts": {
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage"
+  },
+  "keywords": [
+    "automation",
+    "framework",
+    "multi-domain",
+    "job-scheduling"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "jest": "^29.0.0"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testMatch": [
+      "**/__tests__/**/*.test.js",
+      "**/?(*.)+(spec|test).js"
+    ],
+    "collectCoverageFrom": [
+      "packs/**/*.js",
+      "!packs/**/__tests__/**",
+      "!packs/**/node_modules/**"
+    ]
+  }
+}

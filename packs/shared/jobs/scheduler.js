@@ -369,14 +369,19 @@ class JobScheduler extends EventEmitter {
   }
 
   /**
-   * Parse interval string (e.g., "5s", "1m", "1h")
+   * Parse interval string (e.g., "5s", "1m", "1h", "1d")
    */
   _parseInterval(interval) {
-    const match = interval.match(/^(\d+)([smh])$/);
+    const match = interval.match(/^(\d+)([smhd])$/);
     if (!match) throw new Error(`Invalid interval format: ${interval}`);
 
     const [, value, unit] = match;
-    const multipliers = { s: 1000, m: 60 * 1000, h: 60 * 60 * 1000 };
+    const multipliers = {
+      s: 1000,
+      m: 60 * 1000,
+      h: 60 * 60 * 1000,
+      d: 24 * 60 * 60 * 1000,
+    };
     return parseInt(value) * multipliers[unit];
   }
 

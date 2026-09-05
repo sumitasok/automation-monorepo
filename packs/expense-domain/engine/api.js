@@ -4,10 +4,10 @@
  * Inherits from DomainEngine base class
  */
 
-const DomainEngine = require('../../../shared/lib/domain-api.js');
-const ConfigLoader = require('../../../shared/lib/config-loader.js');
-const RulesLoader = require('../../../shared/lib/rules-loader.js');
-const RulesEngine = require('../../../shared/lib/rules-engine.js');
+const DomainEngine = require('../../shared/lib/domain-api.js');
+const ConfigLoader = require('../../shared/lib/config-loader.js');
+const RulesLoader = require('../../shared/lib/rules-loader.js');
+const RulesEngine = require('../../shared/lib/rules-engine.js');
 const fs = require('fs').promises;
 const path = require('path');
 
