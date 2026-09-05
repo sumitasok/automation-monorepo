@@ -74,7 +74,7 @@ function fetchRecords() {
   return new Promise((resolve, reject) => {
     console.log('📥 Fetching records from Wallet API...');
 
-    const url = new URL('/records', walletBaseUrl);
+    const url = new URL('/v1/api/records?limit=500', walletBaseUrl);
     const options = {
       hostname: url.hostname,
       port: url.port || 443,
@@ -111,7 +111,7 @@ function fetchRecords() {
 
 function deleteRecord(recordId) {
   return new Promise((resolve, reject) => {
-    const url = new URL(`/records/${recordId}`, walletBaseUrl);
+    const url = new URL(`/v1/api/records/${recordId}`, walletBaseUrl);
     const options = {
       hostname: url.hostname,
       port: url.port || 443,
@@ -141,7 +141,7 @@ function deleteRecord(recordId) {
 
 function updateRecord(recordId, updateData) {
   return new Promise((resolve, reject) => {
-    const url = new URL(`/records/${recordId}`, walletBaseUrl);
+    const url = new URL(`/v1/api/records/${recordId}`, walletBaseUrl);
     const payload = JSON.stringify(updateData);
 
     const options = {
