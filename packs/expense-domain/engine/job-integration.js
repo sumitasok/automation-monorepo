@@ -134,7 +134,25 @@ class ExpenseDomainJobManager {
       },
     });
 
-    console.log('✓ All 5 expense domain jobs registered');
+    // Job 6: Wallet Sync Orchestration (every 4 hours) - Phase 5 T040
+    // Replaces LaunchD scheduled job
+    this.scheduler.registerJob('wallet-sync-orchestration', {
+      name: 'Wallet Sync Orchestration',
+      description: 'Scheduled wallet sync with Gmail categorization (formerly LaunchD)',
+      schedule: { type: 'interval', interval: '4h' },
+      timeout: 3600,
+      retry: { maxRetries: 1, backoffMultiplier: 2 },
+      enabled: true,
+      handlers: {
+        onStart: this._onJobStart.bind(this),
+        execute: this._executeWalletSyncOrchestration.bind(this),
+        onSuccess: this._onJobSuccess.bind(this),
+        onFailure: this._onJobFailure.bind(this),
+        onComplete: this._onJobComplete.bind(this),
+      },
+    });
+
+    console.log('✓ All 6 expense domain jobs registered (including wallet-sync-orchestration)');
   }
 
   /**
@@ -372,6 +390,40 @@ class ExpenseDomainJobManager {
       };
     } catch (error) {
       throw new Error(`Rule learning failed: ${error.message}`);
+    }
+  }
+
+  // Phase 5 T040: Wallet sync orchestration (replaces LaunchD)
+  async _executeWalletSyncOrchestration({ executionId, jobId, execution }) {
+    console.log(`[${jobId}] Starting wallet sync orchestration (replacing LaunchD)...`);
+
+    try {
+      // Trigger the gmail-wallet-sync orchestration
+      const orchExecutionId = await this.orchestrator.triggerOrchestration('gmail-wallet-sync', {
+        source: 'framework-scheduled',
+        timestamp: new Date().toISOString(),
+        replacesLaunchd: true,
+      });
+
+      console.log(`[${jobId}] Wallet sync orchestration triggered: ${orchExecutionId}`);
+
+      // Get execution status
+      const orchExecution = this.orchestrator.getExecution(orchExecutionId);
+
+      // Get execution history to verify
+      const history = await this.orchestrator.getOrchestrationHistory('gmail-wallet-sync', 1);
+
+      return {
+        status: 'success',
+        orchestrationId: orchExecutionId,
+        orchestrationName: 'gmail-wallet-sync',
+        message: 'Wallet sync orchestration completed successfully',
+        executionDetails: orchExecution,
+        history: history,
+      };
+    } catch (error) {
+      console.error(`[${jobId}] Wallet sync orchestration failed: ${error.message}`);
+      throw new Error(`Wallet sync orchestration failed: ${error.message}`);
     }
   }
 }
