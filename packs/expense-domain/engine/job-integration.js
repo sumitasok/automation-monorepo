@@ -8,6 +8,7 @@ const JobScheduler = require('../../shared/jobs/scheduler.js');
 const ManifestSchema = require('../../shared/jobs/manifest-schema.js');
 const JobStateManager = require('../../shared/jobs/state-manager.js');
 const OrchestratorJobManager = require('../../shared/jobs/orchestrator-manager.js');
+const WalletDeduplicator = require('../adapters/wallet-dedup.js');
 const path = require('path');
 
 class ExpenseDomainJobManager {
