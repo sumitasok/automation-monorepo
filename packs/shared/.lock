@@ -1,0 +1,22 @@
+# SHARED DIRECTORY LOCK
+# This directory is READ-ONLY and contains framework utilities shared across all domains.
+# No modifications allowed without explicit approval from architecture team.
+#
+# Protected contents:
+# - auth/          Shared authentication logic
+# - jobs/          Framework job scheduling engine
+# - lib/           Shared utility libraries
+# - package.json   Shared dependencies
+#
+# Why locked:
+# - Constitution Principle II: packs/ is read-only
+# - All domains depend on stable shared interfaces
+# - Changes to shared/ affect all domains simultaneously
+#
+# If you need to modify:
+# 1. Document the change in docs/adr/
+# 2. Run validation: scripts/validate-shared-integrity.sh
+# 3. Update dependent domain code
+# 4. Get architecture team approval
+#
+# Last verified: 2026-09-05
