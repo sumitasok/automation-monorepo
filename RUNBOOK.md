@@ -4,6 +4,25 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-09-05 — Tag every wallet record with which pipeline created/updated it
+
+**Prompt summary**: With three concurrent sync pipelines now confirmed live (see prior entries), user asked to be able to identify which process created or updated any given Wallet record — tag the note with `com.safinances.wallet-sync` / `com.sumitasok.wallet-sync` / `com.automation-monorepo.wallet-sync-unified` plus create/update.
+
+**Design**: each pipeline stamps `proc:<its-launchd-label>:<create|update>` into the note. On update, a pipeline preserves the *original creator's* `proc:...:create` tag (never overwrites who made the record) and replaces only its *own* prior `proc:...:update` tag (so repeated touches by the same pipeline don't stack, but a different pipeline's tags are left alone) — appending rather than clobbering wherever the existing code already appended. `gm:<message-id>` (dedup key) and the `proc:` tag are treated as never-truncate content; only the merchant/description field gets shortened to fit the Wallet API's 255-char note limit.
+
+**Files modified**:
+- `packs/expense-domain/sources/wallet/jobs/wallet-sync-unified/sync.py` (this repo, `com.automation-monorepo.wallet-sync-unified`) — `PROC_LABEL`/`proc_tag()`; Part A create and Part B create/update paths tagged; replaced the old, ambiguous `source:refactored-code-0905` tag (also shared verbatim by the Go pipeline, which made the two indistinguishable) with the process-specific tag.
+- `packs/expense-domain/sources/wallet/internal/wallet/wallet.go` + `internal/sync/sync.go` (this repo, `com.sumitasok.wallet-sync` — runs from the **main checkout**, a different branch, not this worktree) — `procLabel`/`procTag()`/`extractCreateTag()`/`clipNote()` in `wallet.go`; `UpsertRecords` now tags both its create and update branches; `buildNote()` in `sync.go` no longer bakes in the old shared `source:refactored-code-0905` tag and reserves headroom (170 vs 255 chars) for the tag(s) added later. Verified: `go build ./...` clean; `go test ./...` has one pre-existing failure (`internal/sync/sync_test.go`'s `fakeClient` missing `UpsertRecords`) confirmed via `git stash` to predate this change, not caused by it.
+- `/Users/sumitasok/Library/Mobile Documents/iCloud~md~obsidian/Documents/sa.finances/_db/wallet-sync/sync.py` (a **separate git repo**, `github.com:sumitasok/obsidian.sa.finances.git` — `com.safinances.wallet-sync`) — same `PROC_LABEL`/`proc_tag()` pattern, applied to its create (Part A) and Drive create/update (Part B) paths. That repo had substantial pre-existing uncommitted operational state (live `last-sync.json`/`labels-cache.json`/monthly expense logs from the hourly job); only `sync.py` was staged and committed there, nothing else touched.
+
+**Verified**: live dry-run of this repo's pipeline shows `"note": "...| gm:1a071ab8aadd19bc | proc:com.automation-monorepo.wallet-sync-unified:create"` — confirmed end to end.
+
+**Caveats**:
+- The Go pipeline's fix only takes effect once merged to whatever branch/checkout `com.sumitasok.wallet-sync`'s plist actually runs from (main checkout, `topic/restructure-architecture` — a different branch than this one) — same caveat as the wallet-sync-unified plist itself (see the "Schedule the fixed wallet-sync-unified pipeline" entry above).
+- Tags are best-effort forensics, not a substitute for fixing the underlying non-atomic dedup race across the three pipelines (still open).
+
+---
+
 ## 2026-09-05 — Schedule the fixed wallet-sync-unified pipeline (third launchd trigger, others left running)
 
 **Prompt summary**: User asked to schedule the fixed `wallet-sync-unified/sync.py` pipeline, explicitly keeping the other two existing triggers (`com.safinances.wallet-sync`, `com.sumitasok.wallet-sync`) running. Confirmed with user: hourly, real writes (not dry-run).

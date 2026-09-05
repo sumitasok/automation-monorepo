@@ -136,6 +136,16 @@ ALL_SCOPES   = GMAIL_SCOPES + [DRIVE_SCOPE]
 
 CLAUDE_READ_LABEL_ID = "Label_145"   # created 2026-06-20; name: claude-read
 
+# Identifies this specific scheduled process in every record's note, so a
+# record can be traced back to which of the three concurrently-running
+# sync pipelines created or last updated it (com.safinances.wallet-sync,
+# com.sumitasok.wallet-sync, or this one).
+PROC_LABEL = "com.automation-monorepo.wallet-sync-unified"
+
+
+def proc_tag(action: str) -> str:
+    return f" | proc:{PROC_LABEL}:{action}"
+
 DRIVE_BILLS_FOLDER   = "1DXizYKYGSg8pPO1_tbXPLTUOENOwfMR6"
 
 DEFAULT_LOOKBACK_DAYS = 7
@@ -639,9 +649,11 @@ def part_a(gmail_svc, state: dict, categories: dict, labels_cache: dict,
         cat_id    = guess_category_id(merchant, categories)
         label_ids = label_ids_for_record(rec, labels_cache)
 
-        # Note format: <merchant> | via <instrument> | gm:<msgid> | source:refactored-code-0905
-        # Max 255 chars; preserve source tag and gm: key
-        source_tag = " | source:refactored-code-0905"
+        # Note format: <merchant> | via <instrument> | gm:<msgid> | proc:<label>:create
+        # Max 255 chars; the gm: key and proc: tag must always survive
+        # truncation (gm: for dedup, proc: so this record is traceable back
+        # to this pipeline) — only the merchant field gets shortened.
+        source_tag = proc_tag("create")
         # Use account_name from routing if available, otherwise use instrument
         instrument = rec.get("account_name") or rec.get("instrument", "")
         max_merchant_len = 255 - len(f" | via  | gm:{gm_id}") - len(source_tag)
@@ -856,15 +868,20 @@ def _handle_drive_record(rec, file_id, file_name, categories, labels_cache,
     label_ids = label_ids_for_record(rec, labels_cache)
 
     if match:
-        # Enrich existing record
-        note = (match.get("note") or "") + f" drive:{file_id}"
+        # Enrich existing record. Strip only our own prior *update* tag
+        # (avoid stacking one per patch) — the create tag (ours or another
+        # pipeline's) and everything else is preserved by appending rather
+        # than replacing; that preservation is the whole point (traceability).
+        base_note = re.sub(rf"\s*\|\s*proc:{re.escape(PROC_LABEL)}:update", "",
+                            match.get("note") or "")
+        note = (base_note + f" drive:{file_id}" + proc_tag("update"))[:255]
         wallet_patch(f"/records/{match['id']}",
-                     {"note": note[:255], **({"categoryId": cat_id} if cat_id else {})},
+                     {"note": note, **({"categoryId": cat_id} if cat_id else {})},
                      dry_run=dry_run)
         log(f"    patched existing Wallet record {match['id']} with drive:{file_id}")
     else:
         # Create new record from bill
-        source_tag = " | source:refactored-code-0905"
+        source_tag = proc_tag("create")
         note = f"{merchant} | from-bill drive:{file_id}{source_tag}"[:255]
         payload = {
             "accountId":    account_id,

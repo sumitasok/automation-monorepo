@@ -305,6 +305,11 @@ func hasAnyAccountMapping(cfg *config.Config) bool {
 	return false
 }
 
+// buildNote leaves headroom below the Wallet API's 255-char note limit for
+// the proc:<pipeline>:<create|update> tag(s) that wallet.UpsertRecords
+// appends once it knows whether this ends up as a create or an update —
+// that tag is what makes a record traceable back to this pipeline, so it
+// must never be the part that gets clipped.
 func buildNote(t csvtxn.Txn) string {
 	parts := []string{}
 	if t.Info != "" {
@@ -313,8 +318,7 @@ func buildNote(t csvtxn.Txn) string {
 		parts = append(parts, t.Subject)
 	}
 	parts = append(parts, "[gmail-csv "+short(t.MessageID)+"]")
-	parts = append(parts, "source:refactored-code-0905")
-	return clip(strings.Join(parts, " "), 255)
+	return clip(strings.Join(parts, " "), 170)
 }
 
 // short returns the trailing id segment of a gmail MessageID for readable logs.

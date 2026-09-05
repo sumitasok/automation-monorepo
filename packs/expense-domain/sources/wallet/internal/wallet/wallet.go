@@ -12,8 +12,41 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"time"
 )
+
+// procLabel identifies this pipeline in every record's note, so a record can
+// be traced back to which of the three concurrently-running sync pipelines
+// created or last updated it (com.safinances.wallet-sync,
+// com.sumitasok.wallet-sync — this one — or com.automation-monorepo.wallet-sync-unified).
+const procLabel = "com.sumitasok.wallet-sync"
+
+func procTag(action string) string {
+	return " | proc:" + procLabel + ":" + action
+}
+
+// clipNote enforces the Wallet API's 255-char note limit as a final safety
+// net (callers already leave headroom for tags — see sync.buildNote).
+func clipNote(s string) string {
+	if len(s) > 255 {
+		return s[:255]
+	}
+	return s
+}
+
+var createTagRE = regexp.MustCompile(`proc:[^:|]+:create`)
+
+// extractCreateTag returns the original creator's "proc:<label>:create" tag
+// from an existing note, if present, so an update never erases who created
+// the record — only who last updated it.
+func extractCreateTag(note string) string {
+	m := createTagRE.FindString(note)
+	if m == "" {
+		return ""
+	}
+	return " | " + m
+}
 
 // Client talks to the Wallet REST API.
 type Client struct {
@@ -394,9 +427,12 @@ func (c *Client) UpsertRecords(records []NewRecord) ([]RecordResult, error) {
 			recordID := getRecordString(existingMatch, "id")
 			patchReq := map[string]interface{}{}
 
-			// Merge note if provided
+			// Merge note if provided — keep the original creator's proc:
+			// tag (traceability of who made this record), stamp who is
+			// updating it now.
 			if newRec.Note != "" {
-				patchReq["note"] = newRec.Note
+				existingNote := getRecordString(existingMatch, "note")
+				patchReq["note"] = clipNote(newRec.Note + extractCreateTag(existingNote) + procTag("update"))
 			}
 
 			// Merge labels (combine without duplicates)
@@ -431,6 +467,7 @@ func (c *Client) UpsertRecords(records []NewRecord) ([]RecordResult, error) {
 			results = append(results, result)
 		} else {
 			// Create new record
+			newRec.Note = clipNote(newRec.Note + procTag("create"))
 			var createRes struct {
 				Results []RecordResult `json:"results"`
 			}
