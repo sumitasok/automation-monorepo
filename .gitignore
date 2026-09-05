@@ -73,3 +73,4 @@ data/state/*.db
 # Contains: config/, data/, rules/ — user-local and sensitive
 # This is the Single Source of Truth for all domain runtime configuration
 # Injected to framework at startup via --config-path parameter
+.specify/
