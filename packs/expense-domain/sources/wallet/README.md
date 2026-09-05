@@ -130,9 +130,17 @@ wallet:
   gmail_credentials_path: "~/.config/sa-finances/gmail-credentials.json"
   gmail_token_path: "~/.config/sa-finances/gmail-token.json"
   drive_bills_folder_id: "1DXizYKYGSg8pPO1_tbXPLTUOENOwfMR6"
-  obsidian_vault_path: "~/sa.finances"
+  
+  # Obsidian Vault - External data location (symlinked to actual vault)
+  obsidian_vault_path: "${CONFIG_PATH}/data/expense-domain/obsidian"
+  obsidian_expenses_path: "${CONFIG_PATH}/data/expense-domain/obsidian/expenses"
+  
   auto_account_cap: 10
 ```
+
+**Note**: The Obsidian vault is accessed via symlink:
+- `~/automation-monorepo-config/data/expense-domain/obsidian/expenses` → `~/sa.finances/Expenses`
+- This follows Constitution Principle II (packs/ read-only) and centralizes external data management
 
 ### routing.yaml (Required)
 
