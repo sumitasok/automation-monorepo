@@ -60,5 +60,11 @@ packs:
     default_visibility: private     # reads personal transaction data
     writable: true
 
+  - name: expense-domain
+    path: packs/expense-domain
+    source: ""                      # restructured domain-based architecture
+    default_visibility: private
+    writable: true
+
 # To consume a community pack, add it as a submodule and register it here with
 # writable: false and default_visibility: public.

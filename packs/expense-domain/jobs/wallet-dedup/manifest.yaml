@@ -1,0 +1,17 @@
+id: wallet-dedup
+name: Wallet Deduplication
+description: Interactive wallet record deduplication with backup
+
+language: shell
+
+runtime:
+  type: bash5+
+  timeout_seconds: 600
+
+entrypoint: main.sh
+
+schedule:
+  enabled: false
+
+environment:
+  - CONFIG_PATH
