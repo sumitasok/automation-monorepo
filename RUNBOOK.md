@@ -4,6 +4,35 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-09-05 — Add framework-managed job scheduling to architecture spec
+
+**Prompt summary**: User provided critical framework feature requirement—jobs declared in domain config should be scheduled and executed by the framework itself when loaded, eliminating external cron/launchd dependencies.
+
+**New Feature Added**:
+- **User Story 4 (P1)**: Framework-managed job scheduling—framework executes jobs on configured schedules without external dependencies
+- **Functional Requirements** (FR-009-009c):
+  - FR-009: Framework-managed job scheduling when all domains are loaded
+  - FR-009a: Domains declare jobs in config with schedule, timeout, retry policy
+  - FR-009b: Framework manages job lifecycle (schedule, execute, track, retry, reschedule)
+  - FR-009c: Eliminate external scheduler dependency—no cron/launchd needed
+- **Success Criteria** (SC-009-010):
+  - SC-009: Job scheduling implemented; jobs execute on configured schedules
+  - SC-010: Job scheduling tested with multiple domains; lifecycle management verified
+
+**Impact on Specification**:
+- Functional requirements: 16 → 17 FR
+- Success criteria: 11 → 13 SC
+- User stories: 3 → 4 (added job scheduling P1)
+- Clarifications: 8 → 9 (job scheduling requirement recorded)
+
+**Framework Benefits**:
+- Self-contained deployment (no external orchestrator required)
+- Framework owns job execution across all domains
+- Config-driven scheduling (Convention over Configuration principle)
+- Simplified operations—no cron/launchd setup
+
+---
+
 ## 2026-09-05 — Clarify live migration strategy: preserve framework, BDD testing, config consolidation
 
 **Prompt summary**: User provided critical context—this is a migration of a working system with 7 completed features (specs 001-007), not greenfield restructure. Explicit requirements: preserve shared framework utilities unchanged, use BDD-driven testing with behavior documentation, consolidate config into unified directory, enforce Convention over Configuration as prime principle.
