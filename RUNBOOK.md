@@ -4,6 +4,43 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-09-05 — Phase 4: Framework-managed job scheduling with execution integration
+
+**Prompt summary**: Integrate framework JobScheduler with expense-domain, implement job management API endpoints, validate job execution with retry logic, and test all 5 jobs execute successfully.
+
+**Files created/updated**:
+- `packs/expense-domain/engine/job-integration.js` — ExpenseDomainJobManager class wrapping JobScheduler
+- `packs/expense-domain/engine/server.js` — Added 3 job management API endpoints
+- `packs/shared/jobs/scheduler.js` — Enhanced to support 'd' (day) interval format
+- `packs/expense-domain/engine/__tests__/job-execution.test.js` — Comprehensive job execution tests
+- `test-job-execution.js` — Manual integration test script
+
+**Steps taken**:
+1. Created ExpenseDomainJobManager integrating JobScheduler with ExpenseEngine
+2. Registered all 5 domain jobs (gmail-fetch, wallet-fetch, csv-monitor, process, learn-rules)
+3. Implemented job handler lifecycle (onStart → execute → onSuccess/onFailure → onComplete)
+4. Added 3 REST API endpoints: GET /jobs, POST /jobs/{id}/trigger, GET /jobs/{id}/history
+5. Fixed relative path issues in job-integration.js and api.js (../../shared instead of ../../../shared)
+6. Enhanced scheduler _parseInterval to support 'd' for daily jobs
+7. Created and ran comprehensive job execution tests validating all 5 jobs
+
+**Outcome**:
+- ✅ JobScheduler fully integrated with expense-domain
+- ✅ All 5 domain jobs register and execute successfully
+- ✅ Job execution history tracked with retry configuration
+- ✅ Job management endpoints operational (trigger, list, history)
+- ✅ All jobs execute with proper handler lifecycle
+- ✅ Manual integration tests pass (5/5 jobs executed successfully)
+
+**Caveats**:
+- Job scheduling intervals set but not auto-triggered (framework will activate on start)
+- Simulated executors (production will call actual source adapters)
+- No job persistence across restarts (state tracking planned for Phase 5+)
+
+**Commits**: 1ad4034 (T031-T039)
+
+---
+
 ## 2026-09-05 — Phase 3: Complete expense-domain restructuring with API & validation
 
 **Prompt summary**: Implement Domain Engine API (REST endpoints for expenses/rules/sources) and create integration tests validating all 7 existing features work with new hierarchical structure.
