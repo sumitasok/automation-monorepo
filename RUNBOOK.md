@@ -4,6 +4,19 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-09-05 — Auto-enable --ai-assist from the workspace's configured AI profile
+
+**Prompt summary**: User asked for `--ai-assist` to turn on automatically, using whichever AI profile they'd already configured in `config/ai/`, rather than requiring the flag every run.
+
+**Files modified**:
+- `packs/expense-domain/sources/wallet/scripts/wallet-sync.sh` — loads `${CONFIG_PATH}/config/ai/<profile>.yaml` (default profile name `deepseek` — the one real profile this workspace has, per ADR 0015; override with `WALLET_SYNC_AI_PROFILE`), injects the same env vars `auto run <job> --ai <name>` would (`AI_PROVIDER` + `DEEPSEEK_API_KEY`/`DEEPSEEK_MODEL`/`DEEPSEEK_API_BASE` or the `ANTHROPIC_*` equivalents — exactly what `extract-engine.py`'s existing `get_ai_provider()` already reads, no code change needed there), and defaults `--ai-assist` on whenever that load succeeds. `--no-ai-assist` opts out for one run (e.g. to skip API cost on an ad-hoc check); `--ai-assist` still works as an explicit force-on.
+
+**Verified**: dry-run now prints `🤖 AI-assist: ON (profile: deepseek)` without passing any flag, confirming the profile loads and `sync.py` receives `--ai-assist`.
+
+**Notes**: `sync.py`/`extract-engine.py` themselves are unchanged — profile-loading stays at the `wallet-sync.sh` entry-point layer, matching where the rest of this workspace already does AI-profile injection (ADR 0015), so job code never needs to know about `config/ai/`.
+
+---
+
 ## 2026-09-05 — Fix wallet-sync-unified: stale engine path, dual Gmail credential stores, domain/source config layout
 
 **Prompt summary**: User asked to audit the Obsidian→repo wallet-sync migration (spec 010) and make it actually runnable end-to-end (gmail scan/discover → extract → predict category/labels/description → update wallet).
