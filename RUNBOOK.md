@@ -4,6 +4,50 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-09-05 — Phase 5 (Task 1-5): Job execution persistence layer with SQLite
+
+**Prompt summary**: Begin Phase 5 (Config Consolidation) by implementing job state persistence, distributed locking, and migration strategy for LaunchD → Framework scheduler.
+
+**Files created/updated**:
+- `PHASE5-PLAN.md` — Complete Phase 5 plan with 10 tasks across 5-6 days
+- `packs/shared/jobs/state-manager.js` — JobStateManager class with SQLite persistence
+- `packs/shared/jobs/__tests__/state-manager.test.js` — 17 comprehensive tests
+- `packs/shared/jobs/scheduler.js` — Integrated state manager hooks
+- `packs/expense-domain/engine/job-integration.js` — State manager initialization
+- `packs/expense-domain/engine/server.js` — Job statistics API endpoint
+
+**Steps taken**:
+1. Created Phase 5 plan documenting job persistence, distributed locking, migration strategy
+2. Implemented JobStateManager with SQLite schema (jobs, executions, orchestrations, locks)
+3. Integrated state manager with JobScheduler (auto-persist on execution events)
+4. Added distributed locking mechanism (SQLite-based with TTL)
+5. Created 17 tests validating all state manager functionality
+6. Added job statistics API endpoint (/api/jobs/{id}/stats)
+
+**Outcome**:
+- ✅ JobStateManager fully functional with in-memory fallback
+- ✅ All 17 tests passing (execution tracking, history, stats, locking)
+- ✅ JobScheduler records all executions automatically
+- ✅ Distributed locking prevents concurrent runs
+- ✅ Statistics endpoint calculates success rate and avg duration
+- ✅ sqlite3 is optional (graceful fallback to in-memory)
+
+**Caveats**:
+- sqlite3 requires: `npm install better-sqlite3` (optional)
+- Locking is single-machine only (fine for Phase 5, Redis for Phase 6+)
+- In-memory fallback loses history on restart
+
+**Next Tasks (T036-T040)**:
+- T036: OrchestratorJobManager (wrap orchestrations as framework jobs)
+- T037: Distributed locking verification
+- T038: Orchestration history tracking
+- T039: Orchestration execution API
+- T040: Migrate LaunchD jobs to framework
+
+**Commits**: 7707592 (T031-T035)
+
+---
+
 ## 2026-09-05 — Phase 4: Framework-managed job scheduling with execution integration
 
 **Prompt summary**: Integrate framework JobScheduler with expense-domain, implement job management API endpoints, validate job execution with retry logic, and test all 5 jobs execute successfully.
