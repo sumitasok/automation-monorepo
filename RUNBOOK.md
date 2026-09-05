@@ -4,6 +4,36 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-09-05 — Clarify multi-domain architecture pattern
+
+**Prompt summary**: Clarify scope and design constraints for restructuring. User revealed the architecture must support multiple independent domains (expense, stock, trip) with reusable pattern; established data I/O boundaries and glossary requirements.
+
+**Files updated**:
+- `specs/008-restructure-architecture/spec.md` — Clarifications section added; 5 design decisions recorded; spec refocused from expense-only to multi-domain pattern
+- `specs/008-restructure-architecture/checklists/requirements.md` — Title updated; checklist notes reflect clarifications and constitutional alignment
+
+**Clarifications Recorded**:
+1. **Scope**: Option B + Extensibility — Restructure expense-domain first (P1); extract and document reusable pattern; architecture must prove support for stock, trip, composite domains
+2. **Domain Interaction**: Layered + Composite Domains — Domains isolated with shared foundation; composite domains can declare dependencies and consume outputs
+3. **Shared Foundation**: Hybrid approach — Establish sources/ pattern, domain manifest, composite dependency contract now; organic patterns emerge later
+4. **Data I/O Boundaries**: Domains read-only in repo; all config/rules/data passed as parameters; outputs → data/<domain>/; enforces Constitution Principle II
+5. **Glossary**: Root-level glossary required documenting domain, source connector, composite domain, sources pattern, reports pattern, architectural terms
+
+**Constitutional Alignment**:
+- Principle I (Packs Declare): All config/rules/data injected as parameters
+- Principle II (packs/ Read-Only): Domains cannot write to packs/<domain>/
+- Principle V (Configuration Over Code): Pattern data-driven, not code-driven
+
+**Result**:
+- ✅ Specification clarified and strengthened
+- ✅ 5 critical design decisions documented
+- ✅ Functional requirements expanded from 8 to 11 (added I/O boundaries, glossary, composite domains)
+- ✅ Success criteria expanded from 5 to 8 (added data boundary verification, glossary creation, extensibility proof)
+- ✅ All 17 checklist items passing
+- ✅ Ready for `/speckit-plan` phase
+
+---
+
 ## 2026-09-05 — Restructure architecture: expense tracker as core pack
 
 **Prompt summary**: Restructure from flat pack model (all packs as siblings) to hierarchical architecture where expense tracking is the primary application with external data sources (Gmail, SMS, iMessage, Wallet) as subordinate components.
