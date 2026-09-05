@@ -59,7 +59,7 @@ class OrchestratorJobManager extends EventEmitter {
 
       return this.orchestrations.size;
     } catch (error) {
-      console.error('Failed to load orchestrations:', error.message);
+      console.error('Failed to load orchestrations:', error?.message || String(error) || 'Unknown error');
       return 0;
     }
   }
@@ -230,7 +230,20 @@ class OrchestratorJobManager extends EventEmitter {
       throw new Error(`Orchestration not found: ${orchestrationName}`);
     }
 
-    const execRecord = this.executions.get(executionId);
+    let execRecord = this.executions.get(executionId);
+    if (!execRecord) {
+      execRecord = {
+        id: executionId,
+        orchestrationName,
+        status: 'running',
+        startTime: new Date(),
+        endTime: null,
+        steps: [],
+        error: null,
+        currentStepIndex: 0,
+      };
+      this.executions.set(executionId, execRecord);
+    }
 
     try {
       const results = [];
@@ -379,7 +392,7 @@ class OrchestratorJobManager extends EventEmitter {
       };
     } catch (error) {
       execRecord.status = 'failed';
-      execRecord.error = error.message;
+      execRecord.error = error?.message || String(error) || 'Unknown error';
 
       throw error;
     }
@@ -424,7 +437,7 @@ class OrchestratorJobManager extends EventEmitter {
     if (execRecord) {
       execRecord.endTime = endTime;
       execRecord.status = 'failed';
-      execRecord.error = error.message;
+      execRecord.error = error?.message || String(error) || 'Unknown error';
     }
 
     // Persist orchestration failure to database
@@ -446,7 +459,7 @@ class OrchestratorJobManager extends EventEmitter {
     this.emit('orchestration:failed', {
       executionId,
       name: jobId,
-      error: error.message,
+      error: error?.message || String(error) || 'Unknown error',
     });
   }
 
