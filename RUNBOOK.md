@@ -4,53 +4,60 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
-## 2026-09-05 — Create wallet dedup script for today's entries
+## 2026-09-05 — Create wallet dedup script with universal job runner
 
-**Prompt summary**: Set up script to fetch and dedup wallet entries from today using the Go dedup system (scan → review → execute workflow).
+**Prompt summary**: Set up simplified job runner that auto-discovers config, credentials, data paths, and job code. User just specifies config path once, then runs jobs by name.
 
 **Files created**:
-- `packs/expense-domain/sources/wallet/scripts/dedup-wallet-today.sh` — Main script for deduplication workflow
+- `run-job.sh` — Universal job runner (auto-discovery of creds, paths, code)
+- `packs/expense-domain/sources/wallet/scripts/dedup-wallet-today.sh` — Dedup job script
 
 **Steps taken**:
-1. Created `dedup-wallet-today.sh` that:
-   - Fetches today's wallet records from API (with date range filter: `recordDate gte.TODAY lt.TOMORROW`)
+1. Created `run-job.sh`:
+   - Prompts for config path once (defaults to `~/automation-monorepo-config`)
+   - Takes job name as argument
+   - Auto-discovers job script location
+   - Extracts Wallet API token from config
+   - Sets up all environment variables (CONFIG_PATH, WALLET_API_TOKEN, AUTO_DATA_DIR, REPO_ROOT)
+   - Runs the job script with all context
+
+2. Created `dedup-wallet-today.sh`:
+   - Fetches today's wallet records from API (date range: `recordDate gte.TODAY lt.TOMORROW`)
    - Runs Go dedup scan to identify duplicates (matches on date+amount+counterparty)
    - Collects user decisions via interactive review
-   - Prepares execution plan
+   - Prepares execution plan with next steps
 
-2. Made script executable: `chmod +x dedup-wallet-today.sh`
-
-3. Script automatically:
-   - Extracts Wallet API token from config at `~/automation-monorepo-config/config/wallet/config.yaml`
-   - Saves records to `~/automation-monorepo-config/data/expense-domain/wallet/records-today.jsonl`
-   - Generates scan report: `dedup-scan-{date}.json`
-   - Saves decisions: `dedup-decisions-{date}.json`
+3. Made both scripts executable
 
 **How to use**:
 ```bash
-# Run the script
-CONFIG_PATH=~/automation-monorepo-config packs/expense-domain/sources/wallet/scripts/dedup-wallet-today.sh
+# First time: specify config path
+./run-job.sh wallet-dedup-today
+# → prompts: "Config path [~/automation-monorepo-config]: " (press Enter to use default)
 
-# If duplicates found, you'll be prompted to review and decide
-# Then execute with:
-export AUTO_DATA_DIR=~/automation-monorepo-config/data/expense-domain/wallet
-export WALLET_API_TOKEN="<token>"
-packs/expense-domain/sources/wallet/dedup dedup execute \
-  --records-file ~/automation-monorepo-config/data/expense-domain/wallet/records-today.jsonl \
-  --decisions-file ~/automation-monorepo-config/data/expense-domain/wallet/dedup-decisions-2026-09-05.json
+# Or set once and reuse:
+export CONFIG_PATH=~/automation-monorepo-config
+./run-job.sh wallet-dedup-today
+./run-job.sh another-job-name
 ```
 
+**What the runner auto-handles**:
+- ✅ Finds job script (searches packs/expense-domain/sources/wallet/scripts/ and scripts/)
+- ✅ Extracts Wallet API token from `$CONFIG_PATH/config/wallet/config.yaml`
+- ✅ Creates data directory: `$CONFIG_PATH/data/expense-domain/wallet/`
+- ✅ Sets up environment variables job scripts need
+
 **Outcome**:
-- ✅ Script created and ready to use
-- ✅ Works with existing Go dedup binary (scan/review/execute workflow)
-- ✅ Fetches only today's records (UTC 2026-09-05 00:00:00 to 2026-09-06 00:00:00)
-- ✅ Safe: original records.json untouched until explicit `execute` with confirmation
+- ✅ Single command to run any job: `./run-job.sh job-name [args...]`
+- ✅ Config path prompted once or set via env var
+- ✅ All credentials/paths auto-discovered
+- ✅ Zero manual path/credential management
+- ✅ Extensible: add new job scripts in `packs/expense-domain/sources/wallet/scripts/`, runner finds them
 
 **Caveats**:
-- Script requires `jq` and `curl` (standard tools)
-- Dedup binary must be built (`go build` runs automatically if missing)
-- User decisions are interactive — follow the prompts in review phase
-- Execute phase calls Wallet API to delete records — requires confirmation
+- Runner requires `CONFIG_PATH` pointing to valid automation-monorepo-config directory
+- Job scripts must be placed in expected locations (packs/expense-domain/sources/wallet/scripts/ or scripts/)
+- Wallet config file must contain WALLET_API_TOKEN in format: `WALLET_API_TOKEN: "token-value"`
 
 ---
 
