@@ -4,6 +4,55 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-09-05 — Add AI-assisted pattern learning to extract-engine
+
+**Prompt summary**: User requested AI-powered pattern learning for unmatched emails using available DeepSeek/Claude APIs. When an email doesn't match any format, system should auto-suggest patterns and create format files.
+
+**Files modified**:
+- `packs/expense-domain/sources/wallet/jobs/wallet-sync-unified/extract-engine.py` — Added AI integration (243 lines added)
+
+**Steps taken**:
+1. Added `--ai-assist` command-line flag to enable AI pattern learning
+2. Implemented AI provider integration:
+   - `get_ai_provider()` — reads AI_PROVIDER, api_key, model from environment
+   - `suggest_pattern_via_ai()` — sends unmatched email to AI for analysis
+   - `_call_deepseek_api()` / `_call_claude_api()` — provider-specific API calls
+3. AI prompt asks for complete body regex pattern with named capture groups (e.g., `(?P<amount>...)`)
+4. `create_format_file_from_suggestion()` — auto-generates format YAML file in config/gmail/email-formats/
+5. Testing with sample unmatched email (newbank payment alert):
+   - ✅ AI suggested pattern with all transaction fields
+   - ✅ Format file created and ready to use
+   - ✅ Subsequent run extracted amount, date, time, reference correctly
+
+**How to use**:
+```bash
+# Set up AI provider (example: DeepSeek)
+export CONFIG_PATH=~/automation-monorepo-config
+export AI_PROVIDER=deepseek
+export DEEPSEEK_API_KEY=<your-key>
+
+# Run extraction with AI-assisted learning
+python3 extract-engine.py --file emails.jsonl --ai-assist
+
+# Or via the framework runner:
+CONFIG_PATH=~/automation-monorepo-config .auto run wallet-sync --ai deepseek -- --ai-assist
+```
+
+**Outcome**:
+✅ AI-assisted pattern learning fully functional
+✅ End-to-end: unmatched email → AI suggestion → format file → successful extraction
+✅ DeepSeek integration tested and working
+✅ Ready for production use with --ai-assist flag
+
+**Caveats**:
+- AI pattern quality depends on email structure and AI model accuracy
+- Generated patterns marked priority 90 (higher priority forces evaluation earlier)
+- Currency symbols may be platform/locale-specific; AI handles common cases (₹, $, €)
+- Patterns should be reviewed before deployment (logged to ai_suggestion field)
+- API calls incur usage charges; not recommended for every unmatched email in production
+
+---
+
 ## 2026-09-05 — Add HDFC UPI transaction email pattern and fix routing
 
 **Prompt summary**: User reported HDFC UPI emails (gm:1a071ab8aadd19bc) remaining unmatched despite pattern creation. Investigated extract-engine subprocess and confirmed pattern extraction was working, but routing had incorrect configuration.
