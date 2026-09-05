@@ -1058,11 +1058,13 @@ func executeDedup(recordsFile, decisionFile, stateFile string, dryRun bool) erro
 	}
 
 	// Count successes/failures
+	// NOTE: Only accept 200 (OK) or 204 (No Content) as success
+	// 404 (Not Found) is a failure - record doesn't exist or endpoint is wrong
 	successCount := 0
 	failureCount := 0
 	failedIDs := []string{}
 	for _, result := range deleteResults {
-		if result.Status == 200 || result.Status == 204 || result.Status == 404 {
+		if result.Status == 200 || result.Status == 204 {
 			successCount++
 			fmt.Printf("  [%d/%d] ✅ %s\n", successCount+failureCount, len(deletedIDs), result.ID)
 		} else {
