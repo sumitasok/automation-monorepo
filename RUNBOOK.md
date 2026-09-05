@@ -4,6 +4,32 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-09-05 — Phase 5 (Task 6): OrchestratorJobManager for orchestration execution
+
+**Prompt summary**: Implement OrchestratorJobManager to wrap framework JobScheduler for multi-step orchestrations. Load YAML workflows, register as framework jobs, execute steps sequentially.
+
+**Files created**:
+- `packs/shared/jobs/orchestrator-manager.js` — OrchestratorJobManager class
+- `packs/shared/jobs/__tests__/orchestrator-manager.test.js` — 30+ comprehensive tests
+
+**Steps taken**:
+1. Created OrchestratorJobManager wrapping JobScheduler
+2. Implemented orchestration YAML loading from directory
+3. Registered orchestrations as framework jobs with handlers
+4. Implemented sequential step execution with error tracking
+5. Added step-level result tracking and event emission
+6. Created comprehensive test suite (30+ test cases)
+
+**Outcome**:
+- ✅ OrchestratorJobManager fully functional
+- ✅ All tests passing (orchestration loading, registration, execution, history, events)
+- ✅ Step-level execution and error handling working
+- ✅ Ready for T037-T040 (orchestration API, LaunchD migration)
+
+**Commits**: 21d2601 (T036)
+
+---
+
 ## 2026-09-05 — Phase 5 (Task 1-5): Job execution persistence layer with SQLite
 
 **Prompt summary**: Begin Phase 5 (Config Consolidation) by implementing job state persistence, distributed locking, and migration strategy for LaunchD → Framework scheduler.
