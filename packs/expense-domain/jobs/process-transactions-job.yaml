@@ -1,0 +1,23 @@
+---
+# Process Transactions Job Definition
+# Processes fetched data through domain engine, applies rules
+
+name: process-transactions-job
+description: Process fetched data through domain engine
+
+schedule:
+  type: interval
+  interval: 5m  # Every 5 minutes
+
+timeout: 600
+retry:
+  maxRetries: 3
+  backoffMultiplier: 2
+
+enabled: true
+
+handlers:
+  execute: engine.process
+  onStart: engine.onProcessStart
+  onSuccess: engine.onProcessSuccess
+  onFailure: engine.onProcessFailure

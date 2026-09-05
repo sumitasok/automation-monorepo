@@ -1,0 +1,23 @@
+---
+# Bank CSV Monitor Job Definition
+# Monitors for uploaded bank CSV files and processes them
+
+name: bank-csv-monitor-job
+description: Monitor for uploaded bank CSV files
+
+schedule:
+  type: interval
+  interval: 30s  # Every 30 seconds
+
+timeout: 60
+retry:
+  maxRetries: 2
+  backoffMultiplier: 2
+
+enabled: true
+
+handlers:
+  execute: bank-csv.monitor
+  onStart: bank-csv.onMonitorStart
+  onSuccess: bank-csv.onMonitorSuccess
+  onFailure: bank-csv.onMonitorFailure

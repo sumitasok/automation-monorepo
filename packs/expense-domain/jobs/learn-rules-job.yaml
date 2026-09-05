@@ -1,0 +1,23 @@
+---
+# Learn Rules Job Definition
+# AI learns new rules from transaction patterns daily
+
+name: learn-rules-job
+description: Learn new rules from transaction patterns
+
+schedule:
+  type: interval
+  interval: 1d  # Daily
+
+timeout: 1800  # 30 minutes
+retry:
+  maxRetries: 2
+  backoffMultiplier: 2
+
+enabled: true
+
+handlers:
+  execute: engine.learnRules
+  onStart: engine.onLearnStart
+  onSuccess: engine.onLearnSuccess
+  onFailure: engine.onLearnFailure

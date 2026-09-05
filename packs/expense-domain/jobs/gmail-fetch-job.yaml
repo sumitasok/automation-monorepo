@@ -1,0 +1,24 @@
+---
+# Gmail Fetch Job Definition
+# Fetches new emails from Gmail daily
+
+name: gmail-fetch-job
+description: Fetch emails from Gmail daily
+
+schedule:
+  type: interval
+  interval: 1d  # Daily at configured time
+
+timeout: 300  # 5 minutes
+retry:
+  maxRetries: 3
+  backoffMultiplier: 2
+
+enabled: true
+
+# Job handlers are implemented in packs/expense-domain/sources/gmail/
+handlers:
+  execute: gmail.fetch
+  onStart: gmail.onFetchStart
+  onSuccess: gmail.onFetchSuccess
+  onFailure: gmail.onFetchFailure

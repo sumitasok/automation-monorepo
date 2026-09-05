@@ -1,0 +1,23 @@
+---
+# Wallet Fetch Job Definition
+# Fetches transaction data from Wallet hourly
+
+name: wallet-fetch-job
+description: Fetch transactions from Wallet
+
+schedule:
+  type: interval
+  interval: 1h  # Every hour
+
+timeout: 300
+retry:
+  maxRetries: 3
+  backoffMultiplier: 2
+
+enabled: true
+
+handlers:
+  execute: wallet.fetch
+  onStart: wallet.onFetchStart
+  onSuccess: wallet.onFetchSuccess
+  onFailure: wallet.onFetchFailure

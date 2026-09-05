@@ -1,0 +1,117 @@
+---
+# Expense Domain Manifest
+# Declares structure, APIs, capabilities, and dependencies
+
+name: expense-domain
+version: "1.0.0"
+description: >
+  Multi-source expense tracking domain.
+  Aggregates transaction data from Gmail, Wallet, Bank CSV.
+  Applies learned rules, categorizes, and reconciles expenses.
+
+# Source adapters
+sources:
+  - name: gmail
+    description: Email-based expense extraction
+    capability: read
+    config: ~/automation-monorepo-config/config/expense-domain/gmail.yaml
+    data: ~/automation-monorepo-config/data/expense-domain/gmail/
+    rules: ~/automation-monorepo-config/rules/expense-domain/gmail/
+
+  - name: wallet
+    description: Wallet app transactions
+    capability: read-write
+    config: ~/automation-monorepo-config/config/expense-domain/wallet.yaml
+    data: ~/automation-monorepo-config/data/expense-domain/wallet/
+    rules: ~/automation-monorepo-config/rules/expense-domain/wallet/
+
+  - name: telegram
+    description: Telegram notifications for alerts
+    capability: write
+    config: ~/automation-monorepo-config/config/expense-domain/telegram.yaml
+
+  - name: bank-csv
+    description: Manual bank CSV uploads
+    capability: read
+    config: ~/automation-monorepo-config/config/expense-domain/bank-csv.yaml
+    data: ~/automation-monorepo-config/data/expense-domain/bank-csv/
+    rules: ~/automation-monorepo-config/rules/expense-domain/bank-csv/
+
+# Engine configuration
+engine:
+  description: Expense aggregation and processing engine
+  config: ~/automation-monorepo-config/config/expense-domain/domain.yaml
+  data: ~/automation-monorepo-config/data/expense-domain/engine/
+  rules: ~/automation-monorepo-config/rules/expense-domain/engine/
+
+# API endpoints exposed
+api:
+  base_path: /api/expense-domain
+  endpoints:
+    # Data operations
+    - GET /expenses: Retrieve all transactions
+    - GET /expenses/{id}: Get specific transaction
+    - PATCH /expenses/{id}: Update transaction
+    - POST /expenses: Create transaction
+    - DELETE /expenses/{id}: Delete transaction
+
+    # Rules operations
+    - GET /rules: List all rules (learned and configured)
+    - POST /rules: Create new rule
+    - PATCH /rules/{id}: Update rule
+    - DELETE /rules/{id}: Delete rule
+
+    # Source operations
+    - GET /sources/{source}/status: Get source status
+    - POST /sources/{source}/write-back: Write updates back to source
+
+    # Job operations
+    - GET /jobs: List all jobs and their status
+    - POST /jobs/{job}/trigger: Trigger job immediately
+
+# Jobs
+jobs:
+  - gmail-fetch-job
+  - wallet-fetch-job
+  - bank-csv-monitor-job
+  - process-transactions-job
+  - learn-rules-job
+
+# Reports
+reports:
+  - expense-summary
+  - category-breakdown
+  - monthly-trends
+  - source-analysis
+
+# UI
+ui:
+  path: ./ui/
+  entry: index.html
+  components:
+    - TransactionList
+    - TransactionEditor
+    - SourceStatus
+    - RulesDisplay
+
+# Data model
+entities:
+  - Transaction: Transaction record with amount, category, date, source
+  - Category: Expense category for classification
+  - Rule: Categorization or validation rule
+  - Source: Data source adapter
+
+# Capabilities
+capabilities:
+  data_aggregation: true
+  rule_learning: true
+  write_back: true
+  multi_source: true
+  scheduled_jobs: true
+
+# Constitution compliance
+constitution:
+  principle_i: "Config/rules/data injected via configPath parameter"
+  principle_ii: "No state in packs/; outputs to ~/automation-monorepo-config/data/"
+  principle_v: "Rules are YAML; no code changes for new rules"
+  principle_vi: "APIs only; no direct file access"
