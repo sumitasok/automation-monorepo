@@ -4,6 +4,56 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-09-05 — Create wallet dedup script for today's entries
+
+**Prompt summary**: Set up script to fetch and dedup wallet entries from today using the Go dedup system (scan → review → execute workflow).
+
+**Files created**:
+- `packs/expense-domain/sources/wallet/scripts/dedup-wallet-today.sh` — Main script for deduplication workflow
+
+**Steps taken**:
+1. Created `dedup-wallet-today.sh` that:
+   - Fetches today's wallet records from API (with date range filter: `recordDate gte.TODAY lt.TOMORROW`)
+   - Runs Go dedup scan to identify duplicates (matches on date+amount+counterparty)
+   - Collects user decisions via interactive review
+   - Prepares execution plan
+
+2. Made script executable: `chmod +x dedup-wallet-today.sh`
+
+3. Script automatically:
+   - Extracts Wallet API token from config at `~/automation-monorepo-config/config/wallet/config.yaml`
+   - Saves records to `~/automation-monorepo-config/data/expense-domain/wallet/records-today.jsonl`
+   - Generates scan report: `dedup-scan-{date}.json`
+   - Saves decisions: `dedup-decisions-{date}.json`
+
+**How to use**:
+```bash
+# Run the script
+CONFIG_PATH=~/automation-monorepo-config packs/expense-domain/sources/wallet/scripts/dedup-wallet-today.sh
+
+# If duplicates found, you'll be prompted to review and decide
+# Then execute with:
+export AUTO_DATA_DIR=~/automation-monorepo-config/data/expense-domain/wallet
+export WALLET_API_TOKEN="<token>"
+packs/expense-domain/sources/wallet/dedup dedup execute \
+  --records-file ~/automation-monorepo-config/data/expense-domain/wallet/records-today.jsonl \
+  --decisions-file ~/automation-monorepo-config/data/expense-domain/wallet/dedup-decisions-2026-09-05.json
+```
+
+**Outcome**:
+- ✅ Script created and ready to use
+- ✅ Works with existing Go dedup binary (scan/review/execute workflow)
+- ✅ Fetches only today's records (UTC 2026-09-05 00:00:00 to 2026-09-06 00:00:00)
+- ✅ Safe: original records.json untouched until explicit `execute` with confirmation
+
+**Caveats**:
+- Script requires `jq` and `curl` (standard tools)
+- Dedup binary must be built (`go build` runs automatically if missing)
+- User decisions are interactive — follow the prompts in review phase
+- Execute phase calls Wallet API to delete records — requires confirmation
+
+---
+
 ## 2026-09-05 — Phase 5 (Task 7): Safe wallet deduplication with backup & source tracking
 
 **Prompt summary**: Implement multi-layer safety for wallet deduplication before executing deletions: backup current state, track which code version created/updated each record, and generate revert instructions.
