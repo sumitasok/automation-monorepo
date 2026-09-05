@@ -34,10 +34,11 @@
 ## Notes
 
 - Initial 17/17 checklist items passed; clarifications significantly strengthen coverage
-- Clarifications added: 8 critical design decisions documented in Clarifications section
-- 16 functional requirements now cover: domain structure (FR-001-004), framework preservation (FR-009), config consolidation (FR-010-012), BDD testing (FR-013), backward compatibility (FR-014), glossary (FR-015), extensibility (FR-016)
-- 11 success criteria now measure: live migration preservation, shared framework stability, BDD behavior documentation, integration test generation, config consolidation, Convention over Configuration validation, pattern reusability, domain boundary clarity
-- One user story restructured to emphasize pattern reusability across multiple domains (not expense-specific)
+- Clarifications added: 9 critical design decisions documented in Clarifications section
+- 17 functional requirements now cover: domain structure (FR-001-004), framework-managed job scheduling (FR-009-009c), framework preservation (FR-010), config consolidation (FR-011-012), Convention over Configuration (FR-013), BDD testing (FR-014), backward compatibility (FR-015), glossary (FR-016), extensibility (FR-017)
+- 13 success criteria now measure: live migration preservation, shared framework stability, framework-managed job scheduling, BDD behavior documentation, integration test generation, config consolidation, Convention over Configuration validation, pattern reusability, domain boundary clarity
+- Four user stories now cover: domain pattern (P1), source abstraction (P2), parallel pattern (P2), and framework-managed job scheduling (P1)
 - Specifications now align with Constitution Principles I (Packs Declare), II (packs/ Read-Only), V (Configuration Over Code), and explicitly invoke Convention over Configuration as prime framework principle
-- **Migration scope clarified**: Live migration of 7 working features; preserve shared framework utilities; BDD-driven testing; unified config consolidation
-- Ready to proceed with `/speckit-plan` to establish task decomposition for live migration with zero functionality loss
+- **Framework feature added**: Framework-managed job scheduling eliminates external cron/launchd dependencies; jobs declared in config are executed by framework
+- **Migration scope clarified**: Live migration of 7 working features; preserve shared framework utilities; BDD-driven testing; unified config consolidation; framework-owned job execution
+- Ready to proceed with `/speckit-plan` to establish task decomposition for live migration with zero functionality loss and framework-managed job execution
