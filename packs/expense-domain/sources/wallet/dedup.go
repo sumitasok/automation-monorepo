@@ -274,6 +274,7 @@ func getFieldValue(record wallet.Record, fieldPath string) (interface{}, bool) {
 }
 
 // matchKey checks if two records match on the primary dedup keys.
+// For recordDate, allows same-day matches (within 24 hours) to handle records from different sources.
 func matchKey(rec1, rec2 wallet.Record, config *DedupConfig) bool {
 	for _, key := range config.PrimaryKeys {
 		val1, ok1 := getFieldValue(rec1, key)
@@ -296,14 +297,22 @@ func matchKey(rec1, rec2 wallet.Record, config *DedupConfig) bool {
 			s2 = strings.ToLower(s2)
 		}
 
-		// For recordDate, compare only the date part (YYYY-MM-DD), ignore time
+		// For recordDate, compare date part (YYYY-MM-DD) with tolerance for intra-day variations
+		// but preserve full timestamp for audit trail
 		if key == "recordDate" {
-			if len(s1) > 10 {
-				s1 = s1[:10]
+			date1 := s1
+			date2 := s2
+			if len(date1) > 10 {
+				date1 = date1[:10]
 			}
-			if len(s2) > 10 {
-				s2 = s2[:10]
+			if len(date2) > 10 {
+				date2 = date2[:10]
 			}
+			if date1 != date2 {
+				return false
+			}
+			// Note: Full timestamp (with time) is preserved in the record itself
+			continue
 		}
 
 		if s1 != s2 {

@@ -145,20 +145,34 @@ echo ""
 echo "✅ Decisions saved to: $DECISIONS_FILE"
 echo ""
 
-# Show what will happen
+# Ask for immediate execution confirmation
 echo "═══════════════════════════════════════════════════════════════"
-echo "📋 EXECUTION PLAN"
+echo "⚠️  EXECUTE DEDUPLICATION NOW?"
 echo "═══════════════════════════════════════════════════════════════"
 echo ""
-echo "To execute the deduplication:"
+read -p "This will DELETE the duplicate records from Wallet API. Continue? (yes/no) [no]: " CONFIRM_EXECUTE
+
+if [ "$CONFIRM_EXECUTE" != "yes" ]; then
+  echo ""
+  echo "❌ Execution cancelled. Decisions saved for later."
+  echo ""
+  echo "To execute later, run:"
+  echo "  CONFIG_PATH=\"$CONFIG_PATH\" $(basename "$0") --execute"
+  exit 0
+fi
+
+# Execute immediately
 echo ""
-echo "  export AUTO_DATA_DIR=\"$DATA_DIR\""
-echo "  export WALLET_API_TOKEN=\"$WALLET_TOKEN\""
-echo "  \"$DEDUP_BIN\" dedup execute \\"
-echo "    --records-file \"$RECORDS_FILE\" \\"
-echo "    --decisions-file \"$DECISIONS_FILE\""
+echo "🔄 Executing deduplication..."
 echo ""
-echo "OR use the wrapper:"
+
+export AUTO_DATA_DIR="$DATA_DIR"
+"$DEDUP_BIN" dedup execute \
+  --records-file "$RECORDS_FILE" \
+  --decisions-file "$DECISIONS_FILE"
+
 echo ""
-echo "  CONFIG_PATH=\"$CONFIG_PATH\" $(basename "$0") --execute"
+echo "═══════════════════════════════════════════════════════════════"
+echo "✅ WALLET DEDUPLICATION COMPLETE"
+echo "═══════════════════════════════════════════════════════════════"
 echo ""
