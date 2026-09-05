@@ -10,13 +10,21 @@ const yaml = require('js-yaml');
 const EventEmitter = require('events');
 
 class OrchestratorJobManager extends EventEmitter {
-  constructor(jobScheduler, configPath) {
+  constructor(jobScheduler, configPath, stateManager = null) {
     super();
     this.scheduler = jobScheduler;
     this.configPath = configPath;
+    this.stateManager = stateManager; // Optional: JobStateManager for persistence
     this.orchestrations = new Map(); // name -> orchestration definition
     this.executions = new Map(); // execution-id -> execution record
     this.executionId = 0;
+  }
+
+  /**
+   * Set state manager for persistence
+   */
+  setStateManager(stateManager) {
+    this.stateManager = stateManager;
   }
 
   /**
@@ -126,9 +134,66 @@ class OrchestratorJobManager extends EventEmitter {
     }));
   }
 
+  /**
+   * Get orchestration run history
+   */
+  async getOrchestrationHistory(orchestrationName, limit = 50) {
+    if (!this.stateManager) {
+      // In-memory fallback
+      return this.getExecutionHistory(orchestrationName).slice(0, limit);
+    }
+
+    // Query database for orchestration history
+    try {
+      if (this.stateManager.db) {
+        const stmt = this.stateManager.db.prepare(`
+          SELECT * FROM orchestrations
+          WHERE name = ?
+          ORDER BY started_at DESC
+          LIMIT ?
+        `);
+        return stmt.all(orchestrationName, limit);
+      }
+    } catch (err) {
+      console.error('Failed to query orchestration history:', err.message);
+    }
+
+    return [];
+  }
+
+  /**
+   * Get orchestration step details
+   */
+  async getOrchestrationSteps(orchestrationId) {
+    if (!this.stateManager) {
+      // In-memory fallback
+      const exec = this.executions.get(orchestrationId);
+      return exec?.steps || [];
+    }
+
+    // Query database for orchestration steps
+    try {
+      if (this.stateManager.db) {
+        const stmt = this.stateManager.db.prepare(`
+          SELECT * FROM orchestration_steps
+          WHERE orchestration_id = ?
+          ORDER BY step_index ASC
+        `);
+        return stmt.all(orchestrationId);
+      }
+    } catch (err) {
+      console.error('Failed to query orchestration steps:', err.message);
+    }
+
+    return [];
+  }
+
   // ============ Private Handlers ============
 
   async _onOrchestrationStart({ executionId, jobId }) {
+    const orch = this.orchestrations.get(jobId);
+    const totalSteps = orch?.steps.length || 0;
+
     const executionRecord = {
       id: executionId,
       orchestrationName: jobId,
@@ -136,10 +201,26 @@ class OrchestratorJobManager extends EventEmitter {
       startTime: new Date(),
       steps: [],
       currentStepIndex: 0,
-      totalSteps: this.orchestrations.get(jobId)?.steps.length || 0,
+      totalSteps,
     };
 
     this.executions.set(executionId, executionRecord);
+
+    // Persist orchestration start to database
+    if (this.stateManager) {
+      try {
+        if (this.stateManager.db) {
+          const stmt = this.stateManager.db.prepare(`
+            INSERT INTO orchestrations (id, name, started_at, status, total_steps, completed_steps)
+            VALUES (?, ?, ?, ?, ?, 0)
+          `);
+          stmt.run(executionId, jobId, new Date(), 'running', totalSteps);
+        }
+      } catch (err) {
+        console.error(`Failed to record orchestration start for ${executionId}:`, err.message);
+      }
+    }
+
     this.emit('orchestration:started', { executionId, name: jobId });
   }
 
@@ -178,13 +259,14 @@ class OrchestratorJobManager extends EventEmitter {
           });
 
           const stepExecution = this.scheduler.getExecution(stepExecutionId);
+          const stepEndTime = new Date();
           const stepRecord = {
             stepIndex,
             jobId: step.job,
             executionId: stepExecutionId,
             status: stepExecution?.status || 'completed',
             startTime: stepStartTime,
-            endTime: new Date(),
+            endTime: stepEndTime,
             result: stepExecution?.results,
             error: stepExecution?.lastError,
           };
@@ -196,6 +278,32 @@ class OrchestratorJobManager extends EventEmitter {
             status: stepRecord.status,
             result: stepRecord.result,
           });
+
+          // Persist step execution to database
+          if (this.stateManager) {
+            try {
+              if (this.stateManager.db) {
+                const stepId = `${executionId}-step-${stepIndex}`;
+                const stmt = this.stateManager.db.prepare(`
+                  INSERT INTO orchestration_steps
+                  (id, orchestration_id, step_index, job_id, status, started_at, ended_at, attempts, result)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
+                `);
+                stmt.run(
+                  stepId,
+                  executionId,
+                  stepIndex,
+                  step.job,
+                  stepRecord.status,
+                  stepStartTime,
+                  stepEndTime,
+                  JSON.stringify(stepRecord.result || {})
+                );
+              }
+            } catch (err) {
+              console.error(`Failed to record orchestration step ${stepIndex}:`, err.message);
+            }
+          }
 
           this.emit('orchestration:step:completed', {
             executionId,
@@ -209,16 +317,43 @@ class OrchestratorJobManager extends EventEmitter {
             throw new Error(`Step ${stepIndex} (${step.job}) failed: ${stepRecord.error?.message}`);
           }
         } catch (stepError) {
+          const stepEndTime = new Date();
           const stepRecord = {
             stepIndex,
             jobId: step.job,
             status: 'failed',
             startTime: stepStartTime,
-            endTime: new Date(),
+            endTime: stepEndTime,
             error: stepError,
           };
 
           stepRecords.push(stepRecord);
+
+          // Persist failed step to database
+          if (this.stateManager) {
+            try {
+              if (this.stateManager.db) {
+                const stepId = `${executionId}-step-${stepIndex}`;
+                const stmt = this.stateManager.db.prepare(`
+                  INSERT INTO orchestration_steps
+                  (id, orchestration_id, step_index, job_id, status, started_at, ended_at, attempts, result)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
+                `);
+                stmt.run(
+                  stepId,
+                  executionId,
+                  stepIndex,
+                  step.job,
+                  'failed',
+                  stepStartTime,
+                  stepEndTime,
+                  JSON.stringify({ error: stepError.message })
+                );
+              }
+            } catch (err) {
+              console.error(`Failed to record orchestration step failure for ${stepIndex}:`, err.message);
+            }
+          }
 
           this.emit('orchestration:step:failed', {
             executionId,
@@ -252,9 +387,27 @@ class OrchestratorJobManager extends EventEmitter {
 
   async _onOrchestrationSuccess({ executionId, jobId, execution, result }) {
     const execRecord = this.executions.get(executionId);
+    const endTime = new Date();
+
     if (execRecord) {
-      execRecord.endTime = new Date();
+      execRecord.endTime = endTime;
       execRecord.status = 'success';
+    }
+
+    // Persist orchestration success to database
+    if (this.stateManager) {
+      try {
+        if (this.stateManager.db) {
+          const stmt = this.stateManager.db.prepare(`
+            UPDATE orchestrations
+            SET status = ?, ended_at = ?, completed_steps = total_steps
+            WHERE id = ?
+          `);
+          stmt.run('success', endTime, executionId);
+        }
+      } catch (err) {
+        console.error(`Failed to record orchestration success for ${executionId}:`, err.message);
+      }
     }
 
     this.emit('orchestration:succeeded', {
@@ -266,10 +419,28 @@ class OrchestratorJobManager extends EventEmitter {
 
   async _onOrchestrationFailure({ executionId, jobId, execution, error }) {
     const execRecord = this.executions.get(executionId);
+    const endTime = new Date();
+
     if (execRecord) {
-      execRecord.endTime = new Date();
+      execRecord.endTime = endTime;
       execRecord.status = 'failed';
       execRecord.error = error.message;
+    }
+
+    // Persist orchestration failure to database
+    if (this.stateManager) {
+      try {
+        if (this.stateManager.db) {
+          const stmt = this.stateManager.db.prepare(`
+            UPDATE orchestrations
+            SET status = ?, ended_at = ?
+            WHERE id = ?
+          `);
+          stmt.run('failed', endTime, executionId);
+        }
+      } catch (err) {
+        console.error(`Failed to record orchestration failure for ${executionId}:`, err.message);
+      }
     }
 
     this.emit('orchestration:failed', {

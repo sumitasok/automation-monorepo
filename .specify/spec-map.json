@@ -11,7 +11,7 @@
       "phase_2_foundational": "✅ COMPLETE (8/8 tasks) - 1dd16d6",
       "phase_3_restructure": "✅ COMPLETE (15/15 tasks) - aa27274, fc6d80e",
       "phase_4_job_scheduling": "✅ COMPLETE (9/9 tasks) - 1ad4034",
-      "phase_5_config_consolidation": "🚀 IN PROGRESS (6/10 tasks) - 7707592, 21d2601",
+      "phase_5_config_consolidation": "🚀 IN PROGRESS (7/10 tasks) - 7707592, 21d2601, 1a733f3",
       "phase_6_rule_learning": "⏳ PENDING (12/12 tasks)",
       "phase_7_domain_uis": "⏳ PENDING (13/13 tasks)",
       "phase_8_e2e_testing": "⏳ PENDING (8/8 tasks)"
@@ -23,14 +23,14 @@
       "T034_db_migration": "✅ COMPLETE - Schema creation & initialization",
       "T035_api_endpoints": "✅ COMPLETE - /api/jobs/{id}/stats endpoint added",
       "T036_orchestrator_manager": "✅ COMPLETE - OrchestratorJobManager & step execution - 21d2601",
-      "T037_distributed_locking": "⏳ TODO - Locking verification & tests",
+      "T037_distributed_locking": "✅ COMPLETE - Locking verification & singleton execution - 1a733f3",
       "T038_orchestration_history": "⏳ TODO - Orchestration step tracking",
       "T039_orchestration_api": "⏳ TODO - Orchestration execution endpoints",
       "T040_launchd_migration": "⏳ TODO - Migrate to framework scheduler"
     },
-    "notes": "Phase 5: 60% complete (6/10 tasks). Job state persistence (SQLite) with 17 tests passing. OrchestratorJobManager wraps JobScheduler for multi-step workflows. Sequential execution with step tracking. Next: locking verification & orchestration API (T037-T039), then LaunchD migration (T040).",
-    "last_commit": "21d2601",
-    "commits_this_session": ["adaea3b", "1dd16d6", "aa27274", "fc6d80e", "1ad4034", "46024cc", "9bb91a9", "7707592", "ca905c0", "21d2601"],
+    "notes": "Phase 5: 70% complete (7/10 tasks). Job persistence + orchestrations + locking all working. JobStateManager persists to SQLite (in-memory fallback). OrchestratorJobManager handles multi-step workflows. Distributed locking prevents concurrent orchestration runs. Next: orchestration history persistence & REST API (T038-T039), then LaunchD migration (T040).",
+    "last_commit": "1a733f3",
+    "commits_this_session": ["adaea3b", "1dd16d6", "aa27274", "fc6d80e", "1ad4034", "46024cc", "9bb91a9", "7707592", "ca905c0", "21d2601", "4c0539d", "1a733f3"],
     "documentation": {
       "runbook": "RUNBOOK.md (updated with Phases 1-5)",
       "computation_notes": [
