@@ -4,6 +4,64 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-09-05 — Restructure architecture: expense tracker as core pack
+
+**Prompt summary**: Restructure from flat pack model (all packs as siblings) to hierarchical architecture where expense tracking is the primary application with external data sources (Gmail, SMS, iMessage, Wallet) as subordinate components.
+
+**Files created**:
+- `specs/008-restructure-architecture/spec.md` — Feature specification
+- `specs/008-restructure-architecture/checklists/requirements.md` — Quality validation checklist
+- `.worktrees/restructure-architecture/` — Git worktree for feature branch
+
+**Files updated**:
+- `.specify/feature.json` — Recorded feature directory
+- `.claude/spec-map.json` — Added restructure-architecture tracking entry
+
+**Steps taken**:
+1. ✅ Analyzed current architecture (flat pack model) and user's requirements (hierarchical with expense tracker as core)
+2. ✅ Created feature specification with 3 user stories (P1: reorganization, P2: abstraction, P2: pattern replication)
+3. ✅ Defined 8 functional requirements covering directory structure, source interface standardization, and backward compatibility
+4. ✅ Set 5 measurable success criteria (structure reorganization, interface contracts, script compatibility, documentation, clarity)
+5. ✅ Created quality checklist - all 17 items passed on first validation
+6. ✅ Created git worktree `feature/restructure-architecture` on branch `.worktrees/restructure-architecture`
+7. ✅ Updated spec-map.json to track feature as in_progress
+
+**Architecture Design** (from spec):
+```
+packs/expense-tracker/
+  ├── sources/
+  │   ├── gmail/         (fetch transaction data from Gmail)
+  │   ├── sms/           (fetch transaction data from SMS)
+  │   ├── imessage/      (fetch transaction data from iMessage)
+  │   └── wallet/        (fetch transaction data from Wallet)
+  ├── reports/           (report generation, analysis, output)
+  └── core/              (native expense tracking logic, data models, rules)
+```
+
+**Parallel pack pattern** (demonstrated):
+- CSV/PDF bank transaction repository would follow identical structure: sources/reports/core
+- Enables scalable instantiation of domain-specific packs
+
+**Key requirements**:
+- FR-001-FR-004: Directory reorganization and core mechanism isolation
+- FR-005-FR-008: Source standardization and extensibility
+
+**Outcome**:
+- ✅ Specification complete and quality-validated
+- ✅ Ready for `/speckit-clarify` (no clarifications needed) or `/speckit-plan` (planning phase)
+- ✅ Establishes architectural pattern for future pack development
+
+**Next steps**:
+- Proceed to `/speckit-plan` to determine implementation tasks and dependencies
+- Create implementation tasks for directory reorganization, source interface standardization, migration of existing orchestration scripts
+
+**Caveats**:
+- Requires migration of existing orchestration scripts that reference old pack paths (expenses/, gmail/, wallet/)
+- Write-back capabilities for sources are optional in v1; read operations are primary focus
+- Configuration files and environment variables will need updates during implementation phase
+
+---
+
 ## 2026-08-30 — Integrate wallet-dedup into orchestration workflow
 
 **Prompt summary**: Add wallet-dedup (scan → review → execute → finalize) to the orchestration system so full sync + dedup can run with single command.
