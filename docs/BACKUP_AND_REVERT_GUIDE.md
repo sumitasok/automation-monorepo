@@ -402,10 +402,11 @@ fi
 | Backups stored here | `~/automation-monorepo-config/backups/wallet-dedup/` | Directory |
 | Before-state snapshot | `wallet-before-{TIMESTAMP}.json` | JSON |
 | Change instructions | `wallet-changelog-{TIMESTAMP}.json` | JSON |
-| Script creating backups | `.worktrees/restructure-architecture/scripts/safe-deduplicate-wallet.js` | JavaScript |
-| Execution script | `.worktrees/restructure-architecture/scripts/deduplicate-real-wallet.js` | JavaScript |
+| Script creating backups | `packs/expense-domain/sources/wallet/scripts/safe-deduplicate-wallet.js` | JavaScript |
+| Execution script | `packs/expense-domain/sources/wallet/scripts/deduplicate-real-wallet.js` | JavaScript |
 | Configuration | `~/automation-monorepo-config/config/wallet/config.yaml` | YAML |
-| This guide | `.worktrees/restructure-architecture/docs/BACKUP_AND_REVERT_GUIDE.md` | Markdown |
+| This guide | `docs/BACKUP_AND_REVERT_GUIDE.md` | Markdown |
+| Wallet scripts README | `packs/expense-domain/sources/wallet/scripts/README.md` | Markdown |
 
 ---
 

@@ -9,7 +9,8 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 **Prompt summary**: Implement multi-layer safety for wallet deduplication before executing deletions: backup current state, track which code version created/updated each record, and generate revert instructions.
 
 **Files created**:
-- `scripts/safe-deduplicate-wallet.js` — Safe deduplication script with backup, source tracking, and change logging
+- `packs/expense-domain/sources/wallet/scripts/safe-deduplicate-wallet.js` — Safe deduplication script with backup, source tracking, and change logging
+- `packs/expense-domain/sources/wallet/scripts/README.md` — Documentation for wallet scripts
 
 **Safety Features Implemented**:
 1. **Before-state backup**: Complete wallet snapshot saved before any changes
@@ -49,9 +50,17 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 **Next Steps**:
 1. Review backup and change log
 2. Verify source tracking matches expected code versions
-3. Execute real deduplication when ready: `CONFIG_PATH=~/automation-monorepo-config SKIP_CONFIRMATION=true node scripts/deduplicate-real-wallet.js`
+3. Execute real deduplication when ready: `CONFIG_PATH=~/automation-monorepo-config SKIP_CONFIRMATION=true node packs/expense-domain/sources/wallet/scripts/deduplicate-real-wallet.js`
 4. Verify deduplication succeeded
 5. Merge feature to main after validation
+
+**Scripts Location**:
+All wallet scripts organized under domain:
+- `packs/expense-domain/sources/wallet/scripts/safe-deduplicate-wallet.js` — Analysis (no changes)
+- `packs/expense-domain/sources/wallet/scripts/deduplicate-real-wallet.js` — Execution (with backup)
+- `packs/expense-domain/sources/wallet/scripts/test-wallet-dedup.js` — Unit tests
+- `packs/expense-domain/sources/wallet/scripts/test-wallet-dedup-today.js` — Safe today-only test
+- `packs/expense-domain/sources/wallet/scripts/README.md` — Script documentation
 
 **Commits**: c4b450c (safe-deduplicate-wallet.js implementation)
 
