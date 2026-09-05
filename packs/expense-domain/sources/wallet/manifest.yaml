@@ -2,7 +2,7 @@
 # Declares pack capabilities and dependencies
 
 pack:
-  name: "wallet-sync-unified"
+  name: "wallet-sync"
   version: "1.0.0"
   description: "Unified wallet sync from Gmail alerts, Drive bills, and manual entries"
   
@@ -10,7 +10,7 @@ pack:
 jobs:
   - name: "wallet-sync"
     description: "Main wallet sync job (hourly via launchd)"
-    script: "scripts/wallet-sync-unified.sh"
+    script: "scripts/wallet-sync.sh"
     schedule: "hourly"
     
 # Configuration requirements
