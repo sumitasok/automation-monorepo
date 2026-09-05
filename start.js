@@ -83,7 +83,5 @@ process.on('SIGTERM', async () => {
   }
 });
 
-// Timeout safety
-setTimeout(() => {
-  // Keep process alive
-}, Number.MAX_SAFE_INTEGER);
+// Keep process alive indefinitely
+setInterval(() => {}, 1000 * 60 * 60); // Check every hour
