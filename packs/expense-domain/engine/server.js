@@ -117,6 +117,8 @@ class ExpenseServer {
       } else if (pathname.match(/^\/api\/expense-domain\/jobs\/[^/]+\/stats$/) && req.method === 'GET') {
         const jobId = pathname.split('/')[4];
         await this._handleJobStats(req, res, jobId);
+      } else if (pathname === '/api/expense-domain/wallet-sync-test' && req.method === 'POST') {
+        await this._handleWalletSyncTest(req, res);
       } else if (pathname === '/api/orchestrations' && req.method === 'GET') {
         await this._handleListOrchestrations(req, res);
       } else if (pathname.match(/^\/api\/orchestrations\/[^/]+\/run$/) && req.method === 'POST') {
@@ -244,6 +246,28 @@ class ExpenseServer {
       this._sendJson(res, 200, stats);
     } else {
       this._sendError(res, 503, 'Job state manager not available');
+    }
+  }
+
+  // ============ Wallet Sync Test Handler (T040) ============
+
+  async _handleWalletSyncTest(req, res) {
+    // Phase 5 T040: Test endpoint for wallet-sync job
+    // Allows manual testing before removing LaunchD
+    try {
+      const executionId = await this.jobManager.triggerJob('wallet-sync-orchestration', {
+        source: 'test-endpoint',
+        timestamp: new Date().toISOString(),
+      });
+
+      this._sendJson(res, 200, {
+        status: 'triggered',
+        jobId: 'wallet-sync-orchestration',
+        executionId,
+        message: 'Wallet sync orchestration triggered for testing',
+      });
+    } catch (error) {
+      this._sendError(res, 500, `Failed to trigger wallet sync test: ${error.message}`);
     }
   }
 
