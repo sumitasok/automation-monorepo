@@ -75,37 +75,115 @@ class WalletDeduplicator {
   }
 
   /**
-   * Deduplicate records, keeping automation records
+   * Deduplicate records with intelligent merging
    * Rules:
-   * - Keep: Records with "source:automation-monorepo" label
-   * - Delete: Records without label (manual/duplicates)
-   * - Merge: Categorization into kept record
+   * - Base: Keep automation record (source:automation-monorepo)
+   * - Merge: Best attributes from manual record
+   *   * Take correct category from automation
+   *   * Take better tags from manual record
+   *   * Take better description from manual record
+   * - Audit: Track what was merged
    */
-  deduplicateRecords(recordsWithDuplicates) {
+  deduplicateRecords(recordsWithDuplicates, mergeStrategy = 'best-of-both') {
     const deduplicated = [];
     const removed = [];
+    const merged = new Set(); // Track already merged records
 
     recordsWithDuplicates.forEach((record) => {
-      // Check if this record should be kept or removed
+      if (merged.has(record.id)) return; // Skip already processed
+
       const hasSourceLabel = (record.labels || []).includes('source:automation-monorepo');
 
+      // Find duplicate if this is automation record
       if (hasSourceLabel) {
-        // Keep records from automation
-        deduplicated.push(record);
-      } else {
-        // Mark for removal
-        removed.push({
-          ...record,
-          _duplicate_reason: 'manual-entry-without-source-label',
-          _preferred_record: recordsWithDuplicates.find(r =>
-            (r.labels || []).includes('source:automation-monorepo') &&
-            this.isSameDuplicate(r, record)
-          ),
-        });
+        const duplicate = recordsWithDuplicates.find(r =>
+          !merged.has(r.id) &&
+          !(r.labels || []).includes('source:automation-monorepo') &&
+          this.isSameDuplicate(r, record)
+        );
+
+        if (duplicate && mergeStrategy === 'best-of-both') {
+          // Merge best attributes from both records
+          const merged_record = this.mergeRecords(record, duplicate);
+          deduplicated.push(merged_record);
+
+          // Mark both as processed
+          merged.add(record.id);
+          merged.add(duplicate.id);
+
+          // Track the removal
+          removed.push({
+            ...duplicate,
+            _duplicate_reason: 'merged-into-automation-record',
+            _merged_with: record.id,
+            _merge_strategy: 'best-of-both',
+          });
+        } else {
+          // No duplicate found, keep as is
+          deduplicated.push(record);
+          merged.add(record.id);
+        }
       }
     });
 
     return { deduplicated, removed };
+  }
+
+  /**
+   * Intelligently merge two duplicate records
+   * Takes best attributes from both
+   */
+  mergeRecords(automationRecord, manualRecord) {
+    return {
+      // Keep automation record ID and base structure
+      ...automationRecord,
+
+      // Take better description (manual usually has more detail)
+      description: this.isBetterDescription(automationRecord.description, manualRecord.description)
+        ? manualRecord.description
+        : automationRecord.description,
+
+      // Merge tags/labels - combine both for maximum info
+      labels: [
+        ...(automationRecord.labels || []),
+        ...(manualRecord.labels || []),
+        // Remove duplicates while preserving order
+      ].filter((label, index, self) => self.indexOf(label) === index),
+
+      // Keep automation's category (it's AI-categorized and correct)
+      category: automationRecord.category,
+
+      // Merge notes/metadata
+      _merged_attributes: {
+        source_record_id: automationRecord.id,
+        merged_with_id: manualRecord.id,
+        merged_at: new Date().toISOString(),
+        merged_strategy: 'best-of-both',
+        kept_from_automation: {
+          id: automationRecord.id,
+          category: automationRecord.category,
+          source_label: true,
+        },
+        merged_from_manual: {
+          id: manualRecord.id,
+          description: manualRecord.description !== automationRecord.description,
+          tags: manualRecord.labels?.length > (automationRecord.labels?.length || 0),
+        },
+      },
+    };
+  }
+
+  /**
+   * Determine which description is better
+   * Better = longer, more detailed
+   */
+  isBetterDescription(desc1, desc2) {
+    if (!desc1 && desc2) return true;
+    if (!desc2 && desc1) return false;
+    if (!desc1 && !desc2) return false;
+
+    // Prefer longer, more detailed descriptions
+    return desc2.length > desc1.length;
   }
 
   /**

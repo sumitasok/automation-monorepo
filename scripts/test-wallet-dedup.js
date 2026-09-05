@@ -17,6 +17,7 @@ console.log('══════════════════════�
 console.log('');
 
 // Example test data with duplicates
+// Note: Manual records often have better tags/descriptions than automation records
 const testRecords = [
   {
     id: 'tx-001',
@@ -24,7 +25,7 @@ const testRecords = [
     merchant: 'Starbucks Coffee',
     date: '2026-09-01',
     category: 'Meals & Dining',
-    description: 'Morning coffee',
+    description: 'Coffee',
     labels: ['source:automation-monorepo', 'categorized-by-ai'],
   },
   {
@@ -33,8 +34,8 @@ const testRecords = [
     merchant: 'Starbucks Coffee',
     date: '2026-09-01',
     category: 'Unknown Expense',
-    description: 'Morning coffee',
-    labels: [], // No source label - will be removed
+    description: 'Morning espresso with Sarah at downtown Starbucks on 5th Ave',
+    labels: ['business-meeting', 'with-colleague', 'downtown'], // Better tags!
   },
   {
     id: 'tx-002',
@@ -88,11 +89,39 @@ duplicates.forEach((group, idx) => {
 });
 console.log('');
 
-// Test deduplication
-console.log('🔧 Deduplicating...');
-const { deduplicated, removed } = dedup.deduplicateRecords(testRecords);
-console.log(`   Kept: ${deduplicated.length} records`);
-console.log(`   Removed: ${removed.length} records`);
+// Test deduplication with intelligent merging
+console.log('🔧 Deduplicating with intelligent merging...');
+const { deduplicated, removed } = dedup.deduplicateRecords(testRecords, 'best-of-both');
+console.log(`   Final records: ${deduplicated.length}`);
+console.log(`   Merged/Removed: ${removed.length}`);
+console.log('');
+
+// Show merged record details
+console.log('📋 Merged Record Details:');
+deduplicated.forEach(record => {
+  if (record._merged_attributes) {
+    console.log(`   Record ID: ${record.id}`);
+    console.log(`   Merchant: ${record.merchant} $${record.amount}`);
+    console.log(`   Category: ${record.category} ✓ (from automation)`);
+    console.log(`   Description: "${record.description}" ✓ (from manual - better detail)`);
+    console.log(`   Labels: ${record.labels.join(', ')}`);
+    console.log(`   Merge Info:`);
+    console.log(`     - Source: ${record._merged_attributes.source_record_id}`);
+    console.log(`     - Merged with: ${record._merged_attributes.merged_with_id}`);
+    console.log(`     - Strategy: ${record._merged_attributes.merged_strategy}`);
+    console.log('');
+  }
+});
+
+// Show what was merged away
+console.log('🗑️  Merged Away (Best of Both Applied):');
+removed.forEach(record => {
+  if (record._duplicate_reason === 'merged-into-automation-record') {
+    console.log(`   Record ${record.id} merged into ${record._merged_with}`);
+    console.log(`   - Kept: Correct category from automation record`);
+    console.log(`   - Merged: Better description + tags from manual record`);
+  }
+});
 console.log('');
 
 // Test source enrichment
