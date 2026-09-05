@@ -312,6 +312,7 @@ func buildNote(t csvtxn.Txn) string {
 		parts = append(parts, t.Subject)
 	}
 	parts = append(parts, "[gmail-csv "+short(t.MessageID)+"]")
+	parts = append(parts, "source:refactored-code-0905")
 	return clip(strings.Join(parts, " "), 255)
 }
 
