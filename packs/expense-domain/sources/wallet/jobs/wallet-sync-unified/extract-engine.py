@@ -37,6 +37,7 @@ import datetime as dt
 import html
 import html.parser
 import json
+import os
 import pathlib
 import re
 import sys
@@ -44,8 +45,15 @@ import sys
 import yaml
 
 BASE = pathlib.Path(__file__).resolve().parent
-FORMATS_DIR = BASE / "formats"
-ROUTING_FILE = BASE / "routing.yaml"
+# Read format files from external config if CONFIG_PATH is set
+CONFIG_PATH = pathlib.Path(os.environ.get("CONFIG_PATH", pathlib.Path.home() / "automation-monorepo-config"))
+FORMATS_DIR = CONFIG_PATH / "config" / "expense-domain" / "wallet" / "email-formats"
+ROUTING_FILE = CONFIG_PATH / "config" / "expense-domain" / "wallet" / "routing.yaml"
+
+# Fallback to local formats if external config doesn't exist
+if not FORMATS_DIR.exists():
+    FORMATS_DIR = BASE / "formats"
+    ROUTING_FILE = BASE / "routing.yaml"
 
 
 # --------------------------------------------------------------------------

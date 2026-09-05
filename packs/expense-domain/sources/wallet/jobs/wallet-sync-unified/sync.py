@@ -398,10 +398,13 @@ def run_engine(envelopes: list[dict], log) -> list[dict]:
             f.write(json.dumps(env) + "\n")
         tmp = f.name
     try:
+        # Pass CONFIG_PATH to engine subprocess
+        env = os.environ.copy()
         result = subprocess.run(
             [sys.executable, str(ENGINE), "--file", tmp],
             capture_output=True, text=True, check=True,
-            cwd=str(EXTRACT_DIR)
+            cwd=str(EXTRACT_DIR),
+            env=env
         )
         outputs = []
         for line in result.stdout.strip().splitlines():
@@ -585,9 +588,11 @@ def part_a(gmail_svc, state: dict, categories: dict, labels_cache: dict,
         # Note format: <merchant> | via <instrument> | gm:<msgid> | source:refactored-code-0905
         # Max 255 chars; preserve source tag and gm: key
         source_tag = " | source:refactored-code-0905"
+        # Use account_name from routing if available, otherwise use instrument
+        instrument = rec.get("account_name") or rec.get("instrument", "")
         max_merchant_len = 255 - len(f" | via  | gm:{gm_id}") - len(source_tag)
         merchant_truncated = merchant[:max(10, max_merchant_len)]
-        note = f"{merchant_truncated} | via {rec.get('instrument','')} | gm:{gm_id}{source_tag}"
+        note = f"{merchant_truncated} | via {instrument} | gm:{gm_id}{source_tag}"
         note = note[:255]
 
         payload = {
