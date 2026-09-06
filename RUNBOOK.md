@@ -4,6 +4,45 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-09-06 — Build Go and Python SDKs for the Wallet REST API from the captured spec
+
+**Prompt summary**: Read the Wallet OpenAPI markdown captured in `packs/expense-domain/sources/wallet/sdk/`, then implement a Go SDK and a Python SDK in that directory (separate subdirectories) with complete coverage including edge and error cases, mock-API tests, and several verification passes so no condition is missed.
+
+**Scope**: OpenAPI 3.1, Wallet API 2.0.0 — 22 operations, 62 schemas, 168 distinct fields, 90 enum values, 5 response headers, 14 numeric limits. Both SDKs are standard-library only, matching the existing `internal/wallet` convention (builds offline, no lockfile).
+
+**Files added**:
+- `packs/expense-domain/sources/wallet/sdk/README.md` — shared overview, coverage table, the two API behaviours worth knowing.
+- `packs/expense-domain/sources/wallet/sdk/.gitignore` — Python/Go build and test artefacts.
+- `packs/expense-domain/sources/wallet/sdk/go/` — module `github.com/sumitasok/sa.automation.wallet/sdk/go`, package `wallet`: `doc.go`, `client.go` (transport, retry, error mapping, batch-envelope detection), `errors.go`, `types.go` (tolerant `Time`/`Date`, every enum), `models.go` (every schema), `filters.go`, `validate.go`, `paths.go`, `paginate.go`, and one file per resource (`accounts`, `records`, `budgets`, `categories`, `labels`, `planning`, `datamgmt`). Tests in 8 `*_test.go` files against `httptest` servers.
+- `packs/expense-domain/sources/wallet/sdk/python/` — package `wallet_sdk` (`client.py`, `models.py`, `requests.py`, `errors.py`, `enums.py`, `filters.py`, `validation.py`, `transport.py`, `_convert.py`, `_problems.py`) plus `pyproject.toml` and 8 test modules driven by a real `ThreadingHTTPServer`.
+
+**Design decisions**:
+- **Batch endpoints return their envelope, not an error.** `POST /records` and every `PATCH`/`DELETE` answer 200/207/400/500 with the same body; both SDKs decode all four and tell a real `ValidationError` 400 apart by probing for `results`/`summary` in the body.
+- **Retries are conservative by default**: rate limits, 5xx and transport faults on `GET`/`DELETE` only, honouring `Retry-After`, otherwise exponential backoff with full jitter. `POST`/`PATCH` need an explicit opt-in because a retried create duplicates records. A batch envelope is never retried away — it carries per-item detail.
+- **Every documented constraint is checked client-side** and reports *every* problem at once with an exact field path (`records[2].amount.value`), so a 50-record batch takes one round trip to fix. `SkipValidation` / `validate=False` hands the decision back to the server.
+- **Decoding is forgiving**: unknown fields ignored and retained (`raw`), unknown enum members round-trip verbatim, nulls become absent values, timestamps parsed from every emitted format. A new server release cannot break an old client.
+- Pagination walkers refuse to loop when the server repeats or rewinds `nextOffset`, and never mutate the caller's parameters.
+
+**Verification passes** (see `notes/2026-09-06_wallet-sdk-spec-coverage-audit.md`):
+1. Operation/parameter audit — 22/22 operations, all 147 parameters, both SDKs.
+2. Schema audit — 62 schemas, 168 properties, all mapped in both.
+3. Enum/header/limit audit — 90 values, 5 headers, 14 limits; the one flagged value (`"false"`) is the `X-Sync-In-Progress` enum Go handles by case-insensitive compare.
+4. Cross-SDK differential — both SDKs generate byte-identical JSON and query strings for the same inputs.
+
+**Bugs found and fixed during the passes**:
+- `parse_retry_after` let `email.utils.parsedate_to_datetime` raise on a garbage `Retry-After` header instead of returning `None` — a bad header would have escaped as a `ValueError` from a header parser.
+- Python `format_amount` emitted exponent notation (`1e+20`) for extreme magnitudes, which the `amount` filter cannot read. First fix used `format(v, "f")`, which silently turned `1e-7` into `0`; the shipped fix uses `Decimal`.
+- Go `truncate` sliced by byte and could split a multi-byte rune inside a user-visible error message.
+
+**Outcome**: Go — `go build`, `go vet` and `go test -race` clean, 94% statement coverage. Python — 699 tests passing, 99% statement coverage. Both test suites drive a real HTTP server over a socket rather than a stubbed transport.
+
+**Caveats**:
+- Two constraints cannot be checked client-side because they depend on server state: that `startDate`/`endDate`/`limitOverrides` suit a budget's type (the type is not known until fetched), and that an override `period` is not in the past. Both are documented on the fields and enforced by the API.
+- The Go module is nested inside the existing `sa.automation.wallet` module, so a consumer in this tree needs a `replace` directive (documented in `go/README.md`). The existing narrow `internal/wallet` client is untouched; nothing was migrated onto the new SDK in this change.
+- No live API calls were made — every test runs against a local mock server.
+
+---
+
 ## 2026-09-05 — Tag every wallet record with which pipeline created/updated it
 
 **Prompt summary**: With three concurrent sync pipelines now confirmed live (see prior entries), user asked to be able to identify which process created or updated any given Wallet record — tag the note with `com.safinances.wallet-sync` / `com.sumitasok.wallet-sync` / `com.automation-monorepo.wallet-sync-unified` plus create/update.

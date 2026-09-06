@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wallet-sdk"
+version = "1.0.0"
+description = "Complete, dependency-free client for the BudgetBakers Wallet REST API (OpenAPI 2.0.0)"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "automation-monorepo" }]
+keywords = ["wallet", "budgetbakers", "finance", "rest", "sdk"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Intended Audience :: Developers",
+  "Topic :: Office/Business :: Financial",
+]
+# Standard library only: no runtime dependencies, so the SDK installs and runs
+# offline in the same way the Go client does.
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[tool.setuptools.packages.find]
+include = ["wallet_sdk*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["error"]

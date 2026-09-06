@@ -1,0 +1,18 @@
+# Python build and test artefacts.
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.venv/
+venv/
+
+# Go build and coverage artefacts.
+*.test
+*.out
+coverage.html
