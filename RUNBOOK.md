@@ -4,6 +4,40 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-09-06 — Fix the extraction/dedup bugs the sync fix exposed; verify with a live run
+
+**Prompt summary**: Fix the documents that still fail to extract, verify with an actual (non-dry) run, verify the schedules trigger and call the job properly, and walk through the status of the 5 writes given the records may already be in Wallet.
+
+**What the live verification found**: the scheduled 16:07Z run — the first to get past the YAML crash fixed earlier today — failed with `TypeError: unsupported operand type(s) for +: 'dict' and 'float'`. Pre-existing bug in `fuzzy_duplicate()`: `GET /records` returns `amount` as `{"value": …, "currencyCode": …}`, not a scalar. It had never been reached, because dry-run returns no records and real runs used to crash earlier. The new failure-recording put it in `last-sync.json` immediately, which is how it was caught.
+
+**Files changed**:
+- `jobs/wallet-sync-unified/sync.py` — new `record_amount()` reads the API's amount object (and the legacy scalar); `fuzzy_duplicate()` uses it, and now compares merchants on shared tokens via `_same_merchant()` rather than a first-six-characters prefix; a failed run clears `last_run_summary` instead of leaving the previous run's tallies under a "failed" status.
+- `jobs/wallet-sync-unified/tests/test_sync_failures.py` — 8 more tests (30 total) covering the amount object, the UPI-handle-vs-name match, gm-tag precedence, and the stale-summary case.
+- `~/automation-monorepo-config/config/expense-domain/gmail/email-formats/` (outside this repo) — five AI-generated formats moved to `archive/`: four HDFC "View:" formats with byte-identical match criteria (only one could ever win; each declared `action: extract` with a body regex specific to one of four mail types) replaced by one `email.hdfc-instaalert-notifications.yaml` with `action: skip`; `email.sib-account-statement.yaml` rewritten as `action: skip` (a monthly statement was being extracted as a transaction, surfacing as "UNROUTED ₹0.0").
+
+**Status of the 5 documents** (checked against the live Wallet API before writing anything):
+
+| Document | Outcome |
+|---|---|
+| SIB monthly statement | skip by rule (not a transaction) |
+| ICICI monthly e-statement | skip by rule (already correct) |
+| HUNGERBOX ₹45, 2026-09-04 | already in Wallet, `gm:` tagged → skipped |
+| UBER ₹181.92, 2026-09-04 | already in Wallet, `gm:` tagged → skipped |
+| NASAREEN ₹2500, 2026-09-05 | present but **not** `gm:`-tagged (written by one of the other two sync pipelines). The old prefix match compared "630778" against "NASAREEN" and missed it — this run would have created a duplicate. Now caught by token matching → skipped |
+
+**Writes are not upserts.** `wallet_post("/records")` is a plain create; there is no PATCH path for records and no id in the payload. Idempotency is entirely client-side: `already_in_wallet()` (the `gm:<msgid>` tag in the note) then `fuzzy_duplicate()` (amount + date + counterparty, for records this pipeline did not write).
+
+**Live run**: `./scripts/wallet-sync.sh` exit 0 — 5 fetched, 0 created, 3 already present, 2 skipped by rule, 0 failed. Wallet record count for 2026-09-01..07 unchanged at 36, with no records added or removed.
+
+**Schedules**: three launchd agents write to the same Wallet account — `com.automation-monorepo.wallet-sync-unified` (hourly at :37, this worktree), `com.safinances.wallet-sync` (hourly at :07, a script in the Obsidian iCloud vault), `com.sumitasok.wallet-sync` (6×/day, main checkout). That overlap is what produced the untagged NASAREEN duplicate.
+
+**Caveats**:
+- The unified agent's plist points into `.worktrees/restructure-architecture/`; it will break when that worktree is removed after merge.
+- The Gmail cursor only advances for *pushed* records, so a run that only skips leaves it where it was. Safe (processed threads are excluded by the `claude-read` label) but the query window grows over time.
+- 30 formats load; 5 archived files remain in `archive/` and are not loaded.
+
+---
+
 ## 2026-09-06 — Fix the wallet sync failing silently for 30 consecutive runs
 
 **Prompt summary**: The dashboard showed every recent run failing while `last-sync.json` reported success. Fix it.

@@ -302,3 +302,86 @@ def test_run_engine_logs_warnings_from_a_successful_engine_run(sync, monkeypatch
 
     assert out == [{"matched": False}]
     assert any("skipped 1 unusable format file" in line for line in lines)
+
+
+# ---------------------------------------------------------------------------
+# 5. Dedup against real Wallet API record shapes
+# ---------------------------------------------------------------------------
+
+def test_record_amount_reads_the_api_amount_object(sync):
+    """GET /records returns amount as {"value": ..., "currencyCode": ...}.
+
+    Treating it as a scalar raised `TypeError: unsupported operand type(s)
+    for +: 'dict' and 'float'` and aborted the run before anything was written.
+    """
+    assert sync.record_amount({"amount": {"value": -868.76, "currencyCode": "INR"}}) == -868.76
+    assert sync.record_amount({"amount": -500.0}) == -500.0      # legacy scalar shape
+    assert sync.record_amount({}) == 0.0
+    assert sync.record_amount({"amount": None}) == 0.0
+    assert sync.record_amount({"amount": {"currencyCode": "INR"}}) == 0.0
+
+
+def test_fuzzy_duplicate_survives_the_amount_object(sync):
+    existing = [{"amount": {"value": -2500.0, "currencyCode": "INR"},
+                 "recordDate": "2026-09-05T12:00:00.000Z",
+                 "counterParty": "NASAREEN", "note": "manual entry"}]
+
+    assert sync.fuzzy_duplicate(2500.0, "6307781870@ybl (NASAREEN)", "2026-09-05", existing)
+
+
+def test_fuzzy_duplicate_matches_a_upi_handle_against_a_plain_name(sync):
+    """The alert says "6307781870@ybl (NASAREEN)"; the existing record says
+    "NASAREEN". The old first-six-characters test compared "630778" and missed
+    it, so the run would have created a second copy."""
+    existing = [{"amount": {"value": -2500.0}, "recordDate": "2026-09-05",
+                 "counterParty": "NASAREEN", "note": ""}]
+
+    assert sync.fuzzy_duplicate(2500.0, "6307781870@ybl (NASAREEN)", "2026-09-05", existing)
+
+
+def test_fuzzy_duplicate_ignores_records_this_pipeline_wrote(sync):
+    """gm-tagged records are already_in_wallet()'s job, not fuzzy matching."""
+    existing = [{"amount": {"value": -2500.0}, "recordDate": "2026-09-05",
+                 "counterParty": "NASAREEN", "note": "NASAREEN | gm:abc123"}]
+
+    assert not sync.fuzzy_duplicate(2500.0, "NASAREEN", "2026-09-05", existing)
+
+
+def test_fuzzy_duplicate_does_not_match_a_different_merchant(sync):
+    existing = [{"amount": {"value": -2500.0}, "recordDate": "2026-09-05",
+                 "counterParty": "Blinkit", "note": ""}]
+
+    assert not sync.fuzzy_duplicate(2500.0, "Zomato", "2026-09-05", existing)
+
+
+def test_fuzzy_duplicate_does_not_match_a_different_day_or_amount(sync):
+    base = {"counterParty": "NASAREEN", "note": ""}
+    assert not sync.fuzzy_duplicate(
+        2500.0, "NASAREEN", "2026-09-05",
+        [{**base, "amount": {"value": -2500.0}, "recordDate": "2026-09-04"}])
+    assert not sync.fuzzy_duplicate(
+        2500.0, "NASAREEN", "2026-09-05",
+        [{**base, "amount": {"value": -2400.0}, "recordDate": "2026-09-05"}])
+
+
+def test_already_in_wallet_finds_the_gm_tag(sync):
+    existing = [{"note": "HUNGERBOX | via HDFC CC | gm:1a06bb742c271f68 | proc:x:create"}]
+    assert sync.already_in_wallet("1a06bb742c271f68", existing)
+    assert not sync.already_in_wallet("someotherid", existing)
+    assert not sync.already_in_wallet("1a06bb742c271f68", [{"note": None}])
+
+
+def test_a_failed_run_does_not_leave_the_previous_summary_behind(sync, monkeypatch):
+    """A stale summary under a "failed" status reads as this run's numbers."""
+    sync.LAST_SYNC.write_text(json.dumps({
+        "last_run_status": "success",
+        "last_run_summary": {"total_fetched": 19, "created": 5, "skipped": 3, "failed": 0},
+    }))
+    monkeypatch.setattr(sync, "_run_sync",
+                        lambda a, s, l: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(sys, "argv", ["sync.py"])
+
+    with pytest.raises(RuntimeError):
+        sync.main()
+
+    assert _state(sync)["last_run_summary"] is None

@@ -486,15 +486,54 @@ def already_in_wallet(gm_id: str, existing_records: list) -> bool:
     return any(tag in (r.get("note") or "") for r in existing_records)
 
 
+def record_amount(r: dict) -> float:
+    """Numeric amount of a Wallet API record.
+
+    GET /records returns amount as an object — {"value": -868.76,
+    "currencyCode": "INR"} — not a scalar. Treating it as a number raised
+    TypeError and aborted the run before any record could be written.
+    """
+    amt = r.get("amount", 0)
+    if isinstance(amt, dict):
+        amt = amt.get("value", 0)
+    try:
+        return float(amt)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _merchant_tokens(name: str) -> set:
+    """Significant word-ish tokens of a merchant name, lowercased.
+
+    Bank alerts and hand-entered records name the same counterparty
+    differently: an alert may say "6307781870@ybl (NASAREEN)" where the
+    existing record just says "NASAREEN". Comparing on tokens matches those;
+    comparing on the first six characters did not.
+    """
+    return {t for t in re.split(r"[^a-z0-9]+", (name or "").lower())
+            if len(t) >= 4 and not t.isdigit()}
+
+
+def _same_merchant(a: str, b: str) -> bool:
+    a_l, b_l = (a or "").lower(), (b or "").lower()
+    if not a_l or not b_l:
+        return False
+    if a_l[:6] in b_l or b_l[:6] in a_l:
+        return True
+    return bool(_merchant_tokens(a) & _merchant_tokens(b))
+
+
 def fuzzy_duplicate(amount: float, merchant: str, date: str,
                     existing_records: list) -> bool:
-    """True if a manual entry with same amount+date exists (no gm: tag)."""
+    """True if an entry with the same amount+date+counterparty exists that this
+    pipeline did not write (no gm: tag) — a manual entry, or one of the other
+    wallet-sync pipelines that write to the same account."""
     for r in existing_records:
         if (r.get("note") and "gm:" in r["note"]):
             continue
-        if (abs(r.get("amount", 0) + amount) < 0.10          # amounts stored negative
-                and r.get("recordDate", "")[:10] == date[:10]
-                and merchant.lower()[:6] in (r.get("counterParty") or "").lower()):
+        if (abs(record_amount(r) + amount) < 0.10            # amounts stored negative
+                and (r.get("recordDate") or "")[:10] == date[:10]
+                and _same_merchant(merchant, r.get("counterParty"))):
             return True
     return False
 
@@ -1019,6 +1058,9 @@ def main():
         state["last_run_end"]    = _utcnow()
         state["last_run_status"] = "failed"
         state["last_run_error"]  = f"{type(e).__name__}: {' '.join(str(e).split())[:800]}"
+        # Otherwise the previous run's tallies sit under a "failed" status and
+        # read as though this run had produced them.
+        state["last_run_summary"] = None
         save_state(state, dry_run=args.dry_run)
         log(f"\nFAILED: {state['last_run_error']}")
         raise
