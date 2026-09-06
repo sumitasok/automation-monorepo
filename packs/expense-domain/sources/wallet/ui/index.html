@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wallet Data</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body data-palette="#2a78d6,#e34948">
+
+<header class="topbar">
+  <div class="topbar-left">
+    <h1>Wallet</h1>
+    <p class="dir" id="dataDir">reading data directory…</p>
+  </div>
+  <div class="topbar-right">
+    <span class="badge badge-readonly" title="This dashboard never writes to the data directory">read-only</span>
+    <button type="button" id="refreshBtn" class="btn">Refresh</button>
+    <button type="button" id="themeBtn" class="btn btn-icon" aria-label="Toggle light and dark theme">◑</button>
+  </div>
+</header>
+
+<nav class="tabs" role="tablist">
+  <button type="button" class="tab" role="tab" data-tab="overview" aria-selected="true">Overview</button>
+  <button type="button" class="tab" role="tab" data-tab="records" aria-selected="false">Records <span class="tab-count" id="tabCountRecords"></span></button>
+  <button type="button" class="tab" role="tab" data-tab="duplicates" aria-selected="false">Duplicates <span class="tab-count" id="tabCountDuplicates"></span></button>
+  <button type="button" class="tab" role="tab" data-tab="runs" aria-selected="false">Sync &amp; Logs</button>
+</nav>
+
+<div id="loadError" class="banner banner-critical" hidden></div>
+
+<!-- Filters apply to Overview and Records together, so the totals and the
+     charts always describe exactly the rows listed below them. -->
+<section class="filters" id="filters">
+  <input type="search" id="qInput" class="control control-grow" placeholder="Search merchant, note, label, account…" aria-label="Search records">
+  <label class="control-label">From <input type="date" id="fromInput" class="control" aria-label="Records from date"></label>
+  <label class="control-label">To <input type="date" id="toInput" class="control" aria-label="Records to date"></label>
+  <select id="accountInput" class="control" aria-label="Filter by account"><option value="">All accounts</option></select>
+  <select id="categoryInput" class="control" aria-label="Filter by category"><option value="">All categories</option></select>
+  <select id="labelInput" class="control" aria-label="Filter by label"><option value="">All labels</option></select>
+  <select id="typeInput" class="control" aria-label="Filter by direction">
+    <option value="">In and out</option>
+    <option value="expense">Money out</option>
+    <option value="income">Money in</option>
+  </select>
+  <button type="button" id="clearBtn" class="btn btn-quiet">Clear</button>
+  <span class="filter-summary" id="filterSummary"></span>
+</section>
+
+<main>
+
+<!-- ------------------------------------------------------------------ -->
+<section class="panel-set" id="panel-overview" role="tabpanel">
+
+  <div class="tiles" id="tiles"></div>
+
+  <div id="attention" class="attention"></div>
+
+  <div class="charts">
+    <figure class="card chart-card">
+      <figcaption>
+        <h2>Spend by category</h2>
+        <p class="sub">Money out only, largest first.</p>
+      </figcaption>
+      <div id="categoryChart" class="chart-body"></div>
+    </figure>
+
+    <figure class="card chart-card">
+      <figcaption>
+        <h2>Daily flow</h2>
+        <p class="sub">Money in above the line, money out below.</p>
+        <div class="legend" id="flowLegend">
+          <span class="legend-item"><span class="swatch swatch-in"></span>Money in</span>
+          <span class="legend-item"><span class="swatch swatch-out"></span>Money out</span>
+        </div>
+      </figcaption>
+      <div id="flowChart" class="chart-body"></div>
+    </figure>
+  </div>
+
+  <div class="card">
+    <h2>Top merchants</h2>
+    <div id="merchantTable" class="mini-table-wrap"></div>
+  </div>
+
+  <div class="card">
+    <h2>Files read</h2>
+    <p class="sub">Everything below was read from the data directory; nothing was written back.</p>
+    <div id="filesTable" class="mini-table-wrap"></div>
+    <div id="issuesBox"></div>
+  </div>
+</section>
+
+<!-- ------------------------------------------------------------------ -->
+<section class="panel-set" id="panel-records" role="tabpanel" hidden>
+  <div class="card card-flush">
+    <div class="table-scroll">
+      <table class="data-table" id="recordsTable">
+        <thead>
+          <tr>
+            <th><button type="button" class="sort" data-sort="recordDate">Date</button></th>
+            <th><button type="button" class="sort" data-sort="counterParty">Merchant</button></th>
+            <th class="num"><button type="button" class="sort" data-sort="amount">Amount</button></th>
+            <th><button type="button" class="sort" data-sort="categoryName">Category</button></th>
+            <th><button type="button" class="sort" data-sort="accountName">Account</button></th>
+            <th>Labels</th>
+            <th><button type="button" class="sort" data-sort="source">Source</button></th>
+          </tr>
+        </thead>
+        <tbody id="recordsBody"></tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ------------------------------------------------------------------ -->
+<section class="panel-set" id="panel-duplicates" role="tabpanel" hidden>
+  <div id="dupSummary"></div>
+  <div id="dupGroups"></div>
+</section>
+
+<!-- ------------------------------------------------------------------ -->
+<section class="panel-set" id="panel-runs" role="tabpanel" hidden>
+  <div class="card">
+    <h2>Last sync state</h2>
+    <p class="sub" id="syncFileMeta"></p>
+    <div id="syncState"></div>
+  </div>
+
+  <div class="runs-split">
+    <div class="card card-flush">
+      <div class="card-head"><h2>Run logs</h2><span class="sub" id="logCount"></span></div>
+      <ul class="log-list" id="logList"></ul>
+    </div>
+    <div class="card card-flush">
+      <div class="card-head"><h2 id="logTitle">Log</h2></div>
+      <pre class="log-body" id="logBody">Select a run on the left.</pre>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<!-- Record detail -->
+<div class="drawer-scrim" id="drawerScrim" hidden></div>
+<aside class="drawer" id="drawer" hidden aria-label="Record detail">
+  <div class="drawer-head">
+    <h2 id="drawerTitle">Record</h2>
+    <button type="button" class="btn btn-icon" id="drawerClose" aria-label="Close record detail">&times;</button>
+  </div>
+  <div class="drawer-body" id="drawerBody"></div>
+</aside>
+
+<div class="tooltip" id="tooltip" hidden></div>
+
+<script src="app.js"></script>
+</body>
+</html>

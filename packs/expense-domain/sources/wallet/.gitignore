@@ -9,5 +9,9 @@
 /accounts.json
 /config.yaml
 
-# Build artifacts.
+# Build artifacts. NOTE: ./wallet, ./dedup and ./sa.automation.wallet were
+# committed before this rule and stay tracked until deliberately removed.
 /bin/
+/wallet
+/dedup
+/sa.automation.wallet

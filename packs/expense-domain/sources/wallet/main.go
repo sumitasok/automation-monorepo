@@ -8,6 +8,8 @@
 //	detect-duplicates    find potential duplicate wallet records.
 //	dedup                identify, review, and remove duplicate transaction records from records.json.
 //	                     Sub-operations: scan, review, execute.
+//	ui                   serve a read-only browser dashboard over the pack's data directory
+//	                     (records, duplicates, sync state, run logs).
 //
 // Run `wallet sync --help` for flags. See RUNBOOK.md for setup.
 package main
@@ -52,6 +54,10 @@ func main() {
 		}
 	case "fetch-accounts":
 		if err := runFetchAccounts(os.Args[2:]); err != nil {
+			log.Fatalf("error: %v", err)
+		}
+	case "ui":
+		if err := runUI(os.Args[2:]); err != nil {
 			log.Fatalf("error: %v", err)
 		}
 	case "-h", "--help", "help":
@@ -300,6 +306,7 @@ Usage:
   wallet fetch-accounts [flags]
   wallet dedup [scan|review|execute|finalize] [flags]
   wallet detect-duplicates [flags]
+  wallet ui [flags]
 
 Flags (sync):
   --csv PATH        transactions.csv to read (default ../gmail/transactions.csv)
@@ -321,6 +328,13 @@ Flags (dedup review):
   --dedup-config    path to dedup config
   --decisions-file  path to save decisions (default .dedup-decisions-{timestamp}.json)
   --dry-run         show decisions without saving
+
+Flags (ui):
+  --config-path PATH  config root (default $CONFIG_PATH or ~/automation-monorepo-config)
+  --data-dir PATH     wallet data dir (default <config-path>/data/expense-domain/wallet)
+  --addr HOST:PORT    listen address (default 127.0.0.1:8787)
+  --open              open the dashboard in the default browser
+  --dev               serve ui/ from disk instead of the embedded copy
 
 Setup and scheduling: see RUNBOOK.md
 `)

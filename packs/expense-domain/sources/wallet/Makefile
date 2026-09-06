@@ -39,6 +39,14 @@ dry-run: ## parse + map + report only; no API calls, no token needed; override s
 fetch: ## pull Wallet records -> records.json; full first run, incremental after (needs WALLET_API_TOKEN)
 	$(GO) run $(PKG) fetch $(ARGS)
 
+.PHONY: ui
+ui: ## serve the read-only dashboard over ~/automation-monorepo-config/data/expense-domain/wallet
+	$(GO) run $(PKG) ui --open $(ARGS)
+
+.PHONY: ui-dev
+ui-dev: ## same, but serve ui/ from disk so front-end edits need no rebuild
+	$(GO) run $(PKG) ui --dev --open $(ARGS)
+
 ## ---- run (via auto: env-injected, scheduler path) ----------------------
 
 .PHONY: auto-sync

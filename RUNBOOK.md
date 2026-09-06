@@ -4,6 +4,33 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-09-06 — Add a read-only browser UI over the wallet pack's data directory
+
+**Prompt summary**: Using the wallet SDK in `packs/expense-domain/sources/wallet/sdk/`, build a UI in `packs/expense-domain/sources/wallet/` that shows the data in `~/automation-monorepo-config/data/expense-domain/wallet/`.
+
+**Approach**: a new `wallet ui` subcommand on the existing Go binary rather than a second tool — the pack already owns `sync`, `fetch`, `dedup` and `detect-duplicates`, and a browser cannot read the config directory on its own. The server decodes records with the SDK's own `wallet.Record` type (via a `replace` onto the local `sdk/go` module), so the dashboard and the API client cannot drift apart on field names.
+
+**Files added**:
+- `packs/expense-domain/sources/wallet/ui.go` — the `ui` subcommand: data-dir resolution (`--data-dir` > `--config-path` > `$CONFIG_PATH` > `$AUTO_DATA_DIR` > `~/automation-monorepo-config`), `go:embed` of the static assets, `--dev` to serve them from disk, `--open`.
+- `packs/expense-domain/sources/wallet/internal/uiserver/data.go` — readers for records (JSONL and JSON-array, nested `records/`, de-duplicated by id keeping the newest `updatedAt`), dedup scans joined to their decision files, `last-sync.json`, and run logs classified pass/fail from their text.
+- `packs/expense-domain/sources/wallet/internal/uiserver/server.go` — GET-only route table, `Cache-Control: no-store`, static file serving.
+- `packs/expense-domain/sources/wallet/internal/uiserver/data_test.go` — 16 tests: both file shapes, id de-duplication, malformed-line reporting, dedup join across both decision shapes, missing files, log classification, log tailing, and the read-only/traversal guards.
+- `packs/expense-domain/sources/wallet/ui/{index.html,app.js,styles.css,README.md}` — dependency-free front end: Overview (totals, spend by category, daily flow, top merchants, files read, warnings), Records (filter + sort + per-record drawer with the stored JSON), Duplicates (groups with keep/delete decisions), Sync & Logs (state plus log tails).
+
+**Files changed**: `main.go` (register `ui`, usage text), `go.mod` (require + `replace` the local SDK module), `Makefile` (`ui`, `ui-dev`), `manifest.yaml` (declare the job and the static UI path), pack `README.md` / `RUNBOOK.md`, pack `.gitignore` (build artefacts).
+
+**Verification**: `go test ./internal/uiserver/` — 16/16 pass. Server run against the real data directory: 6 records from `records-today.jsonl`, 3 duplicate groups joined to 3 decisions, `last-sync.json`, 58 run logs (30 classified failed). All four tabs and both colour themes screenshotted in headless Chrome. Chart palette validated with the dataviz validator — all six checks pass in light and dark.
+
+**Outcome**: `make ui` (or `go run . ui --open`) serves <http://127.0.0.1:8787>.
+
+**Caveats**:
+- No authentication — the pages carry personal finance detail, so keep `--addr` on loopback.
+- The dashboard surfaces, but does not fix, a real problem in the data: the newest 30 sync runs failed with `subprocess.CalledProcessError` from `extract-engine.py --ai-assist`, and `last-sync.json` still reads `"last_run_status": "success"` because the wrapper never records the failure.
+- `go vet ./...` reports a pre-existing failure in `internal/sync/sync_test.go` (`fakeClient` missing `UpsertRecords`), untouched by this change. `go vet . ./internal/uiserver` is clean.
+- The older GitHub-PAT viewer at the pack root (`index.html`, `app.js`, …) is left exactly as it was.
+
+---
+
 ## 2026-09-06 — Build Go and Python SDKs for the Wallet REST API from the captured spec
 
 **Prompt summary**: Read the Wallet OpenAPI markdown captured in `packs/expense-domain/sources/wallet/sdk/`, then implement a Go SDK and a Python SDK in that directory (separate subdirectories) with complete coverage including edge and error cases, mock-API tests, and several verification passes so no condition is missed.

@@ -12,6 +12,17 @@ jobs:
     description: "Main wallet sync job (hourly via launchd)"
     script: "scripts/wallet-sync.sh"
     schedule: "hourly"
+  - name: "wallet-ui"
+    description: "Read-only browser dashboard over the pack's data directory"
+    command: "wallet ui"
+    schedule: "on-demand"
+
+# Static UI (Constitution Principle III): the framework serves these files,
+# it does not execute inside the domain.
+ui:
+  path: "ui/"
+  entrypoint: "index.html"
+  served_by: "wallet ui"
     
 # Configuration requirements
 config:

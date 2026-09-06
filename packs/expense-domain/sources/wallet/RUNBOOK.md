@@ -23,6 +23,18 @@ See design & rationale in `docs/adr/0009-wallet-pack.md`.
 cd packs/wallet && go run . sync
 ```
 
+### View the data in a browser
+
+```bash
+cd packs/expense-domain/sources/wallet
+make ui            # or: go run . ui --open
+```
+
+Serves <http://127.0.0.1:8787> — records, duplicates, sync state and run logs
+read straight out of `~/automation-monorepo-config/data/expense-domain/wallet/`.
+Read-only: no endpoint writes, and a non-GET method returns 405. Keep `--addr`
+on loopback; there is no auth in front of it. Details in `ui/README.md`.
+
 ### Dedup Wallet Records (4-Phase Workflow)
 
 ```bash

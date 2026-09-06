@@ -32,6 +32,18 @@ python3 packs/expense-domain/sources/wallet/jobs/wallet-sync-unified/sync.py \
   --dry-run
 ```
 
+### Viewing the data
+
+```bash
+cd packs/expense-domain/sources/wallet
+make ui                    # http://127.0.0.1:8787, opens automatically
+```
+
+A read-only dashboard over `~/automation-monorepo-config/data/expense-domain/wallet/`:
+records with filters and per-record detail, duplicate groups with their
+keep/delete decisions, last-sync state, and every run log classified pass/fail.
+See `ui/README.md`.
+
 ### Framework Integration (Phase 2)
 
 ```bash
@@ -52,6 +64,10 @@ packs/expense-domain/sources/wallet/
 │       ├── extract-engine.py         # Deterministic email/PDF parsing
 │       ├── gen-payload.py            # Wallet payload generation
 │       └── prep-records.py           # Record preprocessing
+├── ui/                               # read-only browser dashboard (`wallet ui`)
+│   ├── index.html, app.js, styles.css
+│   └── README.md                     # what it shows, flags, API
+├── sdk/                              # Go + Python clients for the Wallet REST API
 ├── scripts/                          # CLI entry points (Phase 2)
 │   └── wallet-sync-unified.sh        # Main orchestrator (TBD)
 ├── config/                           # Template configs
