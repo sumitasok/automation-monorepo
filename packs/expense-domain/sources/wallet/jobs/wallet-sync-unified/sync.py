@@ -450,10 +450,23 @@ def run_engine(envelopes: list[dict], log, ai_assist: bool = False) -> list[dict
             cmd.append("--ai-assist")
         result = subprocess.run(
             cmd,
-            capture_output=True, text=True, check=True,
+            capture_output=True, text=True,
             cwd=str(EXTRACT_DIR),
             env=env
         )
+        if result.returncode != 0:
+            # check=True used to raise CalledProcessError with the captured
+            # stderr thrown away, so the log showed the command but never the
+            # reason. Surface the engine's own error instead.
+            detail = (result.stderr or result.stdout or "").strip()
+            raise RuntimeError(
+                f"extract-engine.py failed (exit {result.returncode}):\n{detail}"
+            )
+        # A non-fatal warning (e.g. a skipped format file) still deserves a line
+        # in the sync log rather than being discarded with the rest of stderr.
+        for line in (result.stderr or "").strip().splitlines():
+            if line.strip():
+                log(f"engine: {line.strip()}")
         outputs = []
         for line in result.stdout.strip().splitlines():
             if line.strip():
@@ -558,7 +571,8 @@ def part_a(gmail_svc, state: dict, categories: dict, labels_cache: dict,
     threads = fetch_gmail_threads(gmail_svc, since, log)
     if not threads:
         log("Part A: no new bank-alert threads")
-        return 0, since
+        return 0, since, {"fetched": 0, "pushed": 0, "skipped": 0,
+                          "failed": 0, "unrouted": 0, "deduped": 0}
 
     # Build envelope JSONL for engine
     envelopes = []
@@ -597,18 +611,24 @@ def part_a(gmail_svc, state: dict, categories: dict, labels_cache: dict,
     pushed = 0
     unmatched_log = []
     newest_ts = since
+    # Counted so last-sync.json can report what actually happened rather than
+    # a hardcoded "failed: 0".
+    stats = {"fetched": len(results), "pushed": 0, "skipped": 0,
+             "failed": 0, "unrouted": 0, "deduped": 0}
 
     for res in results:
         msg_id = res.get("source_id", "")
         action = res.get("action", "")
 
         if action == "skip":
+            stats["skipped"] += 1
             log(f"  skip  [{res.get('format','')}] {msg_id}")
             # still label so we don't re-fetch
             _mark_processed(gmail_svc, thread_map.get(msg_id,""), dry_run)
             continue
 
         if action in ("unmatched", "error"):
+            stats["failed"] += 1
             unmatched_log.append(res)
             log(f"  {'UNMATCHED' if action=='unmatched' else 'ERROR'} {msg_id}"
                 f"  sender={res.get('sender','')}  subj={res.get('subject','')[:60]}")
@@ -625,6 +645,7 @@ def part_a(gmail_svc, state: dict, categories: dict, labels_cache: dict,
         account_id = rec.get("wallet_account_id", "")
 
         if not account_id:
+            stats["unrouted"] += 1
             log(f"  UNROUTED {gm_id} {merchant} ₹{amount}")
             unmatched_log.append(res)
             continue
@@ -637,10 +658,12 @@ def part_a(gmail_svc, state: dict, categories: dict, labels_cache: dict,
             dry_run=dry_run
         )
         if already_in_wallet(gm_id, existing):
+            stats["deduped"] += 1
             log(f"  dedup-skip (gm: already in wallet) {gm_id}")
             _mark_processed(gmail_svc, thread_map.get(gm_id,""), dry_run)
             continue
         if fuzzy_duplicate(amount, merchant, date_str, existing):
+            stats["deduped"] += 1
             log(f"  dedup-skip (fuzzy match, manual entry) {gm_id} {merchant} ₹{amount}")
             _mark_processed(gmail_svc, thread_map.get(gm_id,""), dry_run)
             continue
@@ -694,7 +717,8 @@ def part_a(gmail_svc, state: dict, categories: dict, labels_cache: dict,
     if unmatched_log:
         _save_unmatched(unmatched_log, dry_run, log)
 
-    return pushed, newest_ts
+    stats["pushed"] = pushed
+    return pushed, newest_ts, stats
 
 
 def _mark_processed(gmail_svc, thread_id: str, dry_run: bool):
@@ -933,9 +957,14 @@ def part_d(dry_run: bool, log):
 # LOGGING
 # ══════════════════════════════════════════════════════════════════════════
 
+def _utcnow() -> str:
+    """UTC now as an ISO-8601 Z string (datetime.utcnow() is deprecated)."""
+    return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def make_logger(dry_run: bool):
     LOG_DIR.mkdir(parents=True, exist_ok=True)
-    ts  = dt.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    ts  = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     tag = "DRY" if dry_run else "RUN"
     log_file = LOG_DIR / f"sync-{ts}-{tag}.log"
     lines = []
@@ -968,17 +997,70 @@ def main():
         sys.exit(r.returncode)
 
     log, flush = make_logger(args.dry_run)
-    log(f"{'[DRY RUN] ' if args.dry_run else ''}sync.py start "
-        f"{dt.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')}")
+    log(f"{'[DRY RUN] ' if args.dry_run else ''}sync.py start {_utcnow()}")
 
+    # ── State ─────────────────────────────────────────────────────────────
+    # Loaded before anything can fail, and stamped "running" straight away, so
+    # a crash — or a kill that never reaches an except block — leaves a record
+    # of it rather than the previous run's "success".
+    state = load_state()
+    state["last_run_start"]  = _utcnow()
+    state["last_run_end"]    = None
+    state["last_run_status"] = "running"
+    state.pop("last_run_error", None)
+    save_state(state, dry_run=args.dry_run)
+
+    try:
+        a_pushed, b_pushed, new_ts, new_drive_ts, a_stats = _run_sync(args, state, log)
+    except BaseException as e:
+        # The cursor is only advanced on the success path below, so a failed
+        # run re-reads the same emails next time; the MessageID dedupe stops
+        # that turning into duplicate records.
+        state["last_run_end"]    = _utcnow()
+        state["last_run_status"] = "failed"
+        state["last_run_error"]  = f"{type(e).__name__}: {' '.join(str(e).split())[:800]}"
+        save_state(state, dry_run=args.dry_run)
+        log(f"\nFAILED: {state['last_run_error']}")
+        raise
+    finally:
+        # flush() only ran on the happy path before, so a crashed run wrote no
+        # log file of its own and survived only in the wrapper's tee.
+        flush()
+
+    # ── Update cursor ─────────────────────────────────────────────────────
+    now = _utcnow()
+    state["last_email_timestamp"] = new_ts
+    state["drive_cursor"]         = new_drive_ts or state.get("drive_cursor","")
+    state["last_run"]             = now
+    state["last_run_end"]         = now
+    state["last_run_status"]      = "success"
+    state["last_run_detail"]      = (
+        f"sync.py (no-AI). A:{a_pushed} B:{b_pushed} records pushed."
+    )
+    # "success" means the run completed, not that every document extracted —
+    # failed/unrouted are the documents that need a format or a routing rule.
+    state["last_run_summary"]     = {
+        "total_fetched": a_stats["fetched"],
+        "created":       a_pushed + b_pushed,
+        "skipped":       a_stats["skipped"] + a_stats["deduped"],
+        "failed":        a_stats["failed"],
+        "unrouted":      a_stats["unrouted"],
+    }
+    state["records_pushed_total"] = state.get("records_pushed_total", 0) + a_pushed + b_pushed
+
+    save_state(state, dry_run=args.dry_run)
+    log(f"\nDone. {a_pushed + b_pushed} total records pushed. Log → {LOG_DIR}")
+    flush()
+
+
+def _run_sync(args, state, log):
+    """The actual sync. Raises on any failure; main() records the outcome."""
     # ── Google auth ───────────────────────────────────────────────────────
     creds      = _get_google_creds(force_reauth=args.auth)
     gmail_svc  = _gmail_service(creds)
     drive_svc  = _drive_service(creds)
     log("Google auth OK")
 
-    # ── State ─────────────────────────────────────────────────────────────
-    state = load_state()
     if args.since:
         state["last_email_timestamp"] = args.since + "T00:00:00Z"
         log(f"Cursor overridden to {state['last_email_timestamp']}")
@@ -990,9 +1072,11 @@ def main():
 
     # ── Part A ────────────────────────────────────────────────────────────
     log("\n── Part A: Gmail bank alerts ────────────────────────────────────")
-    a_pushed, new_ts = part_a(gmail_svc, state, categories, labels_cache,
-                               args.dry_run, log, ai_assist=args.ai_assist)
-    log(f"Part A done: {a_pushed} records pushed")
+    a_pushed, new_ts, a_stats = part_a(gmail_svc, state, categories, labels_cache,
+                                        args.dry_run, log, ai_assist=args.ai_assist)
+    log(f"Part A done: {a_pushed} pushed, {a_stats['failed']} not extracted, "
+        f"{a_stats['unrouted']} unrouted, {a_stats['deduped']} already present, "
+        f"{a_stats['skipped']} skipped by rule")
 
     # ── Part B ────────────────────────────────────────────────────────────
     log("\n── Part B: Drive Bills Inbox ────────────────────────────────────")
@@ -1008,19 +1092,7 @@ def main():
     log("\n── Part D: label sync ───────────────────────────────────────────")
     part_d(args.dry_run, log)
 
-    # ── Update cursor ─────────────────────────────────────────────────────
-    now = dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
-    state["last_email_timestamp"] = new_ts
-    state["drive_cursor"]         = new_drive_ts or state.get("drive_cursor","")
-    state["last_run"]             = now
-    state["last_run_status"]      = (
-        f"sync.py (no-AI). A:{a_pushed} B:{b_pushed} records pushed."
-    )
-    state["records_pushed_total"] = state.get("records_pushed_total", 0) + a_pushed + b_pushed
-
-    save_state(state, dry_run=args.dry_run)
-    flush()
-    log(f"\nDone. {a_pushed + b_pushed} total records pushed. Log → {LOG_DIR}")
+    return a_pushed, b_pushed, new_ts, new_drive_ts, a_stats
 
 
 if __name__ == "__main__":

@@ -703,6 +703,21 @@ function renderSync() {
   meta.textContent = `${state.sync.file} · updated ${stamp(state.sync.modified)}`;
 
   const s = state.sync.state || {};
+
+  // A failed or still-running state is the headline, not a table row.
+  if (s.last_run_status && s.last_run_status !== 'success') {
+    const kind = s.last_run_status === 'failed' ? 'critical' : 'warning';
+    const b = el('div', `banner banner-${kind}`);
+    b.style.marginBottom = '12px';
+    b.append(el('span', 'banner-icon', s.last_run_status === 'failed' ? '✕' : '…'));
+    const body = el('div', 'banner-body');
+    body.append(el('strong', null, s.last_run_status === 'failed'
+      ? 'The last run failed.' : 'A run is in progress (or was interrupted).'));
+    if (s.last_run_error) body.append(el('p', 'sub', s.last_run_error));
+    b.append(body);
+    box.append(b);
+  }
+
   const dl = el('dl', 'kv');
   const row = (k, v, mono) => {
     dl.append(el('dt', null, k));
@@ -715,7 +730,16 @@ function renderSync() {
   row('Last run end', s.last_run_end ? stamp(s.last_run_end) : 'never recorded');
 
   const sm = s.last_run_summary || {};
-  row('Last run totals', `fetched ${sm.total_fetched ?? 0} · created ${sm.created ?? 0} · skipped ${sm.skipped ?? 0} · failed ${sm.failed ?? 0}`);
+  const totals = [`fetched ${sm.total_fetched ?? 0}`, `created ${sm.created ?? 0}`,
+    `skipped ${sm.skipped ?? 0}`, `failed ${sm.failed ?? 0}`];
+  if (sm.unrouted !== undefined) totals.push(`unrouted ${sm.unrouted}`);
+  row('Last run totals', totals.join(' · '));
+  if (sm.failed) {
+    row('Documents needing a format', `${sm.failed} email${sm.failed === 1 ? '' : 's'} matched no format, or matched one whose pattern did not extract`);
+  }
+  if (sm.unrouted) {
+    row('Documents needing a route', `${sm.unrouted} extracted but had no account to post to`);
+  }
   row('Drive files processed', String((s.processed_drive_files || []).length));
   row('Auto-created accounts', (s.auto_created_accounts || []).join(', ') || 'none');
   box.append(dl);

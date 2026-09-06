@@ -4,6 +4,30 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-09-06 — Fix the wallet sync failing silently for 30 consecutive runs
+
+**Prompt summary**: The dashboard showed every recent run failing while `last-sync.json` reported success. Fix it.
+
+**Root cause** (full analysis: `notes/2026-09-06_wallet-sync-silent-failure-root-cause.md`): `create_format_file_from_suggestion()` wrote AI-suggested format files with an f-string, so subjects beginning `View:` produced `subject: View:` — invalid YAML. Four such files existed. `load_formats()` had no per-file error handling, so one of them aborted the registry and therefore every run from 2026-09-05 on. `--ai-assist` was a red herring: the engine failed with or without it.
+
+**Files changed**:
+- `jobs/wallet-sync-unified/extract-engine.py` — generator now builds a dict and `yaml.safe_dump`s it, escapes the subject as a literal, and parses the result back through `_validate` before writing; `load_formats(strict=False)` skips and reports bad files instead of aborting, still raising when nothing usable remains; new `--check-formats`; `--test` loads strictly.
+- `jobs/wallet-sync-unified/sync.py` — `run_engine` raises with the engine's captured stderr instead of a bare `CalledProcessError`, and logs engine warnings on success; `main()` split from `_run_sync()` so state is stamped `running` at start, `failed` + `last_run_error` on any `BaseException` (cursor deliberately not advanced), `success` at the end; `flush()` moved into a `finally` so a crashed run writes its own log; Part A now returns real per-document tallies and `last_run_summary` reports them instead of a hardcoded `failed: 0`.
+- `jobs/wallet-sync-unified/tests/test_sync_failures.py` — 22 new regression tests.
+- `ui/app.js` — the sync card headlines a failed/running state with its error, and reports the documents needing a format or a route.
+- `~/automation-monorepo-config/config/expense-domain/gmail/email-formats/` (outside this repo) — quoted the `subject:` value in the 4 broken files.
+
+**Verification**: 22/22 pytest pass; `--check-formats` reports 33 formats OK (was: 4 unusable); full `./scripts/wallet-sync.sh --dry-run` exits 0 having processed 19 documents (was: crashed at 9 fetched threads); dashboard screenshotted against a failed-state fixture.
+
+**Outcome**: sync runs again, and a failure is now visible in `last-sync.json`, in the run's own log file, and on the dashboard.
+
+**Caveats**:
+- 10 documents still fail to extract — they match `hdfc-autopay-cancellation` but its AI-written body regex does not. Pattern quality, not a crash; separate work.
+- Verified by dry run only. A live run would push 5 records to the real Wallet account.
+- `last_run_summary` counts Part A only.
+
+---
+
 ## 2026-09-06 — Add a read-only browser UI over the wallet pack's data directory
 
 **Prompt summary**: Using the wallet SDK in `packs/expense-domain/sources/wallet/sdk/`, build a UI in `packs/expense-domain/sources/wallet/` that shows the data in `~/automation-monorepo-config/data/expense-domain/wallet/`.

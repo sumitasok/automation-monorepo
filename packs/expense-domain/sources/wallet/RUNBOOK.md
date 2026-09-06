@@ -35,6 +35,22 @@ read straight out of `~/automation-monorepo-config/data/expense-domain/wallet/`.
 Read-only: no endpoint writes, and a non-GET method returns 405. Keep `--addr`
 on loopback; there is no auth in front of it. Details in `ui/README.md`.
 
+### Check the email-format registry
+
+```bash
+cd packs/expense-domain/sources/wallet/jobs/wallet-sync-unified
+python3 extract-engine.py --check-formats
+# OK  33 formats loaded from ~/automation-monorepo-config/.../email-formats
+```
+
+A malformed format file no longer aborts the sync — it is skipped with a
+WARNING on stderr (which the sync log now carries). Use this to see which files
+are being skipped and why. A run only fails outright if *no* format loads.
+
+If a run fails, `last-sync.json` records `"last_run_status": "failed"` with
+`last_run_error`, the cursor is left where it was, and the run writes its own
+log file. Check it with `wallet ui` (Sync & Logs tab).
+
 ### Dedup Wallet Records (4-Phase Workflow)
 
 ```bash
