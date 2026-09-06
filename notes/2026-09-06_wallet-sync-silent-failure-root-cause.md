@@ -95,3 +95,71 @@ extracted, 1 unrouted, 3 skipped by rule. Exit 0.
   and contributes just its pushed count.
 - Not verified against a live (non-dry) run — that would push 5 records into the
   real Wallet account.
+
+
+---
+
+## Follow-up: two more silent failures found by running it for real (same day)
+
+Unblocking the pipeline let it reach code that had never executed. Two further
+defects surfaced, both of the same shape — a wrong assumption about an API
+response, failing quietly.
+
+### 5. `fuzzy_duplicate()` could not read the API's amount
+
+`GET /records` returns `amount` as `{"value": -868.76, "currencyCode": "INR"}`.
+The dedup comparison did `r.get("amount", 0) + amount` → `TypeError:
+unsupported operand type(s) for +: 'dict' and 'float'`, aborting the run. Never
+reached before: dry-run returns no records to compare, and real runs used to
+crash earlier. Fixed with `record_amount()`, which reads the object and the
+legacy scalar.
+
+The same function also compared merchants on their first six characters. The
+alert says `6307781870@ybl (NASAREEN)`; the existing record said `NASAREEN`. It
+compared `"630778"` and missed, so a live run would have created a duplicate of
+a record one of the *other two* sync pipelines had written. Now matched on
+shared tokens.
+
+### 6. Categories and labels were read from a key the API never returns
+
+`GET /categories` and `GET /labels` answer with a paginated envelope:
+
+```json
+{"categories": [...], "limit": 100, "offset": 0, "nextOffset": 100}
+```
+
+Both call sites read `.get("data", [])`. That key does not exist, so both
+silently returned `[]`. Every log line since this pipeline was written said
+`Wallet: 0 categories` — which means `guess_category_id()` never had anything
+to match, and **this is why so many records land in Wallet as "Unknown
+expense"**. Fixed with `wallet_get_all(path, key)`, which reads the right key
+and follows `nextOffset` (terminating on a non-advancing offset or an empty
+page, matching the Go SDK's `walk()`).
+
+The labels path was worse than useless. `part_d()` wrote whatever it fetched
+straight over `labels-cache.json`:
+
+```python
+cache = {l["name"]: l["id"] for l in labels}   # always {} — wrong key
+LABELS_CACHE.write_text(json.dumps(cache, indent=2))
+```
+
+Part D had never run to completion before (every run died in Part A), so the
+171-entry cache had survived by accident. **The first successful live run
+destroyed it** — 171 entries → 0. Restored from the API (173 entries; two
+labels had been added since). `part_d()` now refuses to overwrite a populated
+cache with an empty fetch.
+
+### Result
+
+`Wallet: 122 categories, 173 cached labels` — previously `0 categories, 171
+cached labels`, with the 171 being a stale file nothing could refresh.
+
+### Lesson
+
+Every one of these six defects was invisible while the pipeline was crashing
+earlier, and each was individually silent: a wrong key returning `[]`, a
+discarded stderr, a state file written only on success, a summary hardcoded to
+`failed: 0`. The crash was the only symptom, and fixing it one layer at a time
+exposed the next. Verifying with a real run — not a dry run — was what found
+defects 5 and 6; dry-run skips the API calls that carry them.

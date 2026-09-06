@@ -248,10 +248,37 @@ def wallet_patch(path, body, dry_run=False):
     return r.json()
 
 
+def wallet_get_all(path: str, key: str, params: dict | None = None) -> list:
+    """Every item from an offset-paginated Wallet endpoint.
+
+    The API answers with {"<key>": [...], "limit", "offset", "nextOffset"} —
+    nextOffset present only while more pages exist. Reading the wrong key here
+    is what made this pipeline see zero categories and zero labels: the code
+    asked for "data", which the API never returns, so every lookup silently
+    fell back to an empty list.
+    """
+    items, offset, seen_pages = [], 0, 0
+    while seen_pages < 1000:                       # bound, per the SDK's walk()
+        body = dict(params or {})
+        body["offset"] = offset
+        page = wallet_get(path, params=body)
+        if isinstance(page, list):                 # non-paginated shape
+            items.extend(page)
+            return items
+        batch = page.get(key) or []
+        items.extend(batch)
+        nxt = page.get("nextOffset")
+        # A next offset that does not advance, or an empty page, would loop.
+        if nxt is None or not batch or nxt <= offset:
+            return items
+        offset = nxt
+        seen_pages += 1
+    return items
+
+
 def fetch_wallet_categories():
     """Returns {name_lower: id} for all Wallet categories."""
-    cats = wallet_get("/categories")
-    return {c["name"].lower(): c["id"] for c in (cats if isinstance(cats, list) else cats.get("data", []))}
+    return {c["name"].lower(): c["id"] for c in wallet_get_all("/categories", "categories")}
 
 
 def fetch_wallet_records(date_from, date_to, account_id=None, dry_run=False):
@@ -983,9 +1010,17 @@ def part_c(state: dict, dry_run: bool, log):
 
 def part_d(dry_run: bool, log):
     """Refresh labels-cache.json from Wallet and report count."""
-    labels_raw = wallet_get("/labels")
-    labels = labels_raw if isinstance(labels_raw, list) else labels_raw.get("data", [])
-    cache = {l["name"]: l["id"] for l in labels}
+    cache = {l["name"]: l["id"] for l in wallet_get_all("/labels", "labels")}
+
+    if not cache:
+        # Never replace a populated cache with nothing. Reading the wrong
+        # response key used to yield {} here, and this write then destroyed a
+        # 171-entry cache — after which every record synced without labels.
+        existing = load_labels_cache()
+        log(f"Part D: /labels returned no labels — keeping the existing "
+            f"{len(existing)} cached labels rather than overwriting them")
+        return existing
+
     if not dry_run:
         LABELS_CACHE.write_text(json.dumps(cache, indent=2))
     log(f"Part D: refreshed labels-cache.json with {len(cache)} labels")

@@ -385,3 +385,95 @@ def test_a_failed_run_does_not_leave_the_previous_summary_behind(sync, monkeypat
         sync.main()
 
     assert _state(sync)["last_run_summary"] is None
+
+
+# ---------------------------------------------------------------------------
+# 6. Paginated envelopes, and never clobbering a good cache
+# ---------------------------------------------------------------------------
+
+def _pages(sync, monkeypatch, pages):
+    """Stub wallet_get to serve a list of prepared response bodies."""
+    calls = []
+    def fake_get(path, params=None):
+        calls.append((path, dict(params or {})))
+        return pages[min(len(calls) - 1, len(pages) - 1)]
+    monkeypatch.setattr(sync, "wallet_get", fake_get)
+    return calls
+
+
+def test_wallet_get_all_reads_the_named_key_not_data(sync, monkeypatch):
+    """GET /labels answers {"labels": [...]}, never {"data": [...]}.
+
+    Asking for "data" returned [] on every call, so the pipeline ran with zero
+    categories and zero labels while looking perfectly healthy.
+    """
+    _pages(sync, monkeypatch, [{"labels": [{"id": "1", "name": "Food"}], "offset": 0}])
+
+    assert sync.wallet_get_all("/labels", "labels") == [{"id": "1", "name": "Food"}]
+
+
+def test_wallet_get_all_follows_next_offset(sync, monkeypatch):
+    calls = _pages(sync, monkeypatch, [
+        {"labels": [{"id": "1"}, {"id": "2"}], "offset": 0, "nextOffset": 2},
+        {"labels": [{"id": "3"}], "offset": 2},          # no nextOffset -> last page
+    ])
+
+    assert [i["id"] for i in sync.wallet_get_all("/labels", "labels")] == ["1", "2", "3"]
+    assert [c[1]["offset"] for c in calls] == [0, 2]
+
+
+def test_wallet_get_all_stops_on_a_non_advancing_offset(sync, monkeypatch):
+    """A server repeating its offset would otherwise loop forever."""
+    _pages(sync, monkeypatch, [{"labels": [{"id": "1"}], "offset": 0, "nextOffset": 0}])
+
+    assert len(sync.wallet_get_all("/labels", "labels")) == 1
+
+
+def test_wallet_get_all_stops_on_an_empty_page(sync, monkeypatch):
+    _pages(sync, monkeypatch, [{"labels": [], "offset": 0, "nextOffset": 50}])
+
+    assert sync.wallet_get_all("/labels", "labels") == []
+
+
+def test_wallet_get_all_accepts_a_bare_list(sync, monkeypatch):
+    _pages(sync, monkeypatch, [[{"id": "1"}]])
+
+    assert sync.wallet_get_all("/labels", "labels") == [{"id": "1"}]
+
+
+def test_fetch_wallet_categories_reads_the_categories_key(sync, monkeypatch):
+    _pages(sync, monkeypatch, [{"categories": [
+        {"id": "c1", "name": "Food & Drinks"}, {"id": "c2", "name": "Transport"}]}])
+
+    assert sync.fetch_wallet_categories() == {"food & drinks": "c1", "transport": "c2"}
+
+
+def test_part_d_never_overwrites_a_populated_cache_with_nothing(sync, monkeypatch):
+    """This write destroyed a 171-entry cache once; it must not again."""
+    sync.LABELS_CACHE.parent.mkdir(parents=True, exist_ok=True)
+    sync.LABELS_CACHE.write_text(json.dumps({"Dinner": "l1", "Groceries": "l2"}))
+    _pages(sync, monkeypatch, [{"labels": []}])
+
+    result = sync.part_d(dry_run=False, log=lambda m: None)
+
+    assert result == {"Dinner": "l1", "Groceries": "l2"}
+    assert json.loads(sync.LABELS_CACHE.read_text()) == {"Dinner": "l1", "Groceries": "l2"}
+
+
+def test_part_d_refreshes_the_cache_when_the_api_answers(sync, monkeypatch):
+    sync.LABELS_CACHE.parent.mkdir(parents=True, exist_ok=True)
+    sync.LABELS_CACHE.write_text(json.dumps({"Old": "x"}))
+    _pages(sync, monkeypatch, [{"labels": [{"id": "l1", "name": "Dinner"}]}])
+
+    assert sync.part_d(dry_run=False, log=lambda m: None) == {"Dinner": "l1"}
+    assert json.loads(sync.LABELS_CACHE.read_text()) == {"Dinner": "l1"}
+
+
+def test_part_d_writes_nothing_in_dry_run(sync, monkeypatch):
+    sync.LABELS_CACHE.parent.mkdir(parents=True, exist_ok=True)
+    sync.LABELS_CACHE.write_text(json.dumps({"Old": "x"}))
+    _pages(sync, monkeypatch, [{"labels": [{"id": "l1", "name": "Dinner"}]}])
+
+    sync.part_d(dry_run=True, log=lambda m: None)
+
+    assert json.loads(sync.LABELS_CACHE.read_text()) == {"Old": "x"}

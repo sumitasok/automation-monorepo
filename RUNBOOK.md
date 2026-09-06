@@ -4,6 +4,27 @@ Newest entries first. Each entry: timestamp, prompt summary, files affected, ste
 
 ---
 
+## 2026-09-06 — Fix categories/labels read from a key the API never returns
+
+**Prompt summary**: Continuation of the same session — the live run and the scheduled-run verification exposed two more silent failures.
+
+**What happened**: the 22:37 scheduled run (the first fully successful one) logged `Wallet: 0 categories, 0 cached labels`, down from `171 cached labels`. `part_d()` had never run to completion before — every previous run died in Part A — so the first successful run destroyed the labels cache.
+
+**Root cause**: `GET /categories` and `GET /labels` return a paginated envelope keyed by `categories`/`labels`; both call sites read `.get("data", [])`, a key the API never returns. Both silently yielded `[]`. Every log line this pipeline ever wrote said `Wallet: 0 categories` — so `guess_category_id()` never had anything to match against, which is why records land in Wallet as "Unknown expense". `part_d()` then wrote the empty result straight over `labels-cache.json`.
+
+**Files changed**:
+- `jobs/wallet-sync-unified/sync.py` — new `wallet_get_all(path, key)` reads the correct key and follows `nextOffset`, terminating on a non-advancing offset or an empty page (matching the Go SDK's `walk()`); `fetch_wallet_categories()` uses it; `part_d()` uses it and refuses to overwrite a populated cache with an empty fetch.
+- `jobs/wallet-sync-unified/tests/test_sync_failures.py` — 9 more tests (39 total): the correct key, pagination, both loop guards, the bare-list shape, and the cache-clobber guard.
+- `~/automation-monorepo-config/config/expense-domain/wallet/labels-cache.json` (outside this repo) — restored from the API, 173 entries.
+
+**Verification**: 39/39 pytest pass. Live `./scripts/wallet-sync.sh` exit 0, logging `Wallet: 122 categories, 173 cached labels` (was `0 categories, 171 cached labels`). Scheduled run at 22:37 fired on time, ran this worktree's wrapper, exit 0, fetched 0 threads — confirming the threads processed by the manual run were correctly labelled `claude-read`. `com.automation-monorepo.wallet-sync-unified` launchd exit status went 1 → 0.
+
+**Caveats**:
+- Categorization is fixed going forward only; records already in Wallet as "Unknown expense" are not retro-corrected.
+- `com.sumitasok.wallet-sync` (a different pipeline) still reports launchd exit status 1 — not investigated.
+
+---
+
 ## 2026-09-06 — Fix the extraction/dedup bugs the sync fix exposed; verify with a live run
 
 **Prompt summary**: Fix the documents that still fail to extract, verify with an actual (non-dry) run, verify the schedules trigger and call the job properly, and walk through the status of the 5 writes given the records may already be in Wallet.
